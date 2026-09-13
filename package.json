@@ -1,6 +1,6 @@
 {
   "name": "stratagate-dsh",
-  "version": "0.2.65",
+  "version": "0.2.66",
   "description": "Recent conversations stay vivid. Older ones fade into summaries, not oblivion. StrataGate gives DeepSeek Harness six-layer, time-decaying memory, while lasting events and relationships settle into a knowledge graph. Bring your memories from other AIs with you—no need to start over.",
   "type": "module",
   "main": "./dist/index.js",
@@ -58,7 +58,7 @@
     "test:dsh": "vitest run --config vitest.config.ts",
     "test:core": "npm run test --workspace @diqier/stratagate",
     "test:workbuddy": "npm run test --workspace stratagate-workbuddy",
-    "verify:dsh": "npm run build:dsh && node scripts/verify-package.mjs && npm pack --ignore-scripts --pack-destination . && node scripts/verify-dsh-install.mjs stratagate-dsh-0.2.65.tgz",
+    "verify:dsh": "npm run build:dsh && node scripts/verify-package.mjs && npm pack --ignore-scripts --pack-destination . && node scripts/verify-dsh-install.mjs stratagate-dsh-0.2.66.tgz",
     "verify:workbuddy": "npm run verify:package --workspace stratagate-workbuddy",
     "test:watch": "vitest --config vitest.config.ts",
     "prepare": "npm run build:dsh"
@@ -210,6 +210,7 @@
     "@deepseek-ai/dsh-session-format-catalog": "0.1.5-rc.2",
     "@deepseek-ai/dsh-session-format-v0-to-v1": "0.1.5-rc.2",
     "@deepseek-ai/dsh-settings": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-settings-file": "0.1.5-rc.2",
     "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.2",
     "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
     "@deepseek-ai/schemastery": "3.18.2",

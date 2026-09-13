@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.66 - 2026-09-13
+
+- Add an independent persistent-memory worker that scans every namespace and consumes pending or retryable Summary, Event extraction, and Graph projection jobs without waiting for a new host session event.
+- Reorganize More into four clear entry points, add global display-only controls for short-term Block and retrieval status UI, surface diagnostics under Advanced Settings, and show the package-derived plugin version with lightweight contribution links.
+
 ## 0.2.65 - 2026-09-13
 
 - Replace the competing processing and retry banners with one actionable memory status bar. Normal background organization now uses the informational accent, retryable failures use warning styling, and concurrent states share one summary and status-page entry point. The detail view groups work by conversation and turn range, shows the three user-facing processing stages, keeps technical job data collapsed, and counts distinct conversation fragments instead of internal jobs.

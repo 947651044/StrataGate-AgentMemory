@@ -19,9 +19,18 @@ import {
 import type { AdminSnapshotEntry, FeedbackDraftInput, StrataGateRuntime } from './runtime.js'
 import { clusterKnowledgeGraph } from './graph-clustering.js'
 
-const STRATAGATE_DSH_VERSION = '0.2.65'
 const LEGACY_THREAD_ID = '__legacy__'
 const nodeRequire = createRequire(import.meta.url)
+
+function currentPluginVersion(): string {
+  try {
+    const value = nodeRequire('../package.json') as { version?: unknown }
+    if (typeof value.version === 'string' && value.version.trim()) return value.version
+  } catch {}
+  return 'unknown'
+}
+
+const STRATAGATE_DSH_VERSION = currentPluginVersion()
 
 function installedPackageVersion(names: readonly string[]): string {
   for (const name of names) {

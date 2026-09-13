@@ -5,6 +5,7 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
+import FileSettingsRuntime from '@deepseek-ai/dsh-settings-file'
 import type { Session } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -12,6 +13,54 @@ import { describe, expect, it } from 'vitest'
 import * as plugin from '../src/index.js'
 
 describe('DSH plugin composition', () => {
+  it('persists global chat display preferences across a complete plugin restart', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-dsh-display-settings-'))
+    const settingsPath = join(directory, 'settings.json')
+    const database = join(directory, 'memory.db')
+    const mount = async () => {
+      const ctx = new Context()
+      await ctx.plugin(FileSettingsRuntime, { path: settingsPath, watch: false })
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(SystemPrompt, {})
+      await ctx.plugin(ToolRuntime, { mode: 'native' })
+      await ctx.plugin(AgentDefaultModelConfig, { provider: 'test', model: 'test' })
+      ctx.provide('webServer', { host: '127.0.0.1', port: 10259, register: () => () => {} })
+      await ctx.plugin(plugin, { database })
+      return ctx
+    }
+    let first: Context | undefined
+    let restarted: Context | undefined
+    try {
+      first = await mount()
+      const settings = first.get('settings')!
+      await settings.update(plugin.STRATAGATE_SETTINGS_NAMESPACE, {
+        showStrataGateStatus: false,
+        showShortTermStatus: false,
+        showRetrievalStatus: false,
+      })
+      expect(settings.get(plugin.STRATAGATE_SETTINGS_NAMESPACE)).toMatchObject({
+        showStrataGateStatus: false,
+        showShortTermStatus: false,
+        showRetrievalStatus: false,
+      })
+      await first.fiber.dispose()
+      first = undefined
+
+      restarted = await mount()
+      expect(restarted.get('settings')!.get(plugin.STRATAGATE_SETTINGS_NAMESPACE)).toMatchObject({
+        showStrataGateStatus: false,
+        showShortTermStatus: false,
+        showRetrievalStatus: false,
+      })
+      const stored = JSON.parse(await import('node:fs/promises').then(({ readFile }) => readFile(settingsPath, 'utf8')))
+      expect(Object.keys(stored)).toEqual([plugin.STRATAGATE_SETTINGS_NAMESPACE])
+    } finally {
+      await first?.fiber.dispose()
+      await restarted?.fiber.dispose()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it.each([
     ['auto', undefined],
     ['force-off', 'force-off'],
@@ -40,7 +89,12 @@ describe('DSH plugin composition', () => {
 
       expect(registration).toEqual({
         namespace: plugin.STRATAGATE_SETTINGS_NAMESPACE,
-        entry: { structuredReasoningEffort: expected, showShortTermStatus: true },
+        entry: {
+          structuredReasoningEffort: expected,
+          showStrataGateStatus: true,
+          showShortTermStatus: true,
+          showRetrievalStatus: true,
+        },
       })
     } finally {
       await ctx.fiber.dispose()

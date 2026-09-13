@@ -14,7 +14,9 @@ describe('DeepSeek Harness plugin config', () => {
       maxOutputTokens: 2048,
       structuredTaskTimeoutMs: 120000,
       structuredReasoningEffort: 'auto',
+      showStrataGateStatus: true,
       showShortTermStatus: true,
+      showRetrievalStatus: true,
     })
   })
 
@@ -43,12 +45,24 @@ describe('DeepSeek Harness plugin config', () => {
     }).structuredReasoningEffort).toBe('force-off')
   })
 
-  it('exposes a persistent switch for the inline short-term status', () => {
-    const field = Config.dict?.showShortTermStatus
-    expect(field?.meta).toMatchObject({
-      default: true,
+  it('exposes persistent defaults for all chat display preferences', () => {
+    expect(Config.dict?.showStrataGateStatus?.meta).toMatchObject({ default: true })
+    expect(Config.dict?.showShortTermStatus?.meta).toMatchObject({ default: true })
+    expect(Config.dict?.showRetrievalStatus?.meta).toMatchObject({ default: true })
+    expect(resolveConfig({ database: 'memory.db' })).toMatchObject({
+      showStrataGateStatus: true,
+      showShortTermStatus: true,
+      showRetrievalStatus: true,
     })
-    expect(resolveConfig({ database: 'memory.db' }).showShortTermStatus).toBe(true)
-    expect(resolveConfig({ database: 'memory.db', showShortTermStatus: false }).showShortTermStatus).toBe(false)
+    expect(resolveConfig({
+      database: 'memory.db',
+      showStrataGateStatus: false,
+      showShortTermStatus: false,
+      showRetrievalStatus: false,
+    })).toMatchObject({
+      showStrataGateStatus: false,
+      showShortTermStatus: false,
+      showRetrievalStatus: false,
+    })
   })
 })

@@ -11,6 +11,7 @@ import { feedbackDraftUrl, StrataGateRuntime } from '../src/runtime.js'
 
 const fakeModels = {
   run: async <T>(_session: Session, operation: () => Promise<T>): Promise<T> => operation(),
+  runDetached: async <T>(_sessionId: string, operation: () => Promise<T>): Promise<T> => operation(),
   summarizer: async () => ({
     l0Title: 'turns', l0Tags: [], l1Summary: 'turns', l2Keypoints: [], shouldExtract: false,
   }),
@@ -50,6 +51,55 @@ function turnEvents(turn = 1): SessionEvent[] {
 }
 
 describe('DSH runtime ingestion', () => {
+  it('consumes persisted graph jobs without a new host session event', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-background-worker-'))
+    const database = join(directory, 'memory.db')
+    const namespace = 'dsh:project:background-worker'
+    const summarizer = async () => ({
+      l0Title: 'worker', l0Tags: [], l1Summary: 'worker', l2Keypoints: [], shouldExtract: true,
+    })
+    try {
+      const seed = await StrataGate.open({
+        database, namespace, blockTurnSize: 1,
+        graphProjector: async () => ({ reason: 'projected', nodes: [], edges: [] }),
+      })
+      await seed.appendTurn({ user: 'seed event', assistant: 'saved', threadId: 'seed-session' }, { deferDerivation: true })
+      const block = seed.listBlocks()[0]!
+      await seed.addEvent({
+        title: 'Background worker event', summary: 'A durable event for worker recovery.',
+        sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id],
+      })
+      expect(seed.listGraphProjectionJobs()).toHaveLength(1)
+      await seed.close()
+
+      const runtime = new StrataGateRuntime({
+        database, namespaceMode: 'project', namespacePrefix: 'dsh', globalNamespace: 'global',
+        blockTurnSize: 1, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048,
+      }, {
+        ...fakeModels,
+        graphProjector: async () => ({ reason: 'projected', nodes: [], edges: [] }),
+      } as unknown as DshModelBridge)
+      try {
+        await vi.waitFor(async () => {
+          const snapshot = await runtime.adminSnapshot(namespace)
+          expect(snapshot?.graphProjectionJobs).toEqual([
+            expect.objectContaining({ status: 'completed', attempts: 1 }),
+          ])
+          expect(snapshot?.blocks).toEqual([
+            expect.objectContaining({ id: block.id, processingStatus: 'ready' }),
+          ])
+          expect(snapshot?.summaryJobs).toEqual([
+            expect.objectContaining({ blockId: block.id, status: 'succeeded', attempts: 1 }),
+          ])
+        }, { timeout: 5_000, interval: 100 })
+      } finally {
+        await runtime.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('persists local feedback drafts and enforces the five-day proactive prompt cooldown', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-feedback-'))
     const database = join(directory, 'memory.db')
