@@ -19,7 +19,7 @@ import {
 import type { AdminSnapshotEntry, FeedbackDraftInput, StrataGateRuntime } from './runtime.js'
 import { clusterKnowledgeGraph } from './graph-clustering.js'
 
-const STRATAGATE_DSH_VERSION = '0.2.64'
+const STRATAGATE_DSH_VERSION = '0.2.65'
 const LEGACY_THREAD_ID = '__legacy__'
 const nodeRequire = createRequire(import.meta.url)
 
@@ -227,6 +227,77 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
   const rows = []
   for (const { namespace, snapshot } of entries) {
     if (!snapshot) continue
+    const recovered = recoverSnapshotView(snapshot)
+    const blockDetails = (blockIds: string[]) => [...new Set(blockIds)].flatMap((blockId) => {
+      const displayBlocks = recovered.blocks.filter(({ source, threadId }) => source.id === blockId && threadId !== LEGACY_THREAD_ID)
+      if (displayBlocks.length > 0) {
+        return displayBlocks.map((block) => ({
+          id: block.id,
+          sourceId: block.source.id,
+          sequence: block.source.sequence,
+          title: block.source.l0Title ?? null,
+          threadId: block.threadId,
+          turnRange: block.turnRange,
+          shouldExtract: block.source.shouldExtract ?? null,
+        }))
+      }
+      const block = snapshot.blocks.find(({ id }) => id === blockId)
+      return block ? [{
+        id: block.id,
+        sourceId: block.id,
+        sequence: block.sequence,
+        title: block.l0Title ?? null,
+        threadId: block.threadId ?? null,
+        turnRange: [block.startTurn, block.endTurn] as [number, number],
+        shouldExtract: block.shouldExtract ?? null,
+      }] : []
+    })
+    const describeBlockJob = (kind: 'block-summary' | 'event-extraction', job: {
+      blockId: string
+      status: string
+      attempts: number
+      nextRetryAt: string | null
+      lastError: string | null
+      updatedAt: string
+    }) => {
+      const details = blockDetails([job.blockId])
+      return {
+        id: job.blockId,
+        kind,
+        status: job.status,
+        attempts: job.attempts,
+        nextRetryAt: job.nextRetryAt,
+        lastError: job.lastError?.slice(0, 500) ?? null,
+        lastErrorFull: job.lastError,
+        updatedAt: job.updatedAt,
+        threadId: details[0]?.threadId ?? null,
+        blockIds: [job.blockId],
+        threadIds: [...new Set(details.flatMap(({ threadId }) => threadId ?? []))],
+        blockDetails: details,
+        sequence: details[0]?.sequence ?? null,
+        turnRange: details[0]?.turnRange ?? null,
+      }
+    }
+    const describeGraphJob = (job: (typeof snapshot.graphProjectionJobs)[number]) => {
+      const blockIds = [...new Set(job.sourceEventIds.flatMap((eventId) =>
+        snapshot.events.find(({ id }) => id === eventId)?.sourceBlockId ?? []))]
+      const details = blockDetails(blockIds)
+      return {
+        id: job.id,
+        kind: 'graph-projection' as const,
+        status: job.status,
+        attempts: job.attempts,
+        nextRetryAt: null,
+        lastError: job.lastError?.slice(0, 500) ?? null,
+        lastErrorFull: job.lastError,
+        updatedAt: job.updatedAt,
+        blockIds,
+        threadIds: [...new Set(details.flatMap(({ threadId }) => threadId ?? []))],
+        blockDetails: details,
+        sequences: details.map(({ sequence }) => sequence),
+        sourceEventIds: job.sourceEventIds,
+      }
+    }
     const failedJobs = snapshot.summaryJobs.filter(({ status }) => status === 'failed').length
       + snapshot.extractionJobs.filter(({ status }) => status === 'failed').length
       + snapshot.graphProjectionJobs.filter(({ status }) => status === 'failed').length
@@ -236,73 +307,24 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
     const failedJobDetails = [
       ...snapshot.summaryJobs
         .filter(({ status }) => status === 'failed')
-        .map((job) => {
-          const block = snapshot.blocks.find(({ id }) => id === job.blockId)
-          return {
-            id: job.blockId,
-            kind: 'block-summary',
-            attempts: job.attempts,
-            nextRetryAt: job.nextRetryAt,
-            lastError: job.lastError?.slice(0, 500) ?? null,
-            lastErrorFull: job.lastError,
-            updatedAt: job.updatedAt,
-            threadId: block?.threadId ?? null,
-            blockIds: [job.blockId],
-            threadIds: block?.threadId ? [block.threadId] : [],
-            blockDetails: block ? [{
-              id: block.id, sequence: block.sequence, title: block.l0Title ?? null,
-              threadId: block.threadId ?? null, turnRange: [block.startTurn, block.endTurn],
-            }] : [],
-            sequence: block?.sequence ?? null,
-            turnRange: block ? [block.startTurn, block.endTurn] : null,
-          }
-        }),
+        .map((job) => describeBlockJob('block-summary', job)),
       ...snapshot.extractionJobs
         .filter(({ status }) => status === 'failed')
-        .map((job) => {
-          const block = snapshot.blocks.find(({ id }) => id === job.blockId)
-          return {
-            id: job.blockId,
-            kind: 'event-extraction',
-            attempts: job.attempts,
-            nextRetryAt: job.nextRetryAt,
-            lastError: job.lastError?.slice(0, 500) ?? null,
-            lastErrorFull: job.lastError,
-            updatedAt: job.updatedAt,
-            blockIds: [job.blockId],
-            threadIds: block?.threadId ? [block.threadId] : [],
-            blockDetails: block ? [{
-              id: block.id, sequence: block.sequence, title: block.l0Title ?? null,
-              threadId: block.threadId ?? null, turnRange: [block.startTurn, block.endTurn],
-            }] : [],
-            sequence: block?.sequence ?? null,
-            turnRange: block ? [block.startTurn, block.endTurn] : null,
-          }
-        }),
+        .map((job) => describeBlockJob('event-extraction', job)),
       ...snapshot.graphProjectionJobs
         .filter(({ status }) => status === 'failed')
-        .map((job) => {
-          const blockIds = [...new Set(job.sourceEventIds.flatMap((eventId) =>
-            snapshot.events.find(({ id }) => id === eventId)?.sourceBlockId ?? []))]
-          const blocks = blockIds.flatMap((blockId) => snapshot.blocks.find(({ id }) => id === blockId) ?? [])
-          return {
-            id: job.id,
-            kind: 'graph-projection',
-            attempts: job.attempts,
-            nextRetryAt: null,
-            lastError: job.lastError?.slice(0, 500) ?? null,
-            lastErrorFull: job.lastError,
-            updatedAt: job.updatedAt,
-            blockIds,
-            threadIds: [...new Set(blocks.flatMap(({ threadId }) => threadId ?? []))],
-            blockDetails: blocks.map((block) => ({
-              id: block.id, sequence: block.sequence, title: block.l0Title ?? null,
-              threadId: block.threadId ?? null, turnRange: [block.startTurn, block.endTurn],
-            })),
-            sequences: blocks.map(({ sequence }) => sequence),
-            sourceEventIds: job.sourceEventIds,
-          }
-        }),
+        .map(describeGraphJob),
+    ]
+    const processingJobDetails = [
+      ...snapshot.summaryJobs
+        .filter(({ status, nextRetryAt }) => status === 'pending' || status === 'running' || (status === 'failed' && nextRetryAt !== null))
+        .map((job) => describeBlockJob('block-summary', job)),
+      ...snapshot.extractionJobs
+        .filter(({ status, nextRetryAt }) => status === 'running' || (status === 'failed' && nextRetryAt !== null))
+        .map((job) => describeBlockJob('event-extraction', job)),
+      ...snapshot.graphProjectionJobs
+        .filter(({ status }) => status === 'pending' || status === 'running')
+        .map(describeGraphJob),
     ]
     const timestamps = [
       ...snapshot.blocks.map(({ createdAt }) => createdAt),
@@ -340,6 +362,7 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
       failedJobs,
       processingJobs,
       failedJobDetails,
+      processingJobDetails,
       successfulModelResponses: snapshot.successfulModelResponses ?? [],
       lastActivityAt: timestamps.at(-1) ?? null,
     })
@@ -987,7 +1010,9 @@ async function dashboard(runtime: StrataGateRuntime, url: URL, ifNoneMatch: stri
   const selected = entries.find(({ namespace }) => namespace === requestedNamespace) ?? entries[0]
   const threadId = url.searchParams.get('threadId')?.trim() ?? ''
   const revisionKey = entries.map(({ namespace, revision }) => `${namespace}:${revision}`).join('|')
-  const etag = `"${createHash('sha256').update(`${revisionKey}\0${selected?.namespace ?? ''}\0${threadId}`).digest('base64url').slice(0, 24)}"`
+  // Include the plugin version so an upgraded server cannot validate an ETag
+  // generated by the previous UI/server pair when the memory revision is unchanged.
+  const etag = `"${createHash('sha256').update(`${STRATAGATE_DSH_VERSION}\0${revisionKey}\0${selected?.namespace ?? ''}\0${threadId}`).digest('base64url').slice(0, 24)}"`
   if (ifNoneMatch.split(',').map((value) => value.trim()).includes(etag)) return { etag, notModified: true }
 
   const overviewValue = await overview(runtime, entries)

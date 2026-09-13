@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.65 - 2026-09-13
+
+- Replace the competing processing and retry banners with one actionable memory status bar. Normal background organization now uses the informational accent, retryable failures use warning styling, and concurrent states share one summary and status-page entry point. The detail view groups work by conversation and turn range, shows the three user-facing processing stages, keeps technical job data collapsed, and counts distinct conversation fragments instead of internal jobs.
+- Keep that detail view truthful during an in-place upgrade: recover visible conversation progress from legacy Block data when possible, identify client/server version skew, and show an explicit restart notice instead of incorrectly claiming that no work is pending.
+- Include the plugin version in Dashboard cache validators so an upgraded server cannot return `304 Not Modified` for a page still holding the previous version's status payload.
+
 ## 0.2.64 - 2026-09-12
 
 - Separate read-only status refresh from targeted retries for Block Summary, Event extraction, and Graph projection failures. The status page now lists every failed job with Block and conversation context, attempt count, retry time, latest error, visible progress, and durable retry failure feedback.
