@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.67 - 2026-09-13
+
+- Repackage the current StrataGate settings and display-preference release as npm package `0.2.67`.
+
 ## 0.2.66 - 2026-09-13
 
 - Add an independent persistent-memory worker that scans every namespace and consumes pending or retryable Summary, Event extraction, and Graph projection jobs without waiting for a new host session event.
