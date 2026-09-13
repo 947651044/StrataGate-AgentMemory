@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
     const FEEDBACK_VIEW_ID = 'feedback'
     const ISSUE_BODY_HINT = '<!-- 请在此处粘贴刚刚复制的反馈报告（Ctrl+V） -->'
     const MASCOT_DATA_URL = '__STRATAGATE_MASCOT_DATA_URL__'
+    const STRATAGATE_CLIENT_VERSION = '0.2.65'
     const MEMORY_CITATIONS_KIND = 'stratagate-memory-citations'
     const MEMORY_RETRIEVAL_TOOLS = new Set([
       'memory_search_events', 'memory_search_graph', 'memory_expand_graph_node',
@@ -207,13 +208,15 @@ window.__ModuleLoader__.load({
       .sg-icon-button,.sg-back,.sg-quiet-button{border:0;background:transparent;cursor:pointer}.sg-icon-button{width:32px;height:32px;border-radius:6px;font-size:20px}.sg-icon-button:hover,.sg-back:hover,.sg-quiet-button:hover{background:var(--sg-soft);transform:translateY(-1px)}
       .sg-project{display:flex;align-items:center;gap:7px;min-width:0;margin:0 0 9px;color:var(--sg-muted);font-size:12px}.sg-project-label{flex:0 0 auto}.sg-project-select{min-width:0;max-width:100%;padding:3px 22px 3px 5px;border:0;border-radius:5px;background:transparent;color:var(--sg-text);font-weight:620;cursor:pointer;text-overflow:ellipsis}
       .sg-tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-bottom:22px;padding:4px;border:1px solid var(--sg-border);border-radius:11px;background:color-mix(in srgb,var(--sg-surface) 58%,transparent)}.sg-tab{position:relative;min-width:0;padding:9px 6px;border:0;border-radius:7px;background:transparent;color:var(--sg-muted);cursor:pointer;white-space:nowrap}.sg-tab:hover{color:var(--sg-text);background:color-mix(in srgb,var(--sg-soft) 70%,transparent)}.sg-tab.active{color:var(--sg-accent);background:var(--sg-surface);font-weight:720;box-shadow:0 3px 12px color-mix(in srgb,var(--sg-text) 7%,transparent)}.sg-tab.active:after{content:"";position:absolute;left:32%;right:32%;bottom:3px;height:2px;border-radius:2px;background:var(--sg-accent)}
-      .sg-alert{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;padding:11px 12px;margin:0 0 18px;border:1px solid color-mix(in srgb,var(--sg-warn) 28%,var(--sg-border));border-radius:8px;background:var(--sg-warn-soft);text-align:left;cursor:pointer}.sg-alert-mark{color:var(--sg-warn);font-size:17px}.sg-alert-title{font-weight:700}.sg-alert-copy{color:var(--sg-muted);font-size:12px}.sg-chevron{color:var(--sg-muted);font-size:18px}.sg-processing-alert{display:flex;align-items:center;gap:9px;width:100%;padding:11px 12px;margin:0 0 18px;border:1px solid color-mix(in srgb,var(--sg-danger) 34%,var(--sg-border));border-radius:8px;background:var(--sg-danger-soft);color:var(--sg-danger)}.sg-processing-icon{display:inline-grid;place-items:center;width:20px;height:20px;flex:0 0 auto;font-size:19px;font-weight:700;line-height:1;animation:sg-spin 1s linear infinite}.sg-processing-title{display:block;font-weight:720}.sg-processing-copy{display:block;margin-top:2px;color:var(--sg-muted);font-size:12px}@keyframes sg-spin{to{transform:rotate(360deg)}}
+      .sg-alert{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;padding:11px 12px;margin:0 0 18px;border:1px solid color-mix(in srgb,var(--sg-warn) 28%,var(--sg-border));border-radius:8px;background:var(--sg-warn-soft);text-align:left;cursor:pointer}.sg-alert-mark{color:var(--sg-warn);font-size:17px}.sg-alert-title{font-weight:700}.sg-alert-copy{color:var(--sg-muted);font-size:12px}.sg-chevron{color:var(--sg-muted);font-size:18px}.sg-memory-alert{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;padding:11px 12px;margin:0 0 18px;border:1px solid var(--sg-border);border-radius:8px;background:var(--sg-soft);color:var(--sg-text);text-align:left;cursor:pointer}.sg-memory-alert.processing{border-color:color-mix(in srgb,var(--sg-accent) 30%,var(--sg-border));background:var(--sg-accent-soft)}.sg-memory-alert.attention{border-color:color-mix(in srgb,var(--sg-warn) 34%,var(--sg-border));background:var(--sg-warn-soft)}.sg-memory-alert:hover{box-shadow:0 6px 18px color-mix(in srgb,var(--sg-text) 7%,transparent);transform:translateY(-1px)}.sg-memory-alert-mark{display:inline-grid;place-items:center;width:20px;height:20px;flex:0 0 auto;color:var(--sg-accent);font-size:19px;font-weight:700;line-height:1}.sg-memory-alert.attention .sg-memory-alert-mark{color:var(--sg-warn)}.sg-memory-alert.processing .sg-memory-alert-mark{animation:sg-spin 1s linear infinite}.sg-memory-alert-title{display:block;font-weight:720}.sg-memory-alert-copy{display:block;margin-top:2px;color:var(--sg-muted);font-size:12px}.sg-processing-icon{display:inline-grid;place-items:center;width:20px;height:20px;flex:0 0 auto;font-size:19px;font-weight:700;line-height:1;animation:sg-spin 1s linear infinite}@keyframes sg-spin{to{transform:rotate(360deg)}}
       .sg-intro{margin-bottom:17px}.sg-intro h2,.sg-detail-title{margin:0;font-size:19px;line-height:1.28;font-weight:760;letter-spacing:-.025em;text-wrap:balance}.sg-intro p,.sg-detail-subtitle{max-width:65ch;margin:5px 0 0;color:var(--sg-muted);font-size:13px;text-wrap:pretty}.sg-search{position:relative;margin-bottom:7px}.sg-search-mark{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--sg-muted);font-size:16px;pointer-events:none}.sg-search input{width:100%;height:41px;padding:0 12px 0 37px;border:1px solid var(--sg-border);border-radius:9px;background:var(--sg-surface);outline:0}.sg-search input:hover{border-color:color-mix(in srgb,var(--sg-accent) 35%,var(--sg-border))}.sg-search input:focus{border-color:var(--sg-accent);box-shadow:0 0 0 3px var(--sg-focus)}
       .sg-feed{border-top:1px solid var(--sg-border)}.sg-entry{position:relative;width:100%;min-width:0;padding:17px 10px;margin:0 -10px;border:0;border-bottom:1px solid var(--sg-border);border-radius:8px;background:transparent;text-align:left}.sg-entry-button{cursor:pointer}.sg-entry-button:hover{background:color-mix(in srgb,var(--sg-accent) 5%,transparent);transform:translateX(2px)}.sg-entry-button:hover .sg-entry-title{color:var(--sg-accent)}.sg-entry-title{padding-right:22px;font-size:15px;line-height:1.42;font-weight:720;letter-spacing:-.01em}.sg-entry-summary{margin-top:5px;color:var(--sg-text);white-space:pre-wrap}.sg-entry-chevron{position:absolute;right:9px;top:18px;color:var(--sg-muted);font-size:18px}.sg-entry-button:hover .sg-entry-chevron{color:var(--sg-accent);transform:translateX(2px)}.sg-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:9px;color:var(--sg-muted);font-size:12px}.sg-meta-sep:before{content:"·";margin-right:7px}.sg-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.sg-tag{max-width:100%;padding:3px 8px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-soft);color:var(--sg-text);font-size:12px;line-height:1.45;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}.sg-tag-button{cursor:pointer}.sg-tag-button:hover{border-color:var(--sg-accent);color:var(--sg-accent);transform:translateY(-1px)}
       .sg-status{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border-radius:5px;font-size:12px;font-weight:650}.sg-status:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.sg-status.organized{color:var(--sg-good);background:var(--sg-good-soft)}.sg-status.processing{color:var(--sg-accent);background:var(--sg-accent-soft)}.sg-status.waiting{color:var(--sg-muted);background:var(--sg-soft)}.sg-status.failed{color:var(--sg-warn);background:var(--sg-warn-soft)}
       .sg-backbar{display:flex;align-items:center;min-height:35px;margin:-4px 0 13px}.sg-back{display:inline-flex;align-items:center;gap:6px;margin-left:-7px;padding:6px 7px;border-radius:6px;font-weight:650}.sg-detail-header{padding-bottom:16px;border-bottom:1px solid var(--sg-border)}.sg-detail-section{padding:18px 0;border-bottom:1px solid var(--sg-border)}.sg-detail-section:last-child{border-bottom:0}.sg-section-title{margin:0 0 11px;font-size:14px;font-weight:730}.sg-prose{margin:0;white-space:pre-wrap}.sg-facts{margin:0;padding-left:20px}.sg-facts li+li{margin-top:7px}.sg-related-list{display:flex;flex-direction:column}.sg-related{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border:0;border-bottom:1px solid var(--sg-border);background:transparent;text-align:left;cursor:pointer}.sg-related:last-child{border-bottom:0}.sg-related-name{color:var(--sg-accent)}.sg-related-time{flex:0 0 auto;color:var(--sg-muted);font-size:12px}
       .sg-source-label{display:flex;align-items:center;gap:8px}.sg-source-icon{color:var(--sg-muted)}.sg-tech{margin-top:13px}.sg-tech summary{color:var(--sg-muted);font-size:12px;cursor:pointer}.sg-tech-body{margin-top:10px;padding:11px;border-radius:7px;background:var(--sg-soft);font-size:12px}.sg-tech-row{display:grid;grid-template-columns:88px minmax(0,1fr);gap:9px;padding:3px 0}.sg-code{font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.sg-raw-message{padding-top:10px;margin-top:10px;border-top:1px solid var(--sg-border)}
-      .sg-result-count{margin:0 0 9px;color:var(--sg-muted);font-size:12px}.sg-result-event{padding:8px 0;border-bottom:1px solid var(--sg-border)}.sg-result-event:last-child{border-bottom:0}.sg-pipeline{display:flex;flex-direction:column}.sg-stage{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:9px 0;border-bottom:1px solid var(--sg-border)}.sg-stage:last-child{border-bottom:0}.sg-stage-value{font-size:12px}.sg-stage-value.done{color:var(--sg-good)}.sg-stage-value.failed{color:var(--sg-danger)}.sg-stage-value.waiting{color:var(--sg-muted)}.sg-lambda-control{display:flex;align-items:center;justify-content:flex-end;gap:7px}.sg-number-input,.sg-effort-select{padding:4px 5px;border:1px solid var(--sg-border);border-radius:6px;background:var(--sg-surface)}.sg-number-input{width:82px;text-align:right}.sg-effort-button{padding:4px 6px;border:0;border-radius:5px;background:transparent;color:var(--sg-muted);cursor:pointer;font-size:12px}.sg-effort-button:hover{background:var(--sg-soft);color:var(--sg-accent)}.sg-setting-switch{position:relative;width:38px;height:22px;padding:0;border:1px solid var(--sg-border);border-radius:999px;background:var(--sg-soft);cursor:pointer}.sg-setting-switch:before{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:var(--sg-muted);transition:transform var(--sg-fast) var(--sg-ease),background-color var(--sg-fast) var(--sg-ease)}.sg-setting-switch[aria-checked="true"]{border-color:var(--sg-accent);background:var(--sg-accent)}.sg-setting-switch[aria-checked="true"]:before{background:#fff;transform:translateX(16px)}.sg-setting-switch:disabled{cursor:not-allowed;opacity:.5}.sg-setting-note{margin:7px 0 11px;color:var(--sg-muted);font-size:12px}.sg-setting-suggestion{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;margin:4px 0 10px;border-radius:7px;background:var(--sg-soft);font-size:12px}.sg-save-button{align-self:flex-end;padding:7px 12px;margin-top:12px;border:0;border-radius:6px;background:var(--sg-accent);color:white;cursor:pointer}.sg-save-button:disabled{opacity:.5;cursor:not-allowed}.sg-safe-note{padding:11px 12px;margin-bottom:12px;border-radius:7px;background:var(--sg-good-soft);color:var(--sg-good);font-weight:650}.sg-error-note{margin:8px 0 0;color:var(--sg-muted);font-size:12px}.sg-job-list{display:grid;gap:10px}.sg-job{padding:12px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-surface)}.sg-job-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.sg-job-title{margin:0;font-size:14px}.sg-job-meta{display:grid;grid-template-columns:112px minmax(0,1fr);gap:5px 10px;margin:11px 0;color:var(--sg-muted);font-size:12px}.sg-job-meta dd,.sg-job-meta dt{min-width:0;margin:0}.sg-job-meta dd{color:var(--sg-text);overflow-wrap:anywhere}.sg-job-error{max-height:150px;margin:9px 0;padding:9px;overflow:auto;border-radius:6px;background:var(--sg-danger-soft);color:var(--sg-danger)}.sg-job-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.sg-job-actions .sg-save-button{margin-top:0}.sg-status-feedback{margin:9px 0 0;color:var(--sg-muted);font-size:12px}.sg-status-feedback.failed{color:var(--sg-danger)}
+      .sg-result-count{margin:0 0 9px;color:var(--sg-muted);font-size:12px}.sg-result-event{padding:8px 0;border-bottom:1px solid var(--sg-border)}.sg-result-event:last-child{border-bottom:0}.sg-pipeline{display:flex;flex-direction:column}.sg-stage{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:9px 0;border-bottom:1px solid var(--sg-border)}.sg-stage:last-child{border-bottom:0}.sg-stage-value{font-size:12px}.sg-stage-value.done{color:var(--sg-good)}.sg-stage-value.processing{color:var(--sg-accent)}.sg-stage-value.failed{color:var(--sg-danger)}.sg-stage-value.waiting{color:var(--sg-muted)}.sg-lambda-control{display:flex;align-items:center;justify-content:flex-end;gap:7px}.sg-number-input,.sg-effort-select{padding:4px 5px;border:1px solid var(--sg-border);border-radius:6px;background:var(--sg-surface)}.sg-number-input{width:82px;text-align:right}.sg-effort-button{padding:4px 6px;border:0;border-radius:5px;background:transparent;color:var(--sg-muted);cursor:pointer;font-size:12px}.sg-effort-button:hover{background:var(--sg-soft);color:var(--sg-accent)}.sg-setting-switch{position:relative;width:38px;height:22px;padding:0;border:1px solid var(--sg-border);border-radius:999px;background:var(--sg-soft);cursor:pointer}.sg-setting-switch:before{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:var(--sg-muted);transition:transform var(--sg-fast) var(--sg-ease),background-color var(--sg-fast) var(--sg-ease)}.sg-setting-switch[aria-checked="true"]{border-color:var(--sg-accent);background:var(--sg-accent)}.sg-setting-switch[aria-checked="true"]:before{background:#fff;transform:translateX(16px)}.sg-setting-switch:disabled{cursor:not-allowed;opacity:.5}.sg-setting-note{margin:7px 0 11px;color:var(--sg-muted);font-size:12px}.sg-setting-suggestion{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;margin:4px 0 10px;border-radius:7px;background:var(--sg-soft);font-size:12px}.sg-save-button{align-self:flex-end;padding:7px 12px;margin-top:12px;border:0;border-radius:6px;background:var(--sg-accent);color:white;cursor:pointer}.sg-save-button:disabled{opacity:.5;cursor:not-allowed}.sg-safe-note{padding:11px 12px;margin-bottom:12px;border-radius:7px;background:var(--sg-good-soft);color:var(--sg-good);font-weight:650}.sg-error-note{margin:8px 0 0;color:var(--sg-muted);font-size:12px}.sg-job-list{display:grid;gap:10px}.sg-job{padding:12px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-surface)}.sg-job-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.sg-job-title{margin:0;font-size:14px}.sg-job-meta{display:grid;grid-template-columns:112px minmax(0,1fr);gap:5px 10px;margin:11px 0;color:var(--sg-muted);font-size:12px}.sg-job-meta dd,.sg-job-meta dt{min-width:0;margin:0}.sg-job-meta dd{color:var(--sg-text);overflow-wrap:anywhere}.sg-job-error{max-height:150px;margin:9px 0;padding:9px;overflow:auto;border-radius:6px;background:var(--sg-danger-soft);color:var(--sg-danger)}.sg-job-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.sg-job-actions .sg-save-button{margin-top:0}.sg-status-feedback{margin:9px 0 0;color:var(--sg-muted);font-size:12px}.sg-status-feedback.failed{color:var(--sg-danger)}
+      .sg-process-summary{padding:12px 13px;margin-bottom:14px;border-radius:8px;background:var(--sg-good-soft);color:var(--sg-good)}.sg-process-summary strong{display:block;font-size:13px}.sg-process-summary span{display:block;margin-top:2px;font-size:12px}.sg-process-groups{display:grid;gap:14px}.sg-process-group{overflow:hidden;border:1px solid var(--sg-border);border-radius:10px;background:var(--sg-surface)}.sg-process-group-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border-bottom:1px solid var(--sg-border);background:color-mix(in srgb,var(--sg-soft) 65%,transparent)}.sg-process-group-title{margin:0;font-size:14px;font-weight:730}.sg-process-group-count{color:var(--sg-muted);font-size:11px}.sg-process-card{padding:13px}.sg-process-card+.sg-process-card{border-top:1px solid var(--sg-border)}.sg-process-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.sg-process-range{font-weight:700}.sg-process-state{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:680}.sg-process-state.processing{color:var(--sg-accent)}.sg-process-state.waiting{color:var(--sg-muted)}.sg-process-state.failed{color:var(--sg-warn)}.sg-process-stages{display:grid;gap:7px;margin-top:12px}.sg-process-stage{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:7px;color:var(--sg-muted);font-size:12px}.sg-process-stage-name{color:var(--sg-text)}.sg-process-stage-state.done{color:var(--sg-good)}.sg-process-stage-state.processing{color:var(--sg-accent)}.sg-process-stage-state.failed{color:var(--sg-danger)}.sg-process-stage-state.waiting,.sg-process-stage-state.skipped{color:var(--sg-muted)}.sg-process-tech{margin-top:12px;padding-top:9px;border-top:1px solid var(--sg-border)}.sg-process-tech>summary{color:var(--sg-muted);font-size:11px;cursor:pointer}.sg-process-job{padding:10px 0}.sg-process-job+.sg-process-job{border-top:1px solid var(--sg-border)}.sg-process-job-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}.sg-process-job-meta{margin-top:5px;color:var(--sg-muted);font-size:11px}.sg-process-job .sg-job-error{font-size:11px}.sg-process-job-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}.sg-process-job-actions .sg-save-button{margin:0}.sg-process-footer{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:15px}.sg-process-footer .sg-quiet-button{padding:7px 9px;border-radius:6px;color:var(--sg-accent)}.sg-process-footer .sg-status-feedback{margin:0}
+      .sg-process-notice{padding:12px 13px;margin:0 0 14px;border:1px solid color-mix(in srgb,var(--sg-warn) 30%,var(--sg-border));border-radius:8px;background:var(--sg-warn-soft)}.sg-process-notice strong{display:block;color:var(--sg-text);font-size:13px}.sg-process-notice span{display:block;margin-top:3px;color:var(--sg-muted);font-size:12px}.sg-process-unavailable{padding:24px 14px;text-align:center;color:var(--sg-muted)}.sg-process-unavailable strong{display:block;color:var(--sg-text);font-size:14px}.sg-process-unavailable span{display:block;margin-top:5px;font-size:12px}
       .sg-menu{display:grid;gap:7px}.sg-menu-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:11px;width:100%;padding:12px;border:1px solid transparent;border-radius:10px;background:color-mix(in srgb,var(--sg-surface) 48%,transparent);text-align:left;cursor:pointer}.sg-menu-row:hover{border-color:color-mix(in srgb,var(--sg-accent) 22%,var(--sg-border));background:color-mix(in srgb,var(--sg-accent) 6%,var(--sg-surface));transform:translateY(-1px);box-shadow:0 8px 20px color-mix(in srgb,var(--sg-text) 6%,transparent)}.sg-menu-row:hover .sg-menu-title,.sg-menu-row:hover .sg-chevron{color:var(--sg-accent)}.sg-menu-icon{width:32px;height:32px;display:grid;place-items:center;border:1px solid color-mix(in srgb,var(--sg-accent) 14%,var(--sg-border));border-radius:8px;background:var(--sg-soft);color:var(--sg-muted);font-weight:700}.sg-menu-title{font-weight:700}.sg-menu-subtitle{color:var(--sg-muted);font-size:12px}.sg-counts{display:flex;gap:22px;padding:5px 0 18px;border-bottom:1px solid var(--sg-border)}.sg-count-value{font-size:22px;font-weight:760;letter-spacing:-.03em}.sg-count-label{color:var(--sg-muted);font-size:12px}.sg-structured-group{padding-top:17px}.sg-raw-group{padding:12px 0;border-bottom:1px solid var(--sg-border)}.sg-raw-group summary{cursor:pointer;font-weight:680}.sg-raw-json{max-height:360px;padding:11px;margin:10px 0 0;overflow:auto;border-radius:7px;background:var(--sg-soft)}
       .sg-import-card{padding:15px;border:1px solid color-mix(in srgb,var(--sg-accent) 22%,var(--sg-border));border-radius:11px;background:color-mix(in srgb,var(--sg-surface) 72%,transparent);box-shadow:0 8px 24px color-mix(in srgb,var(--sg-text) 5%,transparent)}.sg-import-card textarea{width:100%;min-height:270px;padding:11px;border:1px solid var(--sg-border);border-radius:8px;background:var(--sg-page);resize:vertical;outline:0;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.sg-import-card textarea:focus{border-color:var(--sg-accent);box-shadow:0 0 0 3px var(--sg-focus)}.sg-import-actions{display:flex;align-items:center;gap:10px;margin-top:11px;flex-wrap:wrap}.sg-import-button{padding:8px 13px;border:1px solid var(--sg-accent);border-radius:7px;background:var(--sg-accent);color:#fff;cursor:pointer;font-weight:680}.sg-import-button:disabled{cursor:wait;opacity:.6}.sg-import-hint{margin:8px 0 0;color:var(--sg-muted);font-size:12px}.sg-import-result{margin-top:12px;padding:10px 11px;border-radius:7px;background:var(--sg-good-soft);color:var(--sg-good);font-size:12px}.sg-import-error{margin-top:12px;padding:10px 11px;border-radius:7px;background:var(--sg-danger-soft);color:var(--sg-danger);font-size:12px}
       .sg-import-overlay{position:fixed;inset:0;z-index:40;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(0,0,0,.52);backdrop-filter:blur(2px);animation:sg-view-in var(--sg-medium) var(--sg-ease) both}.sg-import-dialog{width:min(720px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto;padding:14px;border:1px solid color-mix(in srgb,var(--sg-border) 90%,#fff 10%);border-radius:12px;background:var(--sg-page);box-shadow:0 24px 80px rgba(0,0,0,.42)}.sg-import-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}.sg-import-dialog-title{margin:0;font-size:18px;font-weight:760}.sg-import-step{padding:12px;margin-top:10px;border-radius:9px;background:color-mix(in srgb,var(--sg-surface) 78%,transparent)}.sg-import-step-head{display:flex;align-items:center;gap:9px;margin-bottom:9px}.sg-import-step-num{display:grid;place-items:center;width:25px;height:25px;border-radius:50%;background:var(--sg-text);color:var(--sg-page);font-weight:760}.sg-import-step-title{font-weight:720}.sg-import-prompt{max-height:185px;padding:10px;overflow:auto;border-radius:7px;background:var(--sg-page);color:var(--sg-muted);font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap}.sg-import-dialog .sg-import-card{padding:0;border:0;box-shadow:none;background:transparent}.sg-import-dialog .sg-import-card textarea{min-height:165px;background:var(--sg-page)}.sg-import-dialog-foot{display:flex;justify-content:flex-end;gap:9px;margin-top:14px}.sg-import-cancel{padding:8px 18px;border:1px solid var(--sg-border);border-radius:7px;background:transparent;cursor:pointer}.sg-import-dialog .sg-import-button{padding:8px 18px}.sg-import-copy{margin-left:auto;padding:6px 11px;border:1px solid var(--sg-border);border-radius:6px;background:var(--sg-page);cursor:pointer;font-size:12px}.sg-import-copy:hover{border-color:var(--sg-accent);color:var(--sg-accent)}.sg-import-loading{color:var(--sg-muted);font-size:12px}.sg-import-preview{display:grid;gap:8px;margin-top:10px}.sg-import-preview-item{padding:10px;border:1px solid var(--sg-border);border-radius:8px;background:var(--sg-page)}.sg-import-preview-title{font-weight:700}.sg-import-preview-meta{display:flex;gap:8px;margin-top:5px;color:var(--sg-muted);font-size:12px}.sg-import-preview-reason{margin-top:5px;font-size:12px}.sg-import-review{display:flex;gap:7px;align-items:flex-start;margin-top:8px;color:var(--sg-warn);font-size:12px}
@@ -241,13 +244,13 @@ window.__ModuleLoader__.load({
       @media (max-width:900px){.sg-long-layout{grid-template-columns:1fr;height:auto;max-height:none}.sg-long-explorer.fullscreen{inset:4px;padding:10px}.sg-long-explorer.fullscreen .sg-long-layout{overflow:auto}.sg-graph-canvas{height:520px}.sg-long-detail{max-height:520px;border-top:1px solid var(--sg-border);border-left:0}.sg-timeline{max-height:520px}.sg-toolbar-count{display:none}.sg-node-bubble{width:min(300px,72%)}}
       @media (max-width:620px){.sg-long-toolbar{flex-wrap:wrap}.sg-long-toolbar .sg-search{flex-basis:100%}.sg-toolbar-button{flex:1}.sg-timeline-card{grid-template-columns:78px minmax(0,1fr)}.sg-timeline-card>.sg-event-status{grid-column:2}.sg-node-bubble{left:50%!important;top:auto!important;bottom:45px;width:calc(100% - 24px);transform:translateX(-50%)!important}}
       @media (max-width:860px){.sg-layer-hover:after{display:none}.sg-layer-popover{position:relative;left:auto;top:auto;width:auto;max-height:280px;margin:5px 0 1px;display:none;transform:none}.sg-layer-hover:hover .sg-layer-popover,.sg-layer-item:focus-visible + .sg-layer-popover{display:block;transform:none}}
-      @media (max-width:560px){.sg-memory{padding:12px 12px 26px}.sg-brand-name{font-size:14px}.sg-tabs{margin-left:-2px;margin-right:-2px}.sg-tab{padding-left:0;padding-right:0}.sg-alert{grid-template-columns:auto minmax(0,1fr)}.sg-alert>.sg-chevron{display:none}.sg-tech-row{grid-template-columns:1fr;gap:1px}.sg-counts{gap:16px}.sg-entry-title{font-size:14px}.sg-block-header{display:none}.sg-block-toggle{grid-template-columns:76px minmax(76px,1fr) 24px;gap:6px}.sg-block-turn{grid-column:1/3}.sg-block-distance{display:none}.sg-layer-heading{display:block}.sg-layer-heading span{display:block;margin-top:2px}}
+      @media (max-width:560px){.sg-memory{padding:12px 12px 26px}.sg-brand-name{font-size:14px}.sg-tabs{margin-left:-2px;margin-right:-2px}.sg-tab{padding-left:0;padding-right:0}.sg-alert,.sg-memory-alert{grid-template-columns:auto minmax(0,1fr)}.sg-alert>.sg-chevron,.sg-memory-alert>.sg-chevron{display:none}.sg-tech-row{grid-template-columns:1fr;gap:1px}.sg-counts{gap:16px}.sg-entry-title{font-size:14px}.sg-block-header{display:none}.sg-block-toggle{grid-template-columns:76px minmax(76px,1fr) 24px;gap:6px}.sg-block-turn{grid-column:1/3}.sg-block-distance{display:none}.sg-layer-heading{display:block}.sg-layer-heading span{display:block;margin-top:2px}}
       .sg-decay-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.sg-conversation{display:flex;align-items:center;justify-content:flex-end;gap:5px;min-width:0;color:var(--sg-muted);font-size:11px}.sg-conversation select{min-width:0;max-width:230px;padding:3px 21px 3px 6px;border:1px solid var(--sg-border);border-radius:5px;background:var(--sg-surface);font-size:11px;text-overflow:ellipsis}.sg-distribution{scrollbar-width:none}.sg-distribution::-webkit-scrollbar{display:none}.sg-distribution-rail{display:block;width:100%;height:14px;margin:4px 0 0;accent-color:var(--sg-accent);cursor:pointer}.sg-distribution-rail:disabled{cursor:default;opacity:.38}.sg-layer-hover:after{display:none}.sg-layer-more-placeholder{width:30px}.sg-layer-popover{position:fixed!important;left:0;top:0;z-index:2147483000;width:min(390px,calc(100vw - 24px));max-height:min(70vh,520px);display:block!important;margin:0;overflow:auto;visibility:visible!important;opacity:1!important;transform:none!important;transition:opacity .1s ease;border:1px solid color-mix(in srgb,var(--sg-accent) 38%,var(--sg-border));background:var(--sg-surface);color:var(--sg-text);box-shadow:0 18px 50px rgba(0,0,0,.38)}
       .sg-support-card{padding:14px 0;border-bottom:1px solid var(--sg-border)}.sg-support-card h3{margin:0;font-size:14px}.sg-support-card p{margin:4px 0 10px;color:var(--sg-muted);font-size:12px}.sg-primary-link{display:inline-flex;padding:7px 11px;border:1px solid var(--sg-accent);border-radius:6px;background:var(--sg-accent);color:#fff;text-decoration:none;cursor:pointer}.sg-support-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:11px}.sg-support-preview-panel{margin-top:12px;padding:12px;border:1px solid var(--sg-border);border-radius:8px;background:var(--sg-soft)}.sg-support-preview-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.sg-support-preview{width:100%;min-height:260px;max-height:440px;margin-top:9px;padding:11px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-surface);resize:vertical;outline:0;color:var(--sg-text);font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre;overflow:auto}.sg-support-preview:focus{border-color:var(--sg-accent);box-shadow:0 0 0 3px var(--sg-focus)}.sg-support-status{margin-top:9px;color:var(--sg-good);font-size:12px}.sg-support-error{margin-top:9px;color:var(--sg-danger);font-size:12px}.sg-check{display:flex;align-items:flex-start;gap:8px;margin:9px 0;color:var(--sg-text);font-size:12px}.sg-check input{margin-top:3px}.sg-privacy-note{padding:10px 11px;margin:12px 0;border-radius:7px;background:var(--sg-good-soft);color:var(--sg-good);font-size:12px}.sg-footer{margin-top:24px;padding-top:13px;border-top:1px solid var(--sg-border);text-align:center;color:var(--sg-muted);font-size:12px}.sg-footer button{padding:2px 4px;border:0;background:transparent;color:var(--sg-accent);cursor:pointer}.sg-virtual-note{margin-top:6px;color:var(--sg-muted);font-size:11px}
       .sg-support-compose{display:grid;gap:8px}.sg-support-compose-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.sg-support-field{display:grid;gap:5px;color:var(--sg-muted);font-size:11px}.sg-support-input,.sg-support-description{width:100%;padding:9px 10px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-surface);color:var(--sg-text);font:inherit;outline:0}.sg-support-description{min-height:190px;resize:vertical;line-height:1.55}.sg-support-input:focus,.sg-support-description:focus{border-color:var(--sg-accent);box-shadow:0 0 0 3px var(--sg-focus)}.sg-support-ai{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--sg-accent);border-radius:6px;background:transparent;color:var(--sg-accent);font-weight:650;cursor:pointer}.sg-support-empty{padding:22px 14px;border:1px dashed var(--sg-border);border-radius:8px;background:var(--sg-soft);color:var(--sg-muted);text-align:center}.sg-support-metrics{margin:0;color:var(--sg-muted);font-size:11px}.sg-support-sync{color:var(--sg-muted);font-size:11px}
       .sg-support-ai-notice{position:sticky;top:8px;z-index:8;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:10px;margin:12px 0;padding:13px 14px;border:1px solid color-mix(in srgb,var(--sg-good) 45%,var(--sg-border));border-radius:8px;background:color-mix(in srgb,var(--sg-good-soft) 92%,var(--sg-surface));color:var(--sg-text);box-shadow:0 8px 24px rgba(0,0,0,.16);scroll-margin-top:8px}.sg-support-ai-notice-mark{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--sg-good);color:#fff;font-weight:800}.sg-support-ai-notice strong{display:block;color:var(--sg-good);font-size:13px}.sg-support-ai-notice p{margin:4px 0 0;color:var(--sg-text);font-size:12px;line-height:1.5}.sg-support-ai-notice .sg-quiet-button{margin-top:9px}.sg-support-ai-notice-close{display:grid;place-items:center;width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--sg-muted);font-size:20px;line-height:1;cursor:pointer}.sg-support-ai-notice-close:hover{background:var(--sg-soft);color:var(--sg-text)}
       @media (max-width:560px){.sg-decay-head{align-items:flex-start;flex-direction:column}.sg-conversation{width:100%;justify-content:flex-start}.sg-conversation select{max-width:100%;flex:1}}
-      @media (prefers-reduced-motion:reduce){.sg-memory *,.sg-memory *:before,.sg-memory *:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.sg-processing-icon{animation:none}.sg-skeleton:after{display:none}}
+      @media (prefers-reduced-motion:reduce){.sg-memory *,.sg-memory *:before,.sg-memory *:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.sg-processing-icon,.sg-memory-alert-mark{animation:none}.sg-skeleton:after{display:none}}
     `
 
     const citationCss = `
@@ -1130,21 +1133,63 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'sg-backbar' }, h('button', { className: 'sg-back', onClick: onBack, title: '返回' }, h('span', { 'aria-hidden': 'true' }, '←'), label))
     }
 
-    function FailureAlert({ count, onOpen }) {
-      if (!count) return null
-      return h('button', { className: 'sg-alert', onClick: onOpen },
-        h('span', { className: 'sg-alert-mark', 'aria-hidden': 'true' }, '⚠'),
-        h('span', null, h('span', { className: 'sg-alert-title' }, count + ' 条短期记忆尚未整理完成'), h('br'), h('span', { className: 'sg-alert-copy' }, '原始内容已经保存，不会丢失。')),
-        h('span', { className: 'sg-chevron', 'aria-hidden': 'true' }, '›'))
+    function activeProcessingCount(overview) {
+      const scheduledRetries = (overview?.failedJobDetails || []).filter((job) => job.nextRetryAt).length
+      return Math.max(0, Number(overview?.processingJobs || 0) - scheduledRetries)
     }
 
-    function ProcessingAlert({ visible }) {
-      if (!visible) return null
-      return h('div', { className: 'sg-processing-alert', role: 'status', 'aria-live': 'polite' },
-        h('span', { className: 'sg-processing-icon', 'aria-hidden': 'true' }, '↻'),
-        h('span', null,
-          h('span', { className: 'sg-processing-title' }, '正在触发记忆整理'),
-          h('span', { className: 'sg-processing-copy' }, 'Block、Event 和知识图谱正在生成，请稍候。')))
+    function statusJobKey(job) {
+      return String(job?.kind || 'job') + ':' + String(job?.id || '')
+    }
+
+    function distinctStatusBlocks(jobs) {
+      const keys = new Set()
+      for (const job of jobs || []) {
+        const details = Array.isArray(job.blockDetails) ? job.blockDetails : []
+        if (details.length) {
+          for (const block of details) keys.add(String(block.threadId || '') + ':' + String(block.id || block.sourceId || job.id))
+        } else {
+          keys.add(statusJobKey(job))
+        }
+      }
+      return keys
+    }
+
+    function memoryStatusCounts(overview) {
+      const failures = overview?.failedJobDetails || []
+      const failedKeys = new Set(failures.map(statusJobKey))
+      const processingDetails = overview?.processingJobDetails
+      const processing = (processingDetails || []).filter((job) => !failedKeys.has(statusJobKey(job)))
+      const failedBlocks = distinctStatusBlocks(failures)
+      const processingBlocks = distinctStatusBlocks(processing)
+      for (const key of failedBlocks) processingBlocks.delete(key)
+      return {
+        failed: failures.length ? failedBlocks.size : Number(overview?.failedJobs || 0),
+        processing: Array.isArray(processingDetails) ? processingBlocks.size : activeProcessingCount(overview),
+      }
+    }
+
+    function MemoryStatusAlert({ failedCount, processingCount, onOpen }) {
+      const failed = Math.max(0, Number(failedCount || 0))
+      const processing = Math.max(0, Number(processingCount || 0))
+      if (!failed && !processing) return null
+      const needsAttention = failed > 0
+      const title = needsAttention
+        ? failed + ' 个对话片段尚未整理完成'
+        : '正在整理 ' + processing + ' 个对话片段'
+      const copy = needsAttention
+        ? (processing ? '另有 ' + processing + ' 个正在后台整理。原始内容已经保存，不会丢失。' : '原始内容已经保存，不会丢失。点击查看并重试。')
+        : '原始内容已保存，不影响继续使用。'
+      return h('button', {
+        type: 'button',
+        className: 'sg-memory-alert ' + (needsAttention ? 'attention' : 'processing'),
+        onClick: onOpen,
+        'aria-live': 'polite',
+        'aria-label': title + '。' + copy + '点击查看处理状态。',
+      },
+      h('span', { className: 'sg-memory-alert-mark', 'aria-hidden': 'true' }, needsAttention ? '⚠' : '↻'),
+      h('span', null, h('span', { className: 'sg-memory-alert-title' }, title), h('span', { className: 'sg-memory-alert-copy' }, copy)),
+      h('span', { className: 'sg-chevron', 'aria-hidden': 'true' }, '›'))
     }
 
     function SearchBox({ value, onChange }) {
@@ -1753,34 +1798,127 @@ window.__ModuleLoader__.load({
         failedJobs: Number(overview?.failedJobs || 0),
         processingJobs: Number(overview?.processingJobs || 0),
         failures: (overview?.failedJobDetails || []).map(({ kind, id, attempts, updatedAt, lastError }) => ({ kind, id, attempts, updatedAt, lastError })),
+        processing: (overview?.processingJobDetails || []).map(({ kind, id, status, attempts, updatedAt }) => ({ kind, id, status, attempts, updatedAt })),
       })
     }
 
-    function ProcessingStatus({ overview, blocks, namespace, onBack, refresh }) {
+    function ProcessingStatus({ overview, blocks, conversations, namespace, serverVersion, onBack, refresh }) {
       const failures = overview.failedJobDetails || []
+      const failedKeys = new Set(failures.map(statusJobKey))
+      const hasProcessingDetails = Array.isArray(overview.processingJobDetails)
+      const rawProcessingCount = activeProcessingCount(overview)
+      const jobsByKey = new Map((overview.processingJobDetails || []).map((job) => [statusJobKey(job), job]))
+      for (const job of failures) jobsByKey.set(statusJobKey(job), job)
       const [refreshing, setRefreshing] = React.useState(false)
       const [feedback, setFeedback] = React.useState({ kind: '', text: '' })
       const [retrying, setRetrying] = React.useState('')
       const [retryErrors, setRetryErrors] = React.useState({})
       const blockById = new Map(blocks.map((block) => [block.id, block]))
-      const taskLabel = (kind) => kind === 'block-summary' ? 'Block Summary' : kind === 'event-extraction' ? 'Event extraction' : 'Graph projection'
-      const retryKey = (job) => job.kind + ':' + job.id
-      const blockDescription = (job) => {
-        const details = Array.isArray(job.blockDetails) ? job.blockDetails : []
-        if (details.length) return details.map((block) =>
-          'Block ' + block.sequence + (block.title ? ' · ' + block.title : '')
-          + (Array.isArray(block.turnRange) ? '（第 ' + block.turnRange[0] + '–' + block.turnRange[1] + ' 轮）' : '')).join('；')
-        const ids = Array.isArray(job.blockIds) && job.blockIds.length ? job.blockIds : job.id && job.kind !== 'graph-projection' ? [job.id] : []
-        const labels = ids.map((id) => {
-          const block = blockById.get(id)
-          const sequence = block?.sequence ?? job.sequence
-          return (sequence ? 'Block ' + sequence : 'Block ' + String(id).slice(0, 10)) + (block?.title ? ' · ' + block.title : '')
-        })
-        return labels.length ? labels.join('；') : '关联 Block 不在当前分页中'
+      const conversationById = new Map((conversations || []).map((conversation) => [conversation.id, conversation]))
+      if (!hasProcessingDetails && rawProcessingCount > 0) {
+        const addLegacyJob = (block, kind, status, details = {}) => {
+          const job = {
+            id: 'legacy:' + block.id + ':' + kind,
+            kind,
+            status,
+            attempts: details.attempts ?? 0,
+            nextRetryAt: details.nextRetryAt ?? null,
+            updatedAt: details.updatedAt || block.createdAt,
+            legacy: true,
+            blockIds: [block.id],
+            blockDetails: [{
+              id: block.id, sourceId: block.sourceId || block.id, sequence: block.sequence || block.blockIndex,
+              title: block.title || block.l0Title, threadId: block.threadId, turnRange: block.turnRange,
+              shouldExtract: block.shouldExtract,
+            }],
+          }
+          jobsByKey.set(statusJobKey(job), job)
+        }
+        for (const block of blocks) {
+          const processing = block.status === 'processing' || block.processingStatus === 'pending'
+          if (!processing) continue
+          let found = false
+          if (['pending', 'running'].includes(block.summaryJob?.status) || block.processingStatus === 'pending') {
+            addLegacyJob(block, 'block-summary', block.summaryJob?.status || 'pending', block.summaryJob)
+            found = true
+          }
+          if (block.eventExtraction?.status === 'running') {
+            addLegacyJob(block, 'event-extraction', 'running', block.eventExtraction)
+            found = true
+          }
+          if (['pending', 'running'].includes(block.graphProjection?.status)) {
+            addLegacyJob(block, 'graph-projection', block.graphProjection.status, block.graphProjection)
+            found = true
+          }
+          if (!found) addLegacyJob(block, 'event-extraction', 'running')
+        }
       }
-      const conversationDescription = (job) => {
-        const ids = Array.isArray(job.threadIds) ? job.threadIds : job.threadId ? [job.threadId] : []
-        return ids.length ? ids.map((id) => String(id).slice(0, 16)).join('、') : '历史或未知对话'
+      const taskLabel = (kind) => kind === 'block-summary' ? 'Block Summary' : kind === 'event-extraction' ? 'Event extraction' : 'Graph projection'
+      const retryKey = statusJobKey
+      const technicalStatusText = (status) => status === 'running' ? '运行中' : status === 'pending' ? '排队中' : status === 'failed' ? '失败' : status === 'succeeded' || status === 'completed' ? '已完成' : String(status || '未知')
+      const workItems = new Map()
+      for (const job of jobsByKey.values()) {
+        let details = Array.isArray(job.blockDetails) ? job.blockDetails : []
+        if (!details.length) {
+          const ids = Array.isArray(job.blockIds) && job.blockIds.length ? job.blockIds : job.id && job.kind !== 'graph-projection' ? [job.id] : []
+          details = ids.map((id) => blockById.get(id)).filter(Boolean).map((block) => ({
+            id: block.id, sourceId: block.id, sequence: block.sequence, title: block.title || block.l0Title,
+            threadId: block.threadId, turnRange: block.turnRange, shouldExtract: block.shouldExtract,
+          }))
+        }
+        if (!details.length) details = [{ id: statusJobKey(job), sourceId: '', sequence: null, title: '', threadId: job.threadId || '', turnRange: job.turnRange, shouldExtract: null }]
+        for (const detail of details) {
+          const key = String(detail.threadId || '') + ':' + String(detail.id || detail.sourceId || statusJobKey(job))
+          const item = workItems.get(key) || { ...detail, jobs: [] }
+          if (!item.jobs.some((candidate) => statusJobKey(candidate) === statusJobKey(job))) item.jobs.push(job)
+          workItems.set(key, item)
+        }
+      }
+      const items = [...workItems.values()].sort((left, right) => {
+        const threadOrder = String(left.threadId || '').localeCompare(String(right.threadId || ''))
+        if (threadOrder) return threadOrder
+        return Number(left.turnRange?.[0] || left.sequence || 0) - Number(right.turnRange?.[0] || right.sequence || 0)
+      })
+      const itemState = (item) => {
+        if (item.jobs.some((job) => failedKeys.has(statusJobKey(job)))) return { kind: 'failed', label: '需要重试', mark: '!' }
+        if (item.jobs.some((job) => job.status === 'running')) return { kind: 'processing', label: '正在整理', mark: '●' }
+        return { kind: 'waiting', label: '等待整理', mark: '○' }
+      }
+      const itemStages = (item) => {
+        const summaryJob = item.jobs.find((job) => job.kind === 'block-summary')
+        const longJobs = item.jobs.filter((job) => job.kind !== 'block-summary')
+        const summaryFailed = summaryJob && failedKeys.has(statusJobKey(summaryJob))
+        const longFailed = longJobs.some((job) => failedKeys.has(statusJobKey(job)))
+        const shortStage = summaryFailed
+          ? { kind: 'failed', mark: '!', label: '需要重试' }
+          : summaryJob?.status === 'running'
+            ? { kind: 'processing', mark: '●', label: '处理中' }
+            : summaryJob
+              ? { kind: 'waiting', mark: '○', label: '排队中' }
+              : { kind: 'done', mark: '✓', label: '已完成' }
+        let longStage
+        if (longFailed) longStage = { kind: 'failed', mark: '!', label: '需要重试' }
+        else if (longJobs.some((job) => job.status === 'running')) longStage = { kind: 'processing', mark: '●', label: '处理中' }
+        else if (longJobs.length) longStage = { kind: 'waiting', mark: '○', label: '排队中' }
+        else if (shortStage.kind !== 'done') longStage = { kind: 'waiting', mark: '○', label: '等待短期摘要' }
+        else if (item.shouldExtract === false) longStage = { kind: 'skipped', mark: '–', label: '无需提炼' }
+        else longStage = { kind: 'waiting', mark: '○', label: '等待更多对话' }
+        return [
+          ['保存原始对话', { kind: 'done', mark: '✓', label: '已完成' }],
+          ['生成短期摘要', shortStage],
+          ['提炼长期记忆', longStage],
+        ]
+      }
+      const conversationLabel = (threadId) => {
+        if (threadId === '__legacy__') return '历史对话'
+        return conversationById.get(threadId)?.label || (threadId ? '对话 ' + String(threadId).slice(0, 8) : '历史或未知对话')
+      }
+      const groups = []
+      for (const item of items) {
+        const key = item.threadId || '__unknown__'
+        let group = groups.find((candidate) => candidate.key === key)
+        if (!group) { group = { key, label: conversationLabel(item.threadId), items: [] }; groups.push(group) }
+        group.items.push(item)
       }
       const checkStatus = () => {
         const before = processingFingerprint(overview)
@@ -1810,28 +1948,52 @@ window.__ModuleLoader__.load({
           })
           .finally(() => setRetrying(''))
       }
+      const failedItems = items.filter((item) => itemState(item).kind === 'failed').length
+      const activeItems = Math.max(0, items.length - failedItems)
+      const unresolvedProcessingCount = hasProcessingDetails ? 0 : Math.max(0, rawProcessingCount - activeItems)
+      const detailsUnavailable = !hasProcessingDetails && rawProcessingCount > 0
+      const versionMismatch = Boolean(serverVersion && serverVersion !== STRATAGATE_CLIENT_VERSION)
+      const summary = items.length
+        ? groups.length + ' 个会话 · ' + (activeItems ? activeItems + ' 个正在整理' : '') + (activeItems && failedItems ? ' · ' : '') + (failedItems ? failedItems + ' 个需要重试' : '') + (unresolvedProcessingCount ? ' · 另有 ' + unresolvedProcessingCount + ' 个详情暂不可用' : '')
+        : detailsUnavailable
+          ? '仍有 ' + rawProcessingCount + ' 个后台任务正在整理'
+          : '本轮整理已经完成'
       return h(React.Fragment, null,
         h(BackBar, { label: '返回', onBack }),
-        h('div', { className: 'sg-intro' }, h('h2', null, '处理状态'), h('p', null, failures.length + ' 个任务需要继续处理')),
-        h('div', { className: 'sg-safe-note' }, '原始记忆已保存，不会丢失。'),
-        failures.length ? h('div', { className: 'sg-job-list' }, failures.map((job) => {
-          const key = retryKey(job)
-          const busy = retrying === key
-          return h('section', { key, className: 'sg-job' },
-            h('div', { className: 'sg-job-head' }, h('h3', { className: 'sg-job-title' }, taskLabel(job.kind)), h('span', { className: 'sg-stage-value failed' }, '失败')),
-            h('dl', { className: 'sg-job-meta' },
-              h('dt', null, 'Block'), h('dd', null, blockDescription(job)),
-              h('dt', null, '对话'), h('dd', { className: 'sg-code' }, conversationDescription(job)),
-              h('dt', null, '当前尝试次数'), h('dd', null, String(job.attempts ?? 0)),
-              job.nextRetryAt ? h(React.Fragment, null, h('dt', null, '下次重试时间'), h('dd', null, formatTime(job.nextRetryAt))) : null),
-            h('div', { className: 'sg-muted', style: { fontSize: '12px' } }, '最近一次错误'),
-            h('pre', { className: 'sg-job-error sg-code' }, job.lastErrorFull || job.lastError || '没有记录技术错误。'),
-            h('div', { className: 'sg-job-actions' },
-              h('span', { className: 'sg-status-feedback failed', role: retryErrors[key] ? 'alert' : undefined }, retryErrors[key] || ''),
-              h('button', { type: 'button', className: 'sg-save-button', disabled: busy, onClick: () => void retryJob(job) }, busy ? '正在处理…' : '重试此任务')))
-        })) : h('div', { className: 'sg-safe-note' }, '当前没有失败任务。'),
-        h('button', { type: 'button', className: 'sg-alert', disabled: refreshing, onClick: () => void checkStatus(), style: { marginTop: '16px' } }, h('span', { className: refreshing ? 'sg-processing-icon' : 'sg-alert-mark' }, '↻'), h('span', null, h('span', { className: 'sg-alert-title' }, refreshing ? '正在读取…' : '重新检查状态'), h('br'), h('span', { className: 'sg-alert-copy' }, '只读取最新状态，不会触发模型调用。')), h('span', { className: 'sg-chevron' }, '›')),
-        feedback.text ? h('p', { className: 'sg-status-feedback ' + feedback.kind, role: feedback.kind === 'failed' ? 'alert' : 'status' }, feedback.text) : null)
+        h('div', { className: 'sg-intro' }, h('h2', null, '短期记忆整理'), h('p', null, summary)),
+        h('div', { className: 'sg-process-summary' }, h('strong', null, '原始对话已保存，不会丢失'), h('span', null, '整理在后台进行，你可以继续使用。')),
+        detailsUnavailable ? h('div', { className: 'sg-process-notice', role: 'status' },
+          h('strong', null, versionMismatch ? '前后端版本尚未同步' : '暂时无法读取完整任务详情'),
+          h('span', null, versionMismatch
+            ? '当前页面为 ' + STRATAGATE_CLIENT_VERSION + '，后台为 ' + serverVersion + '。请确认安装新包后完全退出并重新启动 DSH。'
+            : '后台只返回了任务数量，没有返回会话和轮次。请完全退出并重新启动 DSH 后再检查。')) : null,
+        groups.length ? h('div', { className: 'sg-process-groups' }, groups.map((group) => h('section', { key: group.key, className: 'sg-process-group' },
+          h('header', { className: 'sg-process-group-head' }, h('h3', { className: 'sg-process-group-title' }, group.label), h('span', { className: 'sg-process-group-count' }, group.items.length + ' 个对话片段')),
+          group.items.map((item) => {
+            const state = itemState(item)
+            const range = Array.isArray(item.turnRange) ? '第 ' + item.turnRange[0] + '–' + item.turnRange[1] + ' 轮' : item.title || '对话片段'
+            const technicalJobs = item.jobs.filter((job) => !job.legacy)
+            return h('article', { key: String(item.id || item.sourceId), className: 'sg-process-card' },
+              h('div', { className: 'sg-process-card-head' }, h('span', { className: 'sg-process-range' }, range), h('span', { className: 'sg-process-state ' + state.kind }, h('span', { 'aria-hidden': 'true' }, state.mark), state.label)),
+              h('div', { className: 'sg-process-stages' }, itemStages(item).map(([name, stage]) => h('div', { key: name, className: 'sg-process-stage' }, h('span', { className: 'sg-process-stage-state ' + stage.kind, 'aria-hidden': 'true' }, stage.mark), h('span', { className: 'sg-process-stage-name' }, name), h('span', { className: 'sg-process-stage-state ' + stage.kind }, stage.label)))),
+              technicalJobs.length ? h('details', { className: 'sg-process-tech' }, h('summary', null, '查看技术详情'), technicalJobs.map((job) => {
+                const key = retryKey(job)
+                const failed = failedKeys.has(key)
+                const busy = retrying === key
+                return h('div', { key, className: 'sg-process-job' },
+                  h('div', { className: 'sg-process-job-head' }, h('strong', null, taskLabel(job.kind)), h('span', { className: 'sg-stage-value ' + (failed ? 'failed' : job.status === 'running' ? 'processing' : 'waiting') }, technicalStatusText(job.status))),
+                  h('div', { className: 'sg-process-job-meta sg-code' }, '任务 ' + job.id + ' · 已尝试 ' + String(job.attempts ?? 0) + ' 次 · 更新于 ' + formatTime(job.updatedAt)),
+                  job.nextRetryAt ? h('div', { className: 'sg-process-job-meta' }, '计划重试：' + formatTime(job.nextRetryAt)) : null,
+                  failed ? h('pre', { className: 'sg-job-error sg-code' }, job.lastErrorFull || job.lastError || '没有记录技术错误。') : null,
+                  failed ? h('div', { className: 'sg-process-job-actions' }, h('span', { className: 'sg-status-feedback failed', role: retryErrors[key] ? 'alert' : undefined }, retryErrors[key] || ''), h('button', { type: 'button', className: 'sg-save-button', disabled: busy, onClick: () => void retryJob(job) }, busy ? '正在处理…' : '重试此任务')) : null)
+              })) : null
+            )
+          })
+        ))) : detailsUnavailable
+          ? h('div', { className: 'sg-process-unavailable' }, h('strong', null, '任务仍在整理，具体会话暂不可用'), h('span', null, '这不代表对话丢失；重启并加载同一版本后即可显示详情。'))
+          : h(Empty, { title: '本轮整理已完成', copy: '返回后，顶部状态条会自动消失。' }),
+        h('div', { className: 'sg-process-footer' }, h('button', { type: 'button', className: 'sg-quiet-button', disabled: refreshing, onClick: () => void checkStatus() }, refreshing ? '正在读取…' : '↻ 重新检查状态'), h('span', { className: 'sg-muted' }, '只读取最新状态，不会触发模型调用。'), feedback.text ? h('span', { className: 'sg-status-feedback ' + feedback.kind, role: feedback.kind === 'failed' ? 'alert' : 'status' }, feedback.text) : null)
+      )
     }
 
     function ImportPage({ namespace, onBack, refresh }) {
@@ -2637,9 +2799,9 @@ window.__ModuleLoader__.load({
         conversations.push(memory)
       }
       conversations.sort((left, right) => left.id === '__legacy__' ? 1 : right.id === '__legacy__' ? -1 : 0)
-      const failedCount = Number(selected?.failedJobs || 0)
-      const processing = !error && (Number(selected?.processingJobs || 0) > 0
-        || data.blocks.some((block) => block.status === 'processing'))
+      const statusCounts = memoryStatusCounts(selected)
+      const failedCount = statusCounts.failed
+      const processingCount = !error ? statusCounts.processing : 0
       const goSection = (next) => { setSection(next); setView({ name: 'root' }); setSource(null) }
       const sourceParams = (kind, item) => kind === 'event' ? { eventId: item.id } : kind === 'element' ? { elementId: item.id } : { blockId: item.id }
       const loadSource = (kind, item) => {
@@ -2676,7 +2838,7 @@ window.__ModuleLoader__.load({
       if (loading && !selected) content = h(Loading)
       else if (!selected) content = h(Empty, { title: '还没有记忆', copy: '完成一些 DSH 对话后，短期记忆和长期记忆会出现在这里。' })
       else if (view.name === 'event') content = h(EventDetail, { event: view.item, project, source, onBack: goBack, backLabel })
-      else if (view.name === 'status') content = h(ProcessingStatus, { overview: selected, blocks: data.blocks, namespace, onBack: () => setView({ name: 'root' }), refresh })
+      else if (view.name === 'status') content = h(ProcessingStatus, { overview: selected, blocks: data.blocks, conversations, namespace, serverVersion: overview.pluginVersion, onBack: () => setView({ name: 'root' }), refresh })
       else if (view.name === 'import') content = h(ImportPage, { namespace, onBack: moreBack, refresh })
       else if (view.name === 'structure') content = h(StructurePage, { events: data.events, eventPage: data.pagination?.events, graph: data.graph, openEvent, namespace, onBack: moreBack })
       else if (view.name === 'system') content = h(SystemPage, { selected, blocks: data.blocks, onBack: moreBack, refresh })
@@ -2685,7 +2847,6 @@ window.__ModuleLoader__.load({
       else if (view.name === 'settings') content = h(SettingsPage, { selected, namespace, onBack: moreBack, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort, setShortTermStatus })
       else if (view.name === 'support') content = h(SupportPage, { namespace, overview, selected, data, recentError, onBack: moreBack })
       else content = h(React.Fragment, null,
-        h(FailureAlert, { count: failedCount, onOpen: () => setView({ name: 'status' }) }),
         loading ? h(Loading) : section === 'short' ? h(ShortTermPage, { key: namespace + ':' + conversationId, blocks: data.blocks, blockPage: data.pagination?.blocks, openBlock: data.openBlock, conversations, activeThreadId: conversationId || data.activeThreadId || '', namespace, onConversationChange: selectConversation, refresh }) : section === 'long' ? h(LongTermPage, { key: namespace, events: data.events, eventPage: data.pagination?.events, graph: data.graph, project, query, setQuery, openEvent, namespace }) : h(MoreHome, { setView }))
 
       return h('main', { className: 'sg-memory', 'data-testid': 'stratagate-memory-ui' },
@@ -2700,7 +2861,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'sg-project' }, h('span', { className: 'sg-project-label' }, '当前工作区：'), h('select', { className: 'sg-project-select', value: namespace, onChange: (event) => setNamespace(event.target.value), 'aria-label': '当前工作区' }, (overview.namespaces || []).map((item) => h('option', { key: item.namespace, value: item.namespace }, projectName(item, workspaceTitles))))),
         h('nav', { className: 'sg-tabs', 'aria-label': '记忆视图' }, [['short', '短期记忆'], ['long', '长期记忆'], ['more', '更多']].map(([id, label]) => h('button', { key: id, type: 'button', className: 'sg-tab ' + (section === id ? 'active' : ''), 'aria-current': section === id ? 'page' : undefined, onClick: () => goSection(id) }, label))),
         error ? h('div', { className: 'sg-error' }, h('div', { className: 'sg-error-title' }, '暂时无法读取完整记忆'), h('div', null, '已显示能够读取的内容，请稍后重新加载。'), h('details', null, h('summary', null, '技术详情'), h('div', { className: 'sg-code' }, error))) : null,
-        h(ProcessingAlert, { visible: processing }),
+        view.name === 'status' ? null : h(MemoryStatusAlert, { failedCount, processingCount, onOpen: () => setView({ name: 'status' }) }),
         h('section', { key: section + ':' + view.name, className: 'sg-view', 'aria-label': 'StrataGate 记忆内容' }, content),
         h('footer', { className: 'sg-footer' }, '发现问题？ ', h('button', { type: 'button', onClick: () => { setSection('more'); setView({ name: 'support' }); setSource(null) } }, '提交反馈')))
     }

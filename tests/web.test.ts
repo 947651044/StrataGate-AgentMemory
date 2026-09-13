@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import type { StrataGateSnapshot } from '@diqier/stratagate'
 import type { StrataGateRuntime } from '../src/runtime.js'
@@ -306,6 +307,15 @@ describe('StrataGate admin routes', () => {
     } as unknown as StrataGateRuntime
     const running = await request('/api/stratagate/memories?namespace=dsh%3Aproject%3Asummary&kind=blocks', 'GET', runningRuntime)
     expect(running.body.items[0]).toMatchObject({ status: 'processing', processingStatus: 'pending', summaryJob: { status: 'running' } })
+    const runningOverview = await request('/api/stratagate/overview', 'GET', runningRuntime)
+    expect(runningOverview.body.namespaces[0]).toMatchObject({
+      processingJobs: 1,
+      processingJobDetails: [{
+        id: 'blk_1', kind: 'block-summary', status: 'running', attempts: 1,
+        blockIds: ['blk_1'], turnRange: [1, 4],
+        blockDetails: [expect.objectContaining({ sourceId: 'blk_1', turnRange: [1, 4] })],
+      }],
+    })
 
     const extractionFailureRuntime = {
       ...summaryRuntime,
@@ -494,6 +504,17 @@ describe('StrataGate admin routes', () => {
       { 'if-none-match': first.headers.ETag! },
     )
     expect(unchanged).toMatchObject({ status: 304, body: null, headers: { ETag: first.headers.ETag } })
+  })
+
+  it('changes the dashboard ETag when the plugin version changes without a memory revision change', async () => {
+    // This is the ETag generated before the plugin version was included.
+    const oldEtag = `"${createHash('sha256')
+      .update('dsh:project:test:7\0dsh:project:test\0')
+      .digest('base64url')
+      .slice(0, 24)}"`
+    const second = await request('/api/stratagate/dashboard?namespace=dsh%3Aproject%3Atest', 'GET', runtime, undefined, { 'if-none-match': oldEtag })
+    expect(second.status).toBe(200)
+    expect(second.headers.ETag).not.toBe(oldEtag)
   })
 
   it('filters short-term Blocks and the open tail by the selected conversation', async () => {

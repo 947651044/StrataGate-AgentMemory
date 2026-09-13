@@ -6,7 +6,7 @@ function loadSupportHelpers(stateValues: unknown[] = [], globals: Record<string,
   const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
   const instrumented = source.replace(
     "    exports.name = 'stratagate-dsh'",
-    "    exports.__test = { feedbackDraftMarkdown, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, consumeFeedbackDeepLink, feedbackLinkTarget, navigateToFeedback, installFeedbackLinkNavigation, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
+    "    exports.__test = { feedbackDraftMarkdown, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, consumeFeedbackDeepLink, feedbackLinkTarget, navigateToFeedback, installFeedbackLinkNavigation, ProcessingStatus, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
   )
   let definition: any
   runInNewContext(instrumented, {
@@ -1021,8 +1021,8 @@ describe('StrataGate Web client contract', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
     expect(source).toContain('lastErrorFull')
     expect(source).toContain('原始内容已经保存，不会丢失。')
-    expect(source).toContain('原始记忆已保存，不会丢失。')
-    expect(source).toContain('最近一次错误')
+    expect(source).toContain('原始对话已保存，不会丢失')
+    expect(source).toContain('没有记录技术错误。')
     expect(source).toContain("['raw', '{}', '原始数据'")
     expect(source).toContain("['audit', '↗', '使用记录'")
     expect(source).toContain("['settings', '⚙', '高级设置'")
@@ -1048,13 +1048,21 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain("'提交反馈'")
   })
 
-  it('shows a red processing banner with a loading icon while memory work is active', () => {
+  it('uses one actionable status bar for background processing and retryable failures', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
-    expect(source).toContain('sg-processing-alert')
-    expect(source).toContain('sg-processing-icon')
-    expect(source).toContain('正在触发记忆整理')
-    expect(source).toContain("role: 'status'")
+    expect(source).toContain('function MemoryStatusAlert')
+    expect(source).toContain('sg-memory-alert')
+    expect(source).toContain("needsAttention ? 'attention' : 'processing'")
+    expect(source).toContain("'正在整理 ' + processing + ' 个对话片段'")
+    expect(source).toContain('原始内容已保存，不影响继续使用。')
+    expect(source).toContain('点击查看并重试。')
+    expect(source).not.toContain('sg-processing-alert')
+    expect(source).not.toContain('正在触发记忆整理')
+    expect(source.match(/h\(MemoryStatusAlert/g)).toHaveLength(1)
+    expect(source).toContain("view.name === 'status' ? null : h(MemoryStatusAlert")
+    expect(source).toContain("'aria-live': 'polite'")
     expect(source).toContain('processingJobs')
+    expect(source).toContain('processingJobDetails')
     expect(source).toContain("'/api/stratagate/dashboard'")
     expect(source).toContain("'If-None-Match'")
     expect(source).toContain("document.addEventListener('visibilitychange'")
@@ -1070,15 +1078,55 @@ describe('StrataGate Web client contract', () => {
     expect(statusSource).toContain("{ method: 'POST' }")
     expect(statusSource).toContain('重试此任务')
     expect(statusSource).toContain('正在处理…')
-    expect(statusSource).toContain('当前尝试次数')
-    expect(statusSource).toContain('最近一次错误')
-    expect(statusSource).toContain('下次重试时间')
+    expect(statusSource).toContain('短期记忆整理')
+    expect(statusSource).toContain('保存原始对话')
+    expect(statusSource).toContain('生成短期摘要')
+    expect(statusSource).toContain('提炼长期记忆')
+    expect(statusSource).toContain('等待短期摘要')
+    expect(statusSource).toContain('等待更多对话')
+    expect(statusSource).toContain('查看技术详情')
+    expect(statusSource).toContain('计划重试：')
     expect(statusSource).toContain('只读取最新状态，不会触发模型调用。')
     expect(statusSource).toContain('正在读取…')
     expect(statusSource).toContain('状态已更新')
     expect(statusSource).toContain('状态没有变化')
     expect(statusSource).toContain('读取失败：')
-    expect(statusSource).toContain('failures.map((job) =>')
-    expect(statusSource).not.toContain('failures[0]')
+    expect(statusSource).toContain('groups.map((group) =>')
+    expect(statusSource).toContain('group.items.map((item) =>')
+    expect(statusSource).not.toContain("h('dt', null, 'Block')")
+  })
+
+  it('does not claim legacy background work is empty when the old server omits job details', () => {
+    const { ProcessingStatus } = loadSupportHelpers()
+    const props = {
+      overview: { processingJobs: 2, failedJobs: 0 },
+      blocks: [],
+      conversations: [],
+      namespace: 'dsh:project:test',
+      serverVersion: '0.2.62',
+      onBack: () => {},
+      refresh: async () => null,
+    }
+    const unavailable = JSON.stringify(ProcessingStatus(props))
+    expect(unavailable).toContain('仍有 2 个后台任务正在整理')
+    expect(unavailable).toContain('前后端版本尚未同步')
+    expect(unavailable).toContain('当前页面为 0.2.65，后台为 0.2.62')
+    expect(unavailable).toContain('任务仍在整理，具体会话暂不可用')
+    expect(unavailable).not.toContain('当前没有待整理的对话片段')
+
+    const recovered = JSON.stringify(ProcessingStatus({
+      ...props,
+      overview: { processingJobs: 1, failedJobs: 0 },
+      blocks: [{
+        id: 'blk-legacy', status: 'processing', processingStatus: 'pending', threadId: 'thread-old',
+        turnRange: [13, 18], summaryJob: { status: 'running', attempts: 1, updatedAt: '2026-09-13T00:00:00.000Z' },
+      }],
+      conversations: [{ id: 'thread-old', label: '帮我试用最新版' }],
+    }))
+    expect(recovered).toContain('帮我试用最新版')
+    expect(recovered).toContain('第 13–18 轮')
+    expect(recovered).toContain('生成短期摘要')
+    expect(recovered).toContain('处理中')
+    expect(recovered).not.toContain('任务仍在整理，具体会话暂不可用')
   })
 })
