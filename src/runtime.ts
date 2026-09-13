@@ -43,6 +43,8 @@ const DRAIN_THRESHOLD = 3
 const DRAIN_EAGER_MS = 150
 const DRAIN_BASE_BACKOFF_MS = 2_000
 const DRAIN_MAX_BACKOFF_MS = 60_000
+const BACKGROUND_WORKER_INITIAL_DELAY_MS = 250
+const BACKGROUND_WORKER_INTERVAL_MS = 3_000
 
 interface EvidenceTarget {
   eventIds: string[]
@@ -179,6 +181,9 @@ export class StrataGateRuntime {
   private readonly drainTails = new Map<string, Promise<void>>()
   private readonly drainErrors = new Map<string, unknown>()
   private readonly sessionsById = new Map<string, Session>()
+  private readonly backgroundNamespaceRuns = new Map<string, Promise<void>>()
+  private backgroundWorkerTimer: ReturnType<typeof setTimeout> | undefined
+  private backgroundWorkerRun: Promise<void> | undefined
   private settingsTail: Promise<void> = Promise.resolve()
   private batchSequence = 0
   private closed = false
@@ -195,6 +200,94 @@ export class StrataGateRuntime {
   ) {
     this.blockTurnSize = config.blockTurnSize
     this.blockDecayLambda = config.blockDecayLambda
+    this.scheduleBackgroundWorker(BACKGROUND_WORKER_INITIAL_DELAY_MS)
+  }
+
+  /** Keep durable model jobs moving even when no host session emits events. */
+  private scheduleBackgroundWorker(delayMs: number): void {
+    if (this.closed || this.backgroundWorkerTimer || this.backgroundWorkerRun) return
+    this.backgroundWorkerTimer = setTimeout(() => {
+      this.backgroundWorkerTimer = undefined
+      const run = this.runBackgroundWorker()
+      this.backgroundWorkerRun = run
+      void run.finally(() => {
+        if (this.backgroundWorkerRun === run) this.backgroundWorkerRun = undefined
+        this.scheduleBackgroundWorker(BACKGROUND_WORKER_INTERVAL_MS)
+      })
+    }, delayMs)
+    this.backgroundWorkerTimer.unref?.()
+  }
+
+  private async runBackgroundWorker(): Promise<void> {
+    if (this.closed) return
+    let namespaces: string[]
+    try {
+      namespaces = await this.adminNamespaces()
+    } catch (error) {
+      this.onIngestError(error)
+      return
+    }
+    for (const namespace of namespaces) {
+      if (this.closed) return
+      try {
+        await this.runBackgroundNamespace(namespace)
+      } catch (error) {
+        this.onIngestError(error)
+      }
+    }
+  }
+
+  private async runBackgroundNamespace(namespace: string): Promise<void> {
+    const existing = this.backgroundNamespaceRuns.get(namespace)
+    if (existing) return existing
+    const run = (async () => {
+      const active = this.spaces.get(namespace)
+      const memory = active
+        ? await active
+        : (await this.openAdminMemory(namespace, { derivation: true })).memory
+      const owned = !active
+      try {
+        const runnable = [
+          ...memory.listSummaryJobs(),
+          ...memory.listExtractionJobs(),
+        ].some((job) => job.status === 'pending'
+          || (job.status === 'failed' && job.nextRetryAt !== null
+            && Date.parse(job.nextRetryAt) <= Date.now()))
+          || memory.listGraphProjectionJobs().some(({ status }) => status === 'pending')
+        if (!runnable) return
+        const hasActiveSessionWork = [
+          ...this.derivationTimers.keys(),
+          ...this.derivationRuns.keys(),
+          ...this.migrationTimers.keys(),
+        ]
+          .some((key) => key.startsWith(`${namespace}\u0000`) || key === namespace)
+        if (hasActiveSessionWork) return
+        const resumed = await this.models.runDetached(
+          `stratagate-worker:${namespace}`,
+          () => memory.resumePendingWork(),
+        )
+        await this.persistSuccessfulResponses(memory)
+        const sessionsToSync = new Set<Session>()
+        for (const block of resumed.readyBlocks) {
+          if (!block.threadId) continue
+          this.pendingSurfaceSync.set(
+            `${namespace}\u0000${block.id}`,
+            { namespace, blockId: block.id },
+          )
+          const session = this.knownSessions.get(block.threadId)?.deref()
+          if (session && this.namespaceFor(session) === namespace) sessionsToSync.add(session)
+        }
+        for (const session of sessionsToSync) await this.syncPendingRetrySurface(session, memory)
+      } finally {
+        if (owned) await memory.close()
+      }
+    })()
+    this.backgroundNamespaceRuns.set(namespace, run)
+    try {
+      await run
+    } finally {
+      if (this.backgroundNamespaceRuns.get(namespace) === run) this.backgroundNamespaceRuns.delete(namespace)
+    }
   }
 
   acceptEvent(session: Session, event: SessionEvent): void {
@@ -724,6 +817,8 @@ export class StrataGateRuntime {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    if (this.backgroundWorkerTimer) clearTimeout(this.backgroundWorkerTimer)
+    this.backgroundWorkerTimer = undefined
     for (const timer of this.migrationTimers.values()) clearTimeout(timer)
     this.migrationTimers.clear()
     for (const timer of this.drainTimers.values()) clearTimeout(timer)
@@ -737,6 +832,8 @@ export class StrataGateRuntime {
       flushError = error
     }
     const settled = await Promise.allSettled(this.spaces.values())
+    await Promise.allSettled(this.backgroundNamespaceRuns.values())
+    if (this.backgroundWorkerRun) await Promise.allSettled([this.backgroundWorkerRun])
     await Promise.allSettled(this.derivationRuns.values())
     await Promise.allSettled(this.externalImportRuns.values())
     await Promise.all(settled.flatMap((result) => result.status === 'fulfilled' ? [result.value.close()] : []))

@@ -17,7 +17,9 @@ export interface Config {
   maxOutputTokens?: number
   structuredTaskTimeoutMs?: number
   structuredReasoningEffort?: StructuredReasoningEffortMode
+  showStrataGateStatus?: boolean
   showShortTermStatus?: boolean
+  showRetrievalStatus?: boolean
 }
 
 export interface ResolvedConfig {
@@ -34,21 +36,31 @@ export interface ResolvedConfig {
   maxOutputTokens: number
   structuredTaskTimeoutMs?: number
   structuredReasoningEffort?: StructuredReasoningEffortMode
+  showStrataGateStatus?: boolean
   showShortTermStatus?: boolean
+  showRetrievalStatus?: boolean
 }
 
 export interface StructuredReasoningEffortSettings {
   structuredReasoningEffort: StructuredReasoningEffortMode
+  showStrataGateStatus: boolean
   showShortTermStatus: boolean
+  showRetrievalStatus: boolean
 }
 
 export const StructuredReasoningEffortSettings: z<StructuredReasoningEffortSettings> = z.object({
   structuredReasoningEffort: z.union(['auto', 'force-off'] as const).default('auto')
     .description('记忆处理结构化调用的推理档位策略')
     .comment('auto：仅在模型明确支持 off 时使用；force-off：优先使用 off，不支持或能力检查失败时安全降级，并对同一模型只告警一次。'),
+  showStrataGateStatus: z.boolean().default(true)
+    .description('显示 StrataGate 状态提示')
+    .comment('关闭后隐藏聊天界面中的 StrataGate 状态信息；记忆、检索和后台处理不受影响。'),
   showShortTermStatus: z.boolean().default(true)
-    .description('在聊天内容中显示短期记忆状态')
-    .comment('关闭后不再显示每轮回答下方的短期记忆状态行；记忆采集与处理不受影响。'),
+    .description('显示短期记忆块状态')
+    .comment('控制短期记忆块进度、Block 封存与整理状态的聊天内提示；后台处理不受影响。'),
+  showRetrievalStatus: z.boolean().default(true)
+    .description('显示记忆检索状态')
+    .comment('控制检索次数、返回数量和记忆采用信息的聊天内提示；检索与采用不受影响。'),
 })
 
 export const Config: z<Config> = z.object({
@@ -67,7 +79,9 @@ export const Config: z<Config> = z.object({
   maxOutputTokens: z.natural().min(256).default(2_048),
   structuredTaskTimeoutMs: z.natural().min(1_000).default(120_000),
   structuredReasoningEffort: z.union(['auto', 'force-off'] as const).default('auto'),
+  showStrataGateStatus: z.boolean().default(true),
   showShortTermStatus: z.boolean().default(true),
+  showRetrievalStatus: z.boolean().default(true),
 })
 
 export function resolveConfig(config: Config): ResolvedConfig {
@@ -94,6 +108,8 @@ export function resolveConfig(config: Config): ResolvedConfig {
     maxOutputTokens: Math.max(256, Math.floor(config.maxOutputTokens ?? 2_048)),
     structuredTaskTimeoutMs: Math.max(1_000, Math.floor(config.structuredTaskTimeoutMs ?? 120_000)),
     structuredReasoningEffort: config.structuredReasoningEffort ?? 'auto',
+    showStrataGateStatus: config.showStrataGateStatus ?? true,
     showShortTermStatus: config.showShortTermStatus ?? true,
+    showRetrievalStatus: config.showRetrievalStatus ?? true,
   }
 }

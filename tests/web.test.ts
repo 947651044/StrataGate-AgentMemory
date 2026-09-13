@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import type { StrataGateSnapshot } from '@diqier/stratagate'
 import type { StrataGateRuntime } from '../src/runtime.js'
@@ -412,10 +413,12 @@ describe('StrataGate admin routes', () => {
 
   it('summarizes namespaces and returns paginated memories', async () => {
     const overview = await request('/api/stratagate/overview')
+    const packageVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
     expect(overview.status).toBe(200)
     expect(overview.body).toMatchObject({
       readonly: true,
       settingsWritable: true,
+      pluginVersion: packageVersion,
       namespaces: [{
         workspaceName: 'StrataGate',
         blockTurnSize: 4,

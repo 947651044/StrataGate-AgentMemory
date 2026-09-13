@@ -199,8 +199,14 @@ describe('StrataGate Web client contract', () => {
     const settings = registrations.find(({ metadata }) => metadata.name === 'settings.section')
     expect(typeof tail.render).toBe('function')
     expect(tail.metadata.inject()).toEqual({ hooks: { pluginSettings } })
+    settings.metadata.inject().setStrataGateStatus(false)
     settings.metadata.inject().setShortTermStatus(false)
-    expect(settingWrites).toEqual([['showShortTermStatus', false]])
+    settings.metadata.inject().setRetrievalStatus(false)
+    expect(settingWrites).toEqual([
+      ['showStrataGateStatus', false],
+      ['showShortTermStatus', false],
+      ['showRetrievalStatus', false],
+    ])
     expect(source).toContain('function ShortTermMemoryTurnStatus({ matched, sessionId, useSession, useSessions, useWorkspaces })')
     expect(source).toContain('短期记忆块 · ')
     expect(source).toContain('正在压缩…')
@@ -219,11 +225,11 @@ describe('StrataGate Web client contract', () => {
     expect(source).not.toContain('sg-compression-panel')
   })
 
-  it('defaults the inline short-term status to visible and respects the persisted setting', () => {
+  it('defaults all chat status UI to visible and combines the master and child preferences', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
     const instrumented = source.replace(
       "    exports.name = 'stratagate-dsh'",
-      "    exports.__test = { shortTermStatusVisible }; exports.name = 'stratagate-dsh'",
+      "    exports.__test = { strataGateStatusVisible, shortTermStatusVisible, retrievalStatusVisible }; exports.name = 'stratagate-dsh'",
     )
     let definition: any
     runInNewContext(instrumented, {
@@ -234,11 +240,17 @@ describe('StrataGate Web client contract', () => {
       if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
       return { createElement: (...args: unknown[]) => args }
     })
-    const { shortTermStatusVisible } = plugin.__test
+    const { strataGateStatusVisible, shortTermStatusVisible, retrievalStatusVisible } = plugin.__test
+    expect(strataGateStatusVisible(null)).toBe(true)
     expect(shortTermStatusVisible(null)).toBe(true)
+    expect(retrievalStatusVisible(null)).toBe(true)
     expect(shortTermStatusVisible({ value: {} })).toBe(true)
     expect(shortTermStatusVisible({ value: { showShortTermStatus: true } })).toBe(true)
     expect(shortTermStatusVisible({ value: { showShortTermStatus: false } })).toBe(false)
+    expect(retrievalStatusVisible({ value: { showRetrievalStatus: true } })).toBe(true)
+    expect(retrievalStatusVisible({ value: { showRetrievalStatus: false } })).toBe(false)
+    expect(shortTermStatusVisible({ value: { showStrataGateStatus: false, showShortTermStatus: true } })).toBe(false)
+    expect(retrievalStatusVisible({ value: { showStrataGateStatus: false, showRetrievalStatus: true } })).toBe(false)
   })
 
   it('maps progress and multiple persisted Blocks to only their real Turn positions', () => {
@@ -585,6 +597,17 @@ describe('StrataGate Web client contract', () => {
     const rendered = tail.render({ matched })
     expect(JSON.stringify(rendered)).toContain('已进行 2 次检索，共返回 3 条记忆，未采用')
     expect(JSON.stringify(rendered)).not.toContain('stratagate-answer-citations')
+    const retrievalHidden = tail.render({
+      matched,
+      usePluginSettings: (select: (state: unknown) => unknown) => select({ value: { showRetrievalStatus: false } }),
+    })
+    expect(JSON.stringify(retrievalHidden)).not.toContain('stratagate-answer-retrieval-note')
+    const allStatusHidden = tail.render({
+      matched,
+      usePluginSettings: (select: (state: unknown) => unknown) => select({ value: { showStrataGateStatus: false } }),
+    })
+    expect(JSON.stringify(allStatusHidden)).not.toContain('stratagate-answer-retrieval-note')
+    expect(JSON.stringify(allStatusHidden)).not.toContain('ShortTermMemoryTurnStatus')
 
     let stateCall = 0
     const expandedPlugin = definition.factory((name: string) => {
@@ -618,23 +641,30 @@ describe('StrataGate Web client contract', () => {
 
   it('shows the unified project brand, mascot, usage count, and GitHub Star link', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
+    const buildSource = readFileSync(new URL('../scripts/build-client.mjs', import.meta.url), 'utf8')
     expect(source).toContain('StrataGate-AgentMemory')
     expect(source).toContain('__STRATAGATE_MASCOT_DATA_URL__')
     expect(source).toContain('StrataGate 已在当前工作区中帮助使用记忆 ')
-    expect(source).toContain('为 StrataGate 点 🌟🌟')
+    expect(source).toContain("'v' + overview.pluginVersion")
+    expect(source).toContain('为 StrataGate 点个 🌟')
+    expect(source).toContain('想参与开发？提交 Issue / PR →')
     expect(source).toContain("https://github.com/diqierjia/StrataGate-AgentMemory")
     expect(source).toContain("rel: 'noopener noreferrer'")
+    expect(source).toContain("const STRATAGATE_CLIENT_VERSION = '__STRATAGATE_CLIENT_VERSION__'")
+    expect(buildSource).toContain("readFileSync(new URL('package.json', root), 'utf8')")
+    expect(buildSource).toContain(".replaceAll('__STRATAGATE_CLIENT_VERSION__', packageVersion)")
   })
 
   it('uses the user-defined DSH Workspace title and keeps the compact header collision-free', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
-    expect(source).toContain('function MemoryPage({ useWorkspaces, useSessions, navigationState, usePluginSettings, setEffort, resetEffort, setShortTermStatus })')
+    expect(source).toContain('function MemoryPage({ useWorkspaces, useSessions, navigationState, usePluginSettings, setEffort, resetEffort, setStrataGateStatus, setShortTermStatus, setRetrievalStatus })')
     expect(source).toContain("settingsScope.bind({ namespace: 'stratagate-memory' })")
     expect(source).toContain("pluginSettingsScope.set('structuredReasoningEffort', mode)")
     expect(source).toContain("pluginSettingsScope.unset('structuredReasoningEffort')")
+    expect(source).toContain("pluginSettingsScope.set('showStrataGateStatus', visible)")
     expect(source).toContain("pluginSettingsScope.set('showShortTermStatus', visible)")
-    expect(source).toContain("role: 'switch', 'aria-checked': showShortTermStatus")
-    expect(source).toContain('状态行跟随对应回答一起滚动')
+    expect(source).toContain("pluginSettingsScope.set('showRetrievalStatus', visible)")
+    expect(source).toContain("role: 'switch', 'aria-checked': checked")
     expect(source).toContain('const workspaceItems = useWorkspaces((state) => state.items)')
     expect(source).toContain('const sessionById = useSessions((state) => state.byId || {})')
     expect(source).toContain("String(session?.title || '').trim()")
@@ -676,10 +706,29 @@ describe('StrataGate Web client contract', () => {
     expect(source).not.toContain('封存时为 L5')
   })
 
-  it('places external AI memory import before memory structure in More', () => {
+  it('keeps exactly the four requested primary entries in More and nests diagnostics under Advanced', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
-    expect(source).toContain("['import', '⇄', '导入别的 AI 记忆'")
-    expect(source.indexOf("['import', '⇄', '导入别的 AI 记忆'")).toBeLessThan(source.indexOf("['structure', '◇', '记忆结构'"))
+    const moreSource = source.slice(source.indexOf('function MoreHome'), source.indexOf('function DisplayPage'))
+    expect(moreSource).toContain("['display', '◐', '界面与显示', '控制短期记忆块、检索状态等前端提示']")
+    expect(moreSource).toContain("['import', '⇄', '导入其他 AI 的记忆', '将其他 AI 的历史记忆导入 StrataGate']")
+    expect(moreSource).toContain("['settings', '⚙', '高级设置', '记忆配置、数据与运行诊断']")
+    expect(moreSource).toContain("['support', '?', '反馈与支持', '报告问题、提出建议与查看帮助']")
+    expect(moreSource.match(/^\s*\['(?:display|import|settings|support)'/gm)).toHaveLength(4)
+    expect(moreSource).not.toContain("['structure'")
+    expect(moreSource).not.toContain("['system'")
+    expect(moreSource).not.toContain("['audit'")
+    expect(moreSource).not.toContain("['raw'")
+    const displaySource = source.slice(source.indexOf('function DisplayPage'), source.indexOf('function redactedJson'))
+    expect(displaySource).toContain('控制 StrataGate 在聊天界面中显示的信息。设置对所有工作区生效。')
+    expect(displaySource).toContain('关闭后隐藏聊天界面中的 StrataGate 状态信息，不影响记忆、检索和后台处理。')
+    expect(displaySource).toContain("title: '短期记忆块'")
+    expect(displaySource).toContain("title: '记忆检索状态'")
+    expect(displaySource).toContain('disabled: !showStrataGateStatus')
+    const settingsSource = source.slice(source.indexOf('function SettingsPage'), source.indexOf('function MemoryPage'))
+    expect(settingsSource).toContain("['system', '✓', '系统状态'")
+    expect(settingsSource).toContain("['audit', '↗', '使用记录'")
+    expect(settingsSource).toContain("['raw', '{}', '原始数据'")
+    expect(settingsSource).toContain("back: { name: 'settings' }")
     expect(source).toContain("function ImportPage({ namespace, onBack, refresh })")
     expect(source).toContain("api('import', { namespace }")
     expect(source).toContain('复制以下提示词到其他 AI 对话中')
@@ -1110,7 +1159,7 @@ describe('StrataGate Web client contract', () => {
     const unavailable = JSON.stringify(ProcessingStatus(props))
     expect(unavailable).toContain('仍有 2 个后台任务正在整理')
     expect(unavailable).toContain('前后端版本尚未同步')
-    expect(unavailable).toContain('当前页面为 0.2.65，后台为 0.2.62')
+    expect(unavailable).toContain('当前页面为 __STRATAGATE_CLIENT_VERSION__，后台为 0.2.62')
     expect(unavailable).toContain('任务仍在整理，具体会话暂不可用')
     expect(unavailable).not.toContain('当前没有待整理的对话片段')
 
