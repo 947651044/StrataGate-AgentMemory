@@ -212,7 +212,8 @@ window.__ModuleLoader__.load({
       .sg-intro{margin-bottom:17px}.sg-intro h2,.sg-detail-title{margin:0;font-size:19px;line-height:1.28;font-weight:760;letter-spacing:-.025em;text-wrap:balance}.sg-intro p,.sg-detail-subtitle{max-width:65ch;margin:5px 0 0;color:var(--sg-muted);font-size:13px;text-wrap:pretty}.sg-search{position:relative;margin-bottom:7px}.sg-search-mark{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--sg-muted);font-size:16px;pointer-events:none}.sg-search input{width:100%;height:41px;padding:0 12px 0 37px;border:1px solid var(--sg-border);border-radius:9px;background:var(--sg-surface);outline:0}.sg-search input:hover{border-color:color-mix(in srgb,var(--sg-accent) 35%,var(--sg-border))}.sg-search input:focus{border-color:var(--sg-accent);box-shadow:0 0 0 3px var(--sg-focus)}
       .sg-feed{border-top:1px solid var(--sg-border)}.sg-entry{position:relative;width:100%;min-width:0;padding:17px 10px;margin:0 -10px;border:0;border-bottom:1px solid var(--sg-border);border-radius:8px;background:transparent;text-align:left}.sg-entry-button{cursor:pointer}.sg-entry-button:hover{background:color-mix(in srgb,var(--sg-accent) 5%,transparent);transform:translateX(2px)}.sg-entry-button:hover .sg-entry-title{color:var(--sg-accent)}.sg-entry-title{padding-right:22px;font-size:15px;line-height:1.42;font-weight:720;letter-spacing:-.01em}.sg-entry-summary{margin-top:5px;color:var(--sg-text);white-space:pre-wrap}.sg-entry-chevron{position:absolute;right:9px;top:18px;color:var(--sg-muted);font-size:18px}.sg-entry-button:hover .sg-entry-chevron{color:var(--sg-accent);transform:translateX(2px)}.sg-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:9px;color:var(--sg-muted);font-size:12px}.sg-meta-sep:before{content:"·";margin-right:7px}.sg-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.sg-tag{max-width:100%;padding:3px 8px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-soft);color:var(--sg-text);font-size:12px;line-height:1.45;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}.sg-tag-button{cursor:pointer}.sg-tag-button:hover{border-color:var(--sg-accent);color:var(--sg-accent);transform:translateY(-1px)}
       .sg-status{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border-radius:5px;font-size:12px;font-weight:650}.sg-status:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.sg-status.organized{color:var(--sg-good);background:var(--sg-good-soft)}.sg-status.processing{color:var(--sg-accent);background:var(--sg-accent-soft)}.sg-status.waiting{color:var(--sg-muted);background:var(--sg-soft)}.sg-status.failed{color:var(--sg-warn);background:var(--sg-warn-soft)}
-      .sg-backbar{display:flex;align-items:center;min-height:35px;margin:-4px 0 13px}.sg-back{display:inline-flex;align-items:center;gap:6px;margin-left:-7px;padding:6px 7px;border-radius:6px;font-weight:650}.sg-detail-header{padding-bottom:16px;border-bottom:1px solid var(--sg-border)}.sg-detail-section{padding:18px 0;border-bottom:1px solid var(--sg-border)}.sg-detail-section:last-child{border-bottom:0}.sg-section-title{margin:0 0 11px;font-size:14px;font-weight:730}.sg-prose{margin:0;white-space:pre-wrap}.sg-facts{margin:0;padding-left:20px}.sg-facts li+li{margin-top:7px}.sg-related-list{display:flex;flex-direction:column}.sg-related{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border:0;border-bottom:1px solid var(--sg-border);background:transparent;text-align:left;cursor:pointer}.sg-related:last-child{border-bottom:0}.sg-related-name{color:var(--sg-accent)}.sg-related-time{flex:0 0 auto;color:var(--sg-muted);font-size:12px}
+      .sg-backbar{display:flex;align-items:center;min-height:35px;margin:-4px 0 13px}.sg-back{display:inline-flex;align-items:center;gap:6px;margin-left:-7px;padding:6px 7px;border-radius:6px;font-weight:650}.sg-detail-header{padding-bottom:16px;border-bottom:1px solid var(--sg-border)}.sg-detail-section{padding:18px 0;border-bottom:1px solid var(--sg-border)}.sg-detail-section:last-child{border-bottom:0}.sg-section-title{margin:0 0 11px;font-size:14px;font-weight:730}.sg-prose{margin:0;white-space:pre-wrap}.sg-facts{margin:0;padding-left:20px}.sg-facts li+li{margin-top:7px}.sg-related-list{display:flex;flex-direction:column}.sg-related{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border:0;border-bottom:1px solid var(--sg-border);background:transparent;text-align:left}.sg-related-button,.sg-related:where(button){cursor:pointer}.sg-related:last-child{border-bottom:0}.sg-related-name{color:var(--sg-accent)}.sg-related-time{flex:0 0 auto;color:var(--sg-muted);font-size:12px}
+      .sg-weight-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}.sg-weight-header .sg-section-title,.sg-long-detail .sg-weight-header h3{margin:0}.sg-weight-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px}.sg-weight-metric{min-width:0;padding:8px 9px;border-radius:7px;background:var(--sg-soft)}.sg-weight-metric span{display:block;color:var(--sg-muted);font-size:10px}.sg-weight-metric strong{display:block;margin-top:2px;font-size:14px;font-weight:740;font-variant-numeric:tabular-nums;white-space:nowrap}.sg-weight-chart{position:relative;padding:8px 8px 4px;border:1px solid var(--sg-border);border-radius:9px;background:color-mix(in srgb,var(--sg-surface) 72%,transparent)}.sg-weight-chart svg{display:block;width:100%;height:auto;min-height:156px}.sg-weight-grid{stroke:var(--sg-border);stroke-width:1}.sg-weight-axis-label{fill:var(--sg-muted);font-size:9px}.sg-weight-line{fill:none;stroke:var(--sg-accent);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}.sg-weight-node{fill:var(--sg-page);stroke:var(--sg-accent);stroke-width:2}.sg-weight-node.adoption{fill:var(--sg-accent);stroke:var(--sg-page);stroke-width:2.5}.sg-weight-node.current{fill:var(--sg-text);stroke:var(--sg-page);stroke-width:2}.sg-weight-node-label{fill:var(--sg-text);font-size:9px;font-weight:680}.sg-weight-note{margin:7px 0 0;color:var(--sg-muted);font-size:10px;line-height:1.5}.sg-weight-retrieval{margin-top:6px;color:var(--sg-muted);font-size:10px}.sg-weight-help{margin-top:10px;border-top:1px solid var(--sg-border)}.sg-weight-help summary{padding:9px 2px 2px;color:var(--sg-muted);font-size:11px;font-weight:650;cursor:pointer}.sg-weight-help[open] summary{color:var(--sg-text)}.sg-weight-help-body{padding:8px 0 2px}.sg-weight-help-copy{margin:0 0 7px;color:var(--sg-muted);font-size:11px;line-height:1.58}.sg-weight-demo{padding:8px;border-radius:8px;background:var(--sg-soft)}.sg-weight-demo-label{display:block;margin-bottom:4px;color:var(--sg-muted);font-size:9px}.sg-weight-demo svg{display:block;width:100%;height:76px}.sg-weight-demo path{fill:none;stroke:var(--sg-accent);stroke-width:2}.sg-weight-demo circle{fill:var(--sg-accent)}
       .sg-source-label{display:flex;align-items:center;gap:8px}.sg-source-icon{color:var(--sg-muted)}.sg-tech{margin-top:13px}.sg-tech summary{color:var(--sg-muted);font-size:12px;cursor:pointer}.sg-tech-body{margin-top:10px;padding:11px;border-radius:7px;background:var(--sg-soft);font-size:12px}.sg-tech-row{display:grid;grid-template-columns:88px minmax(0,1fr);gap:9px;padding:3px 0}.sg-code{font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.sg-raw-message{padding-top:10px;margin-top:10px;border-top:1px solid var(--sg-border)}
       .sg-result-count{margin:0 0 9px;color:var(--sg-muted);font-size:12px}.sg-result-event{padding:8px 0;border-bottom:1px solid var(--sg-border)}.sg-result-event:last-child{border-bottom:0}.sg-pipeline{display:flex;flex-direction:column}.sg-stage{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:9px 0;border-bottom:1px solid var(--sg-border)}.sg-stage:last-child{border-bottom:0}.sg-stage-value{font-size:12px}.sg-stage-value.done{color:var(--sg-good)}.sg-stage-value.processing{color:var(--sg-accent)}.sg-stage-value.failed{color:var(--sg-danger)}.sg-stage-value.waiting{color:var(--sg-muted)}.sg-lambda-control{display:flex;align-items:center;justify-content:flex-end;gap:7px}.sg-number-input,.sg-effort-select{padding:4px 5px;border:1px solid var(--sg-border);border-radius:6px;background:var(--sg-surface)}.sg-number-input{width:82px;text-align:right}.sg-effort-button{padding:4px 6px;border:0;border-radius:5px;background:transparent;color:var(--sg-muted);cursor:pointer;font-size:12px}.sg-effort-button:hover{background:var(--sg-soft);color:var(--sg-accent)}.sg-setting-switch{position:relative;width:38px;height:22px;padding:0;border:1px solid var(--sg-border);border-radius:999px;background:var(--sg-soft);cursor:pointer}.sg-setting-switch:before{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:var(--sg-muted);transition:transform var(--sg-fast) var(--sg-ease),background-color var(--sg-fast) var(--sg-ease)}.sg-setting-switch[aria-checked="true"]{border-color:var(--sg-accent);background:var(--sg-accent)}.sg-setting-switch[aria-checked="true"]:before{background:#fff;transform:translateX(16px)}.sg-setting-switch:disabled{cursor:not-allowed;opacity:.5}.sg-setting-note{margin:7px 0 11px;color:var(--sg-muted);font-size:12px}.sg-display-settings{display:grid;gap:2px}.sg-display-setting{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:14px;padding:13px 0;border-bottom:1px solid var(--sg-border)}.sg-display-setting.child{padding-left:18px}.sg-display-setting-copy{display:grid;gap:4px}.sg-display-setting-title{font-size:13px;font-weight:680}.sg-display-setting-description{max-width:62ch;color:var(--sg-muted);font-size:11px;line-height:1.5}.sg-display-disabled{opacity:.58}.sg-settings-group{margin-top:24px;padding-top:18px;border-top:1px solid var(--sg-border)}.sg-settings-group:first-of-type{margin-top:0;padding-top:0;border-top:0}.sg-settings-group-title{margin:0;font-size:15px;letter-spacing:-.01em}.sg-settings-group-copy{margin:4px 0 11px;color:var(--sg-muted);font-size:12px}.sg-settings-panel{padding:2px 13px 12px;border:1px solid var(--sg-border);border-radius:10px;background:color-mix(in srgb,var(--sg-surface) 62%,transparent)}.sg-storage-card{padding:13px;border:1px solid var(--sg-border);border-radius:10px;background:color-mix(in srgb,var(--sg-surface) 62%,transparent)}.sg-storage-label{display:block;margin-bottom:6px;font-size:13px;font-weight:700}.sg-storage-path{display:block;width:100%;padding:9px 10px;border-radius:7px;background:var(--sg-soft);color:var(--sg-text);font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sg-storage-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.sg-storage-button{padding:6px 9px;border:1px solid var(--sg-border);border-radius:6px;background:var(--sg-surface);cursor:pointer;font-size:12px;font-weight:650}.sg-storage-button:hover{border-color:color-mix(in srgb,var(--sg-accent) 38%,var(--sg-border));color:var(--sg-accent);transform:translateY(-1px)}.sg-storage-button:disabled{cursor:not-allowed;opacity:.5}.sg-storage-feedback{min-height:18px;margin:7px 0 -3px;color:var(--sg-good);font-size:12px}.sg-storage-feedback.failed{color:var(--sg-danger)}.sg-settings-menu{margin-top:10px}.sg-setting-suggestion{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;margin:4px 0 10px;border-radius:7px;background:var(--sg-soft);font-size:12px}.sg-save-button{align-self:flex-end;padding:7px 12px;margin-top:12px;border:0;border-radius:6px;background:var(--sg-accent);color:white;cursor:pointer}.sg-save-button:disabled{opacity:.5;cursor:not-allowed}.sg-safe-note{padding:11px 12px;margin-bottom:12px;border-radius:7px;background:var(--sg-good-soft);color:var(--sg-good);font-weight:650}.sg-error-note{margin:8px 0 0;color:var(--sg-muted);font-size:12px}.sg-job-list{display:grid;gap:10px}.sg-job{padding:12px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-surface)}.sg-job-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.sg-job-title{margin:0;font-size:14px}.sg-job-meta{display:grid;grid-template-columns:112px minmax(0,1fr);gap:5px 10px;margin:11px 0;color:var(--sg-muted);font-size:12px}.sg-job-meta dd,.sg-job-meta dt{min-width:0;margin:0}.sg-job-meta dd{color:var(--sg-text);overflow-wrap:anywhere}.sg-job-error{max-height:150px;margin:9px 0;padding:9px;overflow:auto;border-radius:6px;background:var(--sg-danger-soft);color:var(--sg-danger)}.sg-job-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.sg-job-actions .sg-save-button{margin-top:0}.sg-status-feedback{margin:9px 0 0;color:var(--sg-muted);font-size:12px}.sg-status-feedback.failed{color:var(--sg-danger)}
       .sg-process-summary{padding:12px 13px;margin-bottom:14px;border-radius:8px;background:var(--sg-good-soft);color:var(--sg-good)}.sg-process-summary strong{display:block;font-size:13px}.sg-process-summary span{display:block;margin-top:2px;font-size:12px}.sg-process-groups{display:grid;gap:14px}.sg-process-group{overflow:hidden;border:1px solid var(--sg-border);border-radius:10px;background:var(--sg-surface)}.sg-process-group-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border-bottom:1px solid var(--sg-border);background:color-mix(in srgb,var(--sg-soft) 65%,transparent)}.sg-process-group-title{margin:0;font-size:14px;font-weight:730}.sg-process-group-count{color:var(--sg-muted);font-size:11px}.sg-process-card{padding:13px}.sg-process-card+.sg-process-card{border-top:1px solid var(--sg-border)}.sg-process-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.sg-process-range{font-weight:700}.sg-process-state{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:680}.sg-process-state.processing{color:var(--sg-accent)}.sg-process-state.waiting{color:var(--sg-muted)}.sg-process-state.failed{color:var(--sg-warn)}.sg-process-stages{display:grid;gap:7px;margin-top:12px}.sg-process-stage{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:7px;color:var(--sg-muted);font-size:12px}.sg-process-stage-name{color:var(--sg-text)}.sg-process-stage-state.done{color:var(--sg-good)}.sg-process-stage-state.processing{color:var(--sg-accent)}.sg-process-stage-state.failed{color:var(--sg-danger)}.sg-process-stage-state.waiting,.sg-process-stage-state.skipped{color:var(--sg-muted)}.sg-process-tech{margin-top:12px;padding-top:9px;border-top:1px solid var(--sg-border)}.sg-process-tech>summary{color:var(--sg-muted);font-size:11px;cursor:pointer}.sg-process-job{padding:10px 0}.sg-process-job+.sg-process-job{border-top:1px solid var(--sg-border)}.sg-process-job-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}.sg-process-job-meta{margin-top:5px;color:var(--sg-muted);font-size:11px}.sg-process-job .sg-job-error{font-size:11px}.sg-process-job-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}.sg-process-job-actions .sg-save-button{margin:0}.sg-process-footer{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:15px}.sg-process-footer .sg-quiet-button{padding:7px 9px;border-radius:6px;color:var(--sg-accent)}.sg-process-footer .sg-status-feedback{margin:0}
@@ -242,7 +243,7 @@ window.__ModuleLoader__.load({
       @keyframes sg-shimmer{to{transform:translateX(110%)}}
       @media (min-width:720px){.sg-brand-kicker{display:block}}
       @media (max-width:900px){.sg-long-layout{grid-template-columns:1fr;height:auto;max-height:none}.sg-long-explorer.fullscreen{inset:4px;padding:10px}.sg-long-explorer.fullscreen .sg-long-layout{overflow:auto}.sg-graph-canvas{height:520px}.sg-long-detail{max-height:520px;border-top:1px solid var(--sg-border);border-left:0}.sg-timeline{max-height:520px}.sg-toolbar-count{display:none}.sg-node-bubble{width:min(300px,72%)}}
-      @media (max-width:620px){.sg-long-toolbar{flex-wrap:wrap}.sg-long-toolbar .sg-search{flex-basis:100%}.sg-toolbar-button{flex:1}.sg-timeline-card{grid-template-columns:78px minmax(0,1fr)}.sg-timeline-card>.sg-event-status{grid-column:2}.sg-node-bubble{left:50%!important;top:auto!important;bottom:45px;width:calc(100% - 24px);transform:translateX(-50%)!important}}
+      @media (max-width:620px){.sg-long-toolbar{flex-wrap:wrap}.sg-long-toolbar .sg-search{flex-basis:100%}.sg-toolbar-button{flex:1}.sg-timeline-card{grid-template-columns:78px minmax(0,1fr)}.sg-timeline-card>.sg-event-status{grid-column:2}.sg-node-bubble{left:50%!important;top:auto!important;bottom:45px;width:calc(100% - 24px);transform:translateX(-50%)!important}.sg-weight-metrics{grid-template-columns:1fr}.sg-weight-chart svg{min-height:132px}}
       @media (max-width:860px){.sg-layer-hover:after{display:none}.sg-layer-popover{position:relative;left:auto;top:auto;width:auto;max-height:280px;margin:5px 0 1px;display:none;transform:none}.sg-layer-hover:hover .sg-layer-popover,.sg-layer-item:focus-visible + .sg-layer-popover{display:block;transform:none}}
       @media (max-width:560px){.sg-memory{padding:12px 12px 26px}.sg-header-row{align-items:flex-start;gap:10px}.sg-header-row-secondary{flex-wrap:wrap}.sg-header-community{justify-content:flex-start;gap:7px}.sg-brand-name{font-size:14px}.sg-tabs{margin-left:-2px;margin-right:-2px}.sg-tab{padding-left:0;padding-right:0}.sg-alert,.sg-memory-alert{grid-template-columns:auto minmax(0,1fr)}.sg-alert>.sg-chevron,.sg-memory-alert>.sg-chevron{display:none}.sg-tech-row{grid-template-columns:1fr;gap:1px}.sg-counts{gap:16px}.sg-entry-title{font-size:14px}.sg-block-header{display:none}.sg-block-toggle{grid-template-columns:76px minmax(76px,1fr) 24px;gap:6px}.sg-block-turn{grid-column:1/3}.sg-block-distance{display:none}.sg-layer-heading{display:block}.sg-layer-heading span{display:block;margin-top:2px}}
       .sg-decay-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.sg-conversation{display:flex;align-items:center;justify-content:flex-end;gap:5px;min-width:0;color:var(--sg-muted);font-size:11px}.sg-conversation select{min-width:0;max-width:230px;padding:3px 21px 3px 6px;border:1px solid var(--sg-border);border-radius:5px;background:var(--sg-surface);font-size:11px;text-overflow:ellipsis}.sg-distribution{scrollbar-width:none}.sg-distribution::-webkit-scrollbar{display:none}.sg-distribution-rail{display:block;width:100%;height:14px;margin:4px 0 0;accent-color:var(--sg-accent);cursor:pointer}.sg-distribution-rail:disabled{cursor:default;opacity:.38}.sg-layer-hover:after{display:none}.sg-layer-more-placeholder{width:30px}.sg-layer-popover{position:fixed!important;left:0;top:0;z-index:2147483000;width:min(390px,calc(100vw - 24px));max-height:min(70vh,520px);display:block!important;margin:0;overflow:auto;visibility:visible!important;opacity:1!important;transform:none!important;transition:opacity .1s ease;border:1px solid color-mix(in srgb,var(--sg-accent) 38%,var(--sg-border));background:var(--sg-surface);color:var(--sg-text);box-shadow:0 18px 50px rgba(0,0,0,.38)}
@@ -263,12 +264,15 @@ window.__ModuleLoader__.load({
       @keyframes sg-stm-open{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}@keyframes sg-stm-pulse{50%{opacity:.32;transform:scale(.78)}}
       @media (max-width:620px){.sg-stm-line{gap:7px}.sg-stm-line-copy{white-space:normal}.sg-stm-detail{padding-left:10px}.sg-stm-detail-head{display:block}.sg-stm-detail-head span{display:block;margin-top:2px}.sg-stm-layers{grid-template-columns:repeat(6,76px)}}
       @media (prefers-reduced-motion:reduce){.sg-stm *{animation-duration:.01ms!important;transition-duration:.01ms!important}}
-      .sg-answer-citations{display:grid;grid-template-columns:max-content minmax(0,1fr);align-items:start;gap:7px 9px;margin-top:14px;font-size:13px;line-height:22px;color:var(--dsw-alias-label-secondary,#61666b)}
-      .sg-answer-citations-label{color:var(--dsw-alias-label-tertiary,#8a8f98);white-space:nowrap}
-      .sg-answer-citations-list{display:flex;flex-wrap:wrap;gap:7px;min-width:0}
+      .sg-answer-citations{max-width:640px;margin-top:14px;font-size:13px;line-height:22px;color:var(--dsw-alias-label-secondary,#61666b)}
+      .sg-answer-citations-head{display:flex;align-items:baseline;gap:4px;flex-wrap:wrap}
+      .sg-answer-citations-label{color:var(--dsw-alias-label-secondary,#61666b);font-weight:620;white-space:nowrap}
+      .sg-answer-process-link{display:inline-flex;align-items:center;gap:4px;padding:1px 3px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);font:inherit;cursor:pointer}
+      .sg-answer-process-link:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));color:var(--dsw-alias-label-secondary,#61666b)}
+      .sg-answer-citations-list{display:flex;flex-wrap:wrap;gap:7px;min-width:0;margin-top:7px}
       .sg-answer-citation{display:inline-flex;align-items:center;gap:6px;max-width:min(100%,420px);min-width:0;padding:2px 8px;border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));border-radius:7px;background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));color:var(--dsw-alias-label-secondary,#61666b);font:inherit;cursor:pointer}
       .sg-answer-citation:hover{border-color:var(--dsw-alias-state-business-primary,#4176e6);color:var(--dsw-alias-label-primary,#0f1115)}
-      .sg-answer-citation:focus-visible,.sg-answer-retrieval-toggle:focus-visible,.sg-retrieved-memory:focus-visible,.sg-citation-close:focus-visible,.sg-citation-disclosure summary:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+      .sg-answer-citation:focus-visible,.sg-answer-process-link:focus-visible,.sg-answer-retrieval-toggle:focus-visible,.sg-retrieved-memory:focus-visible,.sg-retrieved-group>summary:focus-visible,.sg-citation-close:focus-visible,.sg-citation-disclosure summary:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
       .sg-answer-citation-kind{flex:0 0 auto;color:var(--dsw-alias-state-business-primary,#4176e6);font-weight:680}
       .sg-answer-citation-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .sg-answer-citation-action{flex:0 0 auto;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:12px}
@@ -278,15 +282,17 @@ window.__ModuleLoader__.load({
       .sg-answer-retrieval-chevron{display:inline-block;font-size:12px;transition:transform 180ms cubic-bezier(.22,1,.36,1)}
       .sg-answer-retrieval-chevron.open{transform:rotate(90deg)}
       .sg-retrieved-panel{max-height:380px;margin-top:6px;padding:7px 0 2px 12px;overflow:auto;border-left:2px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));animation:sg-retrieved-in 180ms cubic-bezier(.22,1,.36,1) both}
-      .sg-retrieved-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:0 8px 5px;color:var(--dsw-alias-label-secondary,#61666b)}
+      .sg-retrieved-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:0 8px 7px;color:var(--dsw-alias-label-secondary,#61666b)}
       .sg-retrieved-heading strong{font-size:12px;font-weight:650}.sg-retrieved-heading span{color:var(--dsw-alias-label-tertiary,#8a8f98)}
-      .sg-retrieved-group{padding-top:7px;border-top:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))}.sg-retrieved-group+.sg-retrieved-group{margin-top:8px}
-      .sg-retrieved-group-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:0 8px 4px;color:var(--dsw-alias-label-secondary,#61666b)}.sg-retrieved-group-head strong{font-size:12px;font-weight:680}.sg-retrieved-group-head span{color:var(--dsw-alias-label-tertiary,#8a8f98);font-variant-numeric:tabular-nums}
+      .sg-retrieved-group{padding-top:1px;border-top:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))}.sg-retrieved-group+.sg-retrieved-group{margin-top:3px}
+      .sg-retrieved-group>summary{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:7px 8px;color:var(--dsw-alias-label-secondary,#61666b);cursor:pointer;list-style:none}.sg-retrieved-group>summary::-webkit-details-marker{display:none}.sg-retrieved-group>summary:before{content:'›';display:inline-block;flex:0 0 auto;color:var(--dsw-alias-label-tertiary,#8a8f98);transition:transform 180ms cubic-bezier(.22,1,.36,1)}.sg-retrieved-group[open]>summary:before{transform:rotate(90deg)}
+      .sg-retrieved-group-title{min-width:0;flex:1;font-size:12px;font-weight:680}.sg-retrieved-gate{flex:0 0 auto;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:11px}.sg-retrieved-gate.sufficient{color:var(--dsw-alias-state-success-primary,#34865d)}
       .sg-retrieved-list{margin:0;padding:0;list-style:none}
       .sg-retrieved-memory{display:grid;grid-template-columns:20px auto minmax(0,1fr) auto;align-items:center;gap:8px;width:100%;padding:7px 8px;border:0;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));background:transparent;color:var(--dsw-alias-label-secondary,#61666b);font:inherit;text-align:left;cursor:pointer}
       .sg-retrieved-memory:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));color:var(--dsw-alias-label-primary,#0f1115)}
       .sg-retrieved-index{color:var(--dsw-alias-label-tertiary,#8a8f98);font-variant-numeric:tabular-nums;text-align:right}.sg-retrieved-memory-kind{color:var(--dsw-alias-label-tertiary,#8a8f98);font-weight:650}.sg-retrieved-memory-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.sg-retrieved-memory-state{color:var(--dsw-alias-label-tertiary,#8a8f98);white-space:nowrap}
       .sg-retrieved-unavailable{padding:6px 8px;color:var(--dsw-alias-label-tertiary,#8a8f98)}
+      .sg-retrieved-final{display:flex;justify-content:space-between;gap:12px;margin-top:6px;padding:8px;border-top:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));color:var(--dsw-alias-label-secondary,#61666b);font-weight:650}.sg-retrieved-final span:last-child{color:var(--dsw-alias-label-tertiary,#8a8f98);font-weight:500}
       @keyframes sg-retrieved-in{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
       .sg-citation-overlay{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.46);backdrop-filter:blur(2px)}
       .sg-citation-dialog{--sg-page:var(--dsw-alias-bg-layer-2,#fff);--sg-surface:var(--dsw-specific-input-major,var(--sg-page));--sg-soft:var(--dsw-alias-interactive-bg-hover-solid,#f1f3f5);--sg-text:var(--dsw-alias-label-primary,#0f1115);--sg-muted:var(--dsw-alias-label-secondary,#61666b);--sg-border:var(--dsw-alias-border-l2,rgba(0,0,0,.1));--sg-accent:var(--dsw-alias-state-business-primary,#4176e6);width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto;border:1px solid var(--sg-border);border-radius:13px;background:var(--sg-page);color:var(--sg-text);box-shadow:0 24px 80px rgba(0,0,0,.34);font:13px/1.6 "Segoe UI Variable Text","Segoe UI",ui-sans-serif,system-ui,-apple-system,"Microsoft YaHei",sans-serif}
@@ -377,8 +383,13 @@ window.__ModuleLoader__.load({
     }
 
     function retrievalGroupLabel(index) {
-      const chineseNumerals = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
-      return '第' + (chineseNumerals[index] || index + 1) + '次检索'
+      return '第 ' + (index + 1) + ' 轮检索'
+    }
+
+    function evidenceGateLabel(group) {
+      if (group.verdict === 'sufficient') return '证据充分'
+      if (group.verdict === 'partial' || group.verdict === 'wrong') return '证据不足，继续检索'
+      return ''
     }
 
     function selectMemoryCitations(owner) {
@@ -401,6 +412,9 @@ window.__ModuleLoader__.load({
             sequence: Number.isInteger(entry.retrievalSequence) ? entry.retrievalSequence : null,
             seq: entry.seq,
             count: groupCount,
+            verdict: entry.verdict,
+            missing: entry.missing,
+            nextStrategy: entry.nextStrategy,
             memories: (Array.isArray(entry.retrievedMemories) ? entry.retrievedMemories : []).map((memory) => ({ ...memory, namespace: entry.namespace })),
           })
         }
@@ -451,6 +465,9 @@ window.__ModuleLoader__.load({
           citations: value.citations,
           retrievedCount,
           retrievedMemories,
+          verdict: value.verdict === 'sufficient' || value.verdict === 'partial' || value.verdict === 'wrong' ? value.verdict : undefined,
+          missing: typeof value.missing === 'string' ? value.missing : undefined,
+          nextStrategy: typeof value.nextStrategy === 'string' ? value.nextStrategy : undefined,
         }
       } catch {
         return null
@@ -478,6 +495,9 @@ window.__ModuleLoader__.load({
             citations: match.event.data.citations,
             retrievedCount: match.event.data.retrievedCount,
             retrievedMemories: match.event.data.retrievedMemories,
+            verdict: match.event.data.verdict,
+            missing: match.event.data.missing,
+            nextStrategy: match.event.data.nextStrategy,
           }],
         }
         if (match.event.type === 'tool/call') {
@@ -507,6 +527,9 @@ window.__ModuleLoader__.load({
             citations: result.citations,
             retrievedCount: result.retrievedCount,
             retrievedMemories: result.retrievedMemories,
+            verdict: result.verdict,
+            missing: result.missing,
+            nextStrategy: result.nextStrategy,
           }],
         }
       },
@@ -946,6 +969,32 @@ window.__ModuleLoader__.load({
         expanded ? h(ShortTermMemoryBlockDetail, { namespace: feed.payload.namespace, block }) : null)
     }
 
+    function RetrievalProcessPanel({ retrievalGroups, retrievedCount, citations, open }) {
+      const adoptedRefs = new Set(citations.map((citation) => citation.evidenceRef))
+      return h('section', { className: 'sg-retrieved-panel', 'aria-label': '本次记忆检索过程' },
+        h('div', { className: 'sg-retrieved-heading' },
+          h('strong', null, '检索过程'),
+          h('span', null, retrievalGroups.length + ' 轮 · 共返回 ' + retrievedCount + ' 条')),
+        retrievalGroups.map((group, groupIndex) => {
+          const gateLabel = evidenceGateLabel(group)
+          return h('details', { key: group.batchId || group.seq, className: 'sg-retrieved-group' },
+            h('summary', null,
+              h('span', { className: 'sg-retrieved-group-title' }, retrievalGroupLabel(groupIndex) + ' · 返回 ' + group.count + ' 条'),
+              gateLabel ? h('span', { className: 'sg-retrieved-gate ' + (group.verdict === 'sufficient' ? 'sufficient' : '') }, gateLabel) : null),
+            group.memories.length ? h('ol', { className: 'sg-retrieved-list' }, group.memories.map((memory, memoryIndex) => {
+              const action = citationActionLabel(memory)
+              const adopted = adoptedRefs.has(memory.evidenceRef)
+              const state = adopted ? '最终采用' : '检索到 · 未采用'
+              return h('li', { key: memory.batchId + ':' + memory.evidenceRef }, h('button', { type: 'button', className: 'sg-retrieved-memory', title: memory.evidenceRef, onClick: () => open(memory, adopted) },
+                h('span', { className: 'sg-retrieved-index', 'aria-hidden': 'true' }, memoryIndex + 1 + '.'),
+                h('span', { className: 'sg-retrieved-memory-kind' }, citationKindLabel(memory)),
+                h('span', { className: 'sg-retrieved-memory-title' }, memory.title),
+                h('span', { className: 'sg-retrieved-memory-state' }, action ? action + ' · ' + state : state)))
+            })) : h('div', { className: 'sg-retrieved-unavailable' }, group.count === 0 ? '本轮检索没有返回匹配记忆。' : '这条历史回执未保存候选摘要。'))
+        }),
+        h('div', { className: 'sg-retrieved-final' }, h('span', null, '最终采用 ' + citations.length + ' 条'), h('span', null, '检索命中不会自动强化记忆')))
+    }
+
     function MemoryCitationTail({ matched, sessionId, useSession, useSessions, useWorkspaces, usePluginSettings }) {
       const citations = matched.citations
       const retrievedCount = matched.retrievedCount
@@ -978,30 +1027,24 @@ window.__ModuleLoader__.load({
           ? h(ShortTermMemoryTurnStatus, { matched, sessionId, useSession, useSessions, useWorkspaces })
           : null,
         retrievalStatusVisible(pluginSettings) && citations.length ? h('div', { className: 'sg-answer-citations', 'data-testid': 'stratagate-answer-citations' },
-          h('span', { className: 'sg-answer-citations-label' }, '本回答参考了 ' + citations.length + ' 条记忆'),
+          h('div', { className: 'sg-answer-citations-head' },
+            h('span', { className: 'sg-answer-citations-label' }, '本回答采用了 ' + citations.length + ' 条记忆'),
+            retrievalGroups.length ? h('button', { type: 'button', className: 'sg-answer-process-link', 'aria-expanded': showRetrieved, onClick: () => setShowRetrieved((value) => !value) },
+              h('span', null, '· 查看检索过程'),
+              h('span', { className: 'sg-answer-retrieval-chevron ' + (showRetrieved ? 'open' : ''), 'aria-hidden': 'true' }, '›')) : null),
           h('div', { className: 'sg-answer-citations-list' }, citations.map((citation) => {
             const action = citationActionLabel(citation)
             return h('button', { key: citation.batchId + ':' + citation.evidenceRef, type: 'button', className: 'sg-answer-citation', title: citation.evidenceRef, onClick: () => open(citation, true) },
               h('span', { className: 'sg-answer-citation-kind' }, citationKindLabel(citation)),
               h('span', { className: 'sg-answer-citation-title' }, citation.title),
               action ? h('span', { className: 'sg-answer-citation-action' }, action) : null)
-          }))) : null,
+          })),
+          showRetrieved && retrievalGroups.length ? h(RetrievalProcessPanel, { retrievalGroups, retrievedCount, citations, open }) : null) : null,
         retrievalStatusVisible(pluginSettings) && citations.length === 0 && retrievalGroups.length > 0 ? h('div', { className: 'sg-answer-retrieval', 'data-testid': 'stratagate-answer-retrieval-note' },
           h('button', { type: 'button', className: 'sg-answer-retrieval-toggle', 'aria-expanded': showRetrieved, onClick: () => setShowRetrieved((value) => !value) },
-            h('span', null, '已进行 ' + retrievalGroups.length + ' 次检索，共返回 ' + retrievedCount + ' 条记忆，未采用'),
+            h('span', null, '检索 ' + retrievalGroups.length + ' 轮 · 返回 ' + retrievedCount + ' 条 · 未采用'),
             h('span', { className: 'sg-answer-retrieval-chevron ' + (showRetrieved ? 'open' : ''), 'aria-hidden': 'true' }, '›')),
-          showRetrieved ? h('section', { className: 'sg-retrieved-panel', 'aria-label': '本次检索到但未采用的记忆' },
-            h('div', { className: 'sg-retrieved-heading' }, h('strong', null, '检索过程'), h('span', null, retrievalGroups.length + ' 次 · ' + retrievedCount + ' 条 · 均未采用')),
-            retrievalGroups.map((group, groupIndex) => h('section', { key: group.batchId || group.seq, className: 'sg-retrieved-group', 'aria-label': retrievalGroupLabel(groupIndex) },
-              h('div', { className: 'sg-retrieved-group-head' }, h('strong', null, retrievalGroupLabel(groupIndex)), h('span', null, group.count + ' 条')),
-              group.memories.length ? h('ol', { className: 'sg-retrieved-list' }, group.memories.map((memory, memoryIndex) => {
-                const action = citationActionLabel(memory)
-                return h('li', { key: memory.batchId + ':' + memory.evidenceRef }, h('button', { type: 'button', className: 'sg-retrieved-memory', title: memory.evidenceRef, onClick: () => open(memory, false) },
-                  h('span', { className: 'sg-retrieved-index', 'aria-hidden': 'true' }, memoryIndex + 1 + '.'),
-                  h('span', { className: 'sg-retrieved-memory-kind' }, citationKindLabel(memory)),
-                  h('span', { className: 'sg-retrieved-memory-title' }, memory.title),
-                  h('span', { className: 'sg-retrieved-memory-state' }, action ? action + ' · 未采用' : '未采用')))
-              })) : h('div', { className: 'sg-retrieved-unavailable' }, group.count === 0 ? '本次检索没有返回匹配记忆。' : '这条历史回执未保存候选摘要。')))) : null) : null,
+          showRetrieved ? h(RetrievalProcessPanel, { retrievalGroups, retrievedCount, citations, open }) : null) : null,
         retrievalStatusVisible(pluginSettings) && selected ? h('div', { className: 'sg-citation-overlay', onMouseDown: (event) => { if (event.target === event.currentTarget) close() } },
           h('section', { className: 'sg-citation-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': citationKindLabel(selected) + ' 详情' },
             h('header', { className: 'sg-citation-dialog-head' },
@@ -1457,6 +1500,59 @@ window.__ModuleLoader__.load({
         h('section', null, h('h3', null, '支撑事件'), (node.sourceEventIds || []).flatMap((id) => eventMap.get(id) || []).slice(0, 8).map((event) => h('button', { key: event.id, className: 'sg-support-event', onClick: () => onEvent(event.id) }, h('span', null, exactTime(eventOccurrence(event).value) + ' · ' + event.title), h('b', null, '›')))))
     }
 
+    function WeightMechanismHelp() {
+      return h('details', { className: 'sg-weight-help' },
+        h('summary', null, 'ⓘ 权重如何变化？'),
+        h('div', { className: 'sg-weight-help-body' },
+          h('p', { className: 'sg-weight-help-copy' }, '新 Event 初始权重较高，并随对话推进逐渐衰减。只有被回答真正采用时才会恢复或强化；采用次数越多，后续衰减越慢。检索本身不会强化。'),
+          h('div', { className: 'sg-weight-demo' },
+            h('span', { className: 'sg-weight-demo-label' }, '机制示意 · 非当前 Event 数据'),
+            h('svg', { viewBox: '0 0 320 76', role: 'img', 'aria-label': '权重衰减并在采用后恢复的通用示意曲线' },
+              h('path', { d: 'M8 15 C35 18 55 35 82 50 C98 58 104 59 112 58 L112 20 C150 23 177 40 204 49 L204 23 C243 25 269 35 312 43' }),
+              h('circle', { cx: '8', cy: '15', r: '3' }),
+              h('circle', { cx: '112', cy: '20', r: '4' }),
+              h('circle', { cx: '204', cy: '23', r: '4' })))))
+    }
+
+    function MemoryWeightTrajectory({ event }) {
+      const trajectory = event?.weightTrajectory
+      if (!trajectory || !Array.isArray(trajectory.points) || trajectory.points.length === 0) return null
+      const points = trajectory.points.filter((point) => Number.isFinite(point?.turn) && Number.isFinite(point?.weight))
+      if (points.length === 0) return null
+      const minTurn = Math.min(...points.map((point) => point.turn))
+      const maxTurn = Math.max(...points.map((point) => point.turn))
+      const span = Math.max(1, maxTurn - minTurn)
+      const x = (turn) => 42 + (turn - minTurn) / span * 540
+      const y = (weight) => 16 + (1 - Math.max(0, Math.min(1, weight))) * 146
+      const path = points.map((point, index) => (index ? 'L' : 'M') + x(point.turn).toFixed(1) + ' ' + y(point.weight).toFixed(1)).join(' ')
+      const nodes = points.filter((point) => point.kind !== 'sample')
+      const latestText = trajectory.turnsSinceLatestAdoption === null
+        ? '尚未采用'
+        : Number(trajectory.turnsSinceLatestAdoption) === 0 ? '本轮' : trajectory.turnsSinceLatestAdoption + ' 轮前'
+      return h(React.Fragment, null,
+        h('div', { className: 'sg-weight-header' }, h('h3', { className: 'sg-section-title' }, '记忆权重轨迹')),
+        h('div', { className: 'sg-weight-metrics' },
+          h('div', { className: 'sg-weight-metric' }, h('span', null, '当前权重'), h('strong', null, Number(trajectory.currentWeight).toFixed(2))),
+          h('div', { className: 'sg-weight-metric' }, h('span', null, '有效采用'), h('strong', null, trajectory.effectiveAdoptions + ' 次')),
+          h('div', { className: 'sg-weight-metric' }, h('span', null, '最近采用'), h('strong', null, latestText))),
+        h('div', { className: 'sg-weight-chart' },
+          h('svg', { viewBox: '0 0 620 196', preserveAspectRatio: 'xMidYMid meet', role: 'img', 'aria-label': '该 Event 的真实记忆权重轨迹，横轴为对话轮次，纵轴为记忆权重' },
+            [0, .5, 1].map((weight) => h(React.Fragment, { key: weight },
+              h('line', { className: 'sg-weight-grid', x1: '42', y1: String(y(weight)), x2: '582', y2: String(y(weight)) }),
+              h('text', { className: 'sg-weight-axis-label', x: '34', y: String(y(weight) + 3), textAnchor: 'end' }, weight.toFixed(1)))),
+            h('path', { className: 'sg-weight-line', d: path }),
+            nodes.map((point, index) => h(React.Fragment, { key: point.kind + ':' + point.turn + ':' + index },
+              h('circle', { className: 'sg-weight-node ' + point.kind, cx: String(x(point.turn)), cy: String(y(point.weight)), r: point.kind === 'adoption' ? '5' : '4' },
+                h('title', null, (point.label || point.kind) + ' · Turn ' + point.turn + ' · 权重 ' + Number(point.weight).toFixed(2))),
+              h('text', { className: 'sg-weight-node-label', x: String(x(point.turn)), y: String(Math.max(10, y(point.weight) - 9 - index % 2 * 10)), textAnchor: index === 0 ? 'start' : index === nodes.length - 1 ? 'end' : 'middle' }, point.label || ''))),
+            h('text', { className: 'sg-weight-axis-label', x: '42', y: '181', textAnchor: 'start' }, 'Turn ' + minTurn),
+            h('text', { className: 'sg-weight-axis-label', x: '582', y: '181', textAnchor: 'end' }, 'Turn ' + maxTurn),
+            h('text', { className: 'sg-weight-axis-label', x: '312', y: '193', textAnchor: 'middle' }, '对话轮次'))),
+        trajectory.lastRetrievedAt ? h('div', { className: 'sg-weight-retrieval' }, '最近检索：' + formatTime(trajectory.lastRetrievedAt) + '。检索不改变权重；当前记录没有检索轮次，因此不绘制为强化节点。') : null,
+        trajectory.note ? h('p', { className: 'sg-weight-note' }, trajectory.note) : null,
+        h(WeightMechanismHelp))
+    }
+
     function EventDetailPanel({ event, nodes, events, onNode, openSource, className = '', onMouseEnter, onMouseLeave }) {
       if (!event) return h('aside', { className: 'sg-long-detail sg-placeholder-detail' }, '选择事件查看完整时间、关系与证据')
       const temporal = event.temporal || {}; const eventMap = new Map(events.map((item) => [item.id, item])); const nodeMap = new Map(nodes.map((node) => [node.id, node]))
@@ -1473,6 +1569,7 @@ window.__ModuleLoader__.load({
           h('dt', null, '原始表达'), h('dd', null, temporal.originalText || '未记录'))),
         h('section', null, h('h3', null, '参与实体'), h('div', { className: 'sg-tags' }, (temporal.participantNodeIds || []).flatMap((id) => nodeMap.get(id) || []).map((node) => h(NodePill, { key: node.id, node, onClick: () => onNode(node.id) })), !(temporal.participantNodeIds || []).length ? (temporal.participants || []).map((name) => h('span', { key: name, className: 'sg-tag' }, name)) : null)),
         relations.length ? h('section', null, h('h3', null, '事件关系'), relations.map((relation) => h('div', { key: relation.label + relation.id, className: 'sg-relation-row' }, h('span', null, relation.label), h('strong', null, eventMap.get(relation.id)?.title || relation.id)))) : null,
+        event.weightTrajectory ? h('section', null, h(MemoryWeightTrajectory, { event })) : null,
         h('section', null, h('h3', null, '证据来源'), h('div', { className: 'sg-evidence-row' }, h('span', null, '来源 Block'), h('code', null, event.sourceBlockId)), h('div', { className: 'sg-evidence-row' }, h('span', null, '置信度'), h('strong', null, Math.round((event.confidence || 0) * 100) + '%'))),
         h('button', { className: 'sg-source-button', onClick: () => openSource(event) }, '查看来源原始消息 →'))
     }
@@ -1784,6 +1881,7 @@ window.__ModuleLoader__.load({
         h('header', { className: 'sg-detail-header' }, h('h2', { className: 'sg-detail-title' }, event.title || '记忆详情'), event.summary ? h('p', { className: 'sg-detail-subtitle' }, event.summary) : null, h('div', { className: 'sg-meta' }, h('span', null, formatTime(event.updatedAt || event.createdAt)), h('span', { className: 'sg-meta-sep' }, project))),
         event.narrative ? h('div', { className: 'sg-detail-section' }, h('h3', { className: 'sg-section-title' }, 'AI 对这段经历的理解'), h('p', { className: 'sg-prose' }, event.narrative)) : null,
         h('div', { className: 'sg-detail-section' }, h('h3', { className: 'sg-section-title' }, '参与实体'), (event.temporal?.participants || []).length ? h('div', { className: 'sg-tags' }, event.temporal.participants.map((name) => h('span', { key: name, className: 'sg-tag' }, name))) : h('span', { className: 'sg-muted' }, '未记录')),
+        event.weightTrajectory ? h('div', { className: 'sg-detail-section' }, h(MemoryWeightTrajectory, { event })) : null,
         h(SourceDetails, { item: event, source, kind: 'event' }))
     }
 

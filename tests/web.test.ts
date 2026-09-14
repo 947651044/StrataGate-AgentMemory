@@ -56,7 +56,7 @@ const snapshot: StrataGateSnapshot = {
     confidence: 0.95,
     status: 'active',
     supersededBy: null,
-    weight: { mentionCount: 1, lastAdoptedTurn: 8, lastRetrievedAt: null, pinned: false, floorWeight: 0, forcedCap: null },
+    weight: { mentionCount: 2, lastAdoptedTurn: 8, lastRetrievedAt: null, pinned: false, floorWeight: 0, forcedCap: null },
     createdAt: '2026-08-18T00:00:00.000Z',
     updatedAt: '2026-08-18T00:00:00.000Z',
   }],
@@ -458,7 +458,25 @@ describe('StrataGate admin routes', () => {
     expect(overview.headers['Cache-Control']).toBe('no-store')
 
     const memories = await request('/api/stratagate/memories?namespace=dsh%3Aproject%3Atest&kind=events&q=pnpm')
-    expect(memories.body).toMatchObject({ total: 1, items: [{ id: 'evt_1', title: 'Use pnpm', relatedElements: [{ id: 'el_1', name: 'pnpm' }] }] })
+    expect(memories.body).toMatchObject({
+      total: 1,
+      items: [{
+        id: 'evt_1',
+        title: 'Use pnpm',
+        relatedElements: [{ id: 'el_1', name: 'pnpm' }],
+        weightTrajectory: {
+          scale: 'conversation_turn',
+          currentTurn: 8,
+          currentWeight: 1,
+          effectiveAdoptions: 1,
+          latestAdoptionTurn: 8,
+          turnsSinceLatestAdoption: 0,
+          recordedAdoptionTurns: [8],
+          historyComplete: true,
+          points: [{ turn: 8, weight: 1, kind: 'adoption', label: '采用 · 当前' }],
+        },
+      }],
+    })
 
     const graph = await request('/api/stratagate/memories?namespace=dsh%3Aproject%3Atest&kind=graph')
     expect(graph.body).toMatchObject({
@@ -526,6 +544,57 @@ describe('StrataGate admin routes', () => {
       { 'if-none-match': first.headers.ETag! },
     )
     expect(unchanged).toMatchObject({ status: 304, body: null, headers: { ETag: first.headers.ETag } })
+  })
+
+  it('builds Event weight trajectories from real adoption receipts and the core weight function', async () => {
+    const trajectoryRuntime = {
+      adminSnapshot: async () => ({
+        ...snapshot,
+        currentTurn: 12,
+        events: [{
+          ...snapshot.events[0]!,
+          weight: { ...snapshot.events[0]!.weight, mentionCount: 3, lastAdoptedTurn: 10, lastRetrievedAt: '2026-08-18T00:04:00.000Z' },
+        }],
+        usageReceipts: [
+          { ...snapshot.usageReceipts[0]!, id: 'use-1', audit: { ...snapshot.usageReceipts[0]!.audit, turn: 5 } },
+          { ...snapshot.usageReceipts[0]!, id: 'use-2', audit: { ...snapshot.usageReceipts[0]!.audit, turn: 10 } },
+        ],
+      }),
+    } as unknown as StrataGateRuntime
+    const result = await request('/api/stratagate/memories?namespace=trajectory&kind=events', 'GET', trajectoryRuntime)
+    const trajectory = result.body.items[0].weightTrajectory
+    expect(trajectory).toMatchObject({
+      scale: 'conversation_turn',
+      currentTurn: 12,
+      effectiveAdoptions: 2,
+      latestAdoptionTurn: 10,
+      turnsSinceLatestAdoption: 2,
+      recordedAdoptionTurns: [5, 10],
+      historyComplete: true,
+    })
+    expect(trajectory.points).toContainEqual(expect.objectContaining({ turn: 5, weight: 1, kind: 'adoption' }))
+    expect(trajectory.points).toContainEqual(expect.objectContaining({ turn: 10, weight: 1, kind: 'adoption', label: '再次采用' }))
+    expect(trajectory.points.find((point: { turn: number; kind: string }) => point.turn === 10 && point.kind === 'sample').weight).toBeLessThan(1)
+    expect(trajectory.currentWeight).toBeLessThan(1)
+  })
+
+  it('does not turn a retrieval timestamp into a weight reinforcement node', async () => {
+    const retrievalOnlyRuntime = {
+      adminSnapshot: async () => ({
+        ...snapshot,
+        currentTurn: 8,
+        events: [{
+          ...snapshot.events[0]!,
+          weight: { ...snapshot.events[0]!.weight, mentionCount: 1, lastAdoptedTurn: 4, lastRetrievedAt: '2026-08-18T00:04:00.000Z' },
+        }],
+        usageReceipts: [],
+      }),
+    } as unknown as StrataGateRuntime
+    const result = await request('/api/stratagate/memories?namespace=retrieval-only&kind=events', 'GET', retrievalOnlyRuntime)
+    const trajectory = result.body.items[0].weightTrajectory
+    expect(trajectory).toMatchObject({ effectiveAdoptions: 0, recordedAdoptionTurns: [], lastRetrievedAt: '2026-08-18T00:04:00.000Z' })
+    expect(trajectory.currentWeight).toBeLessThan(1)
+    expect(trajectory.points.some((point: { kind: string }) => point.kind === 'adoption')).toBe(false)
   })
 
   it('changes the dashboard ETag when the plugin version changes without a memory revision change', async () => {
@@ -644,6 +713,7 @@ describe('StrataGate admin routes', () => {
     expect(result.status).toBe(200)
     expect(result.body.messages[0].content).toBe('Use pnpm. api_key=[REDACTED]')
     expect(result.body.messages[0].toolCalls[0].arguments.authorization).toBe('Bearer [REDACTED]')
+    expect(result.body.events[0].weightTrajectory).toMatchObject({ currentWeight: 1, effectiveAdoptions: 1 })
   })
 
   it('reports the actual decayed layer and its size relative to L5', async () => {

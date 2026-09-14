@@ -8,6 +8,7 @@ import {
   formatRawTranscript,
   getDecayedBlockLevel,
   KNOWLEDGE_GRAPH_PROJECTOR_VERSION,
+  memoryWeightAt,
   type ElementCard,
   type EventCard,
   type ExternalMemoryAction,
@@ -173,7 +174,119 @@ function blockLayers(block: MemoryBlock): DisplayLayer[] {
   ])
 }
 
-function eventSummary(event: EventCard): unknown {
+interface EventWeightTrajectoryPoint {
+  turn: number
+  weight: number
+  kind: 'sample' | 'creation' | 'adoption' | 'current'
+  label?: string
+}
+
+function sampledEventWeight(
+  event: EventCard,
+  turn: number,
+  lastAdoptedTurn: number,
+  mentionCount: number,
+): number {
+  return memoryWeightAt({
+    status: event.status,
+    weight: { ...event.weight, lastAdoptedTurn, mentionCount },
+  }, turn)
+}
+
+function appendWeightSegment(
+  points: EventWeightTrajectoryPoint[],
+  event: EventCard,
+  fromTurn: number,
+  toTurn: number,
+  mentionCount: number,
+): void {
+  if (toTurn < fromTurn) return
+  if (toTurn === fromTurn) return
+  const span = toTurn - fromTurn
+  const step = Math.max(1, Math.ceil(span / 32))
+  for (let turn = fromTurn; turn < toTurn; turn += step) {
+    points.push({ turn, weight: sampledEventWeight(event, turn, fromTurn, mentionCount), kind: 'sample' })
+  }
+  points.push({ turn: toTurn, weight: sampledEventWeight(event, toTurn, fromTurn, mentionCount), kind: 'sample' })
+}
+
+function eventWeightTrajectory(snapshot: StrataGateSnapshot, event: EventCard): unknown {
+  const currentTurn = snapshot.currentTurn
+  const effectiveAdoptions = Math.max(0, event.weight.mentionCount - 1)
+  const adoptionReceipts = snapshot.usageReceipts.filter(({ eventIds }) => eventIds.includes(event.id))
+  const adoptionTurns = adoptionReceipts
+    .map(({ audit }) => audit?.turn)
+    .filter((turn): turn is number => Number.isSafeInteger(turn) && turn! >= 0)
+    .sort((left, right) => left - right)
+  const historyComplete = adoptionReceipts.length === effectiveAdoptions
+    && adoptionTurns.length === adoptionReceipts.length
+    && (effectiveAdoptions === 0 || adoptionTurns.at(-1) === event.weight.lastAdoptedTurn)
+  const canInterpolate = event.status !== 'forgotten' && event.status !== 'archived'
+    && event.weight.forcedCap === null && !event.weight.pinned
+  const points: EventWeightTrajectoryPoint[] = []
+
+  if (canInterpolate && effectiveAdoptions === 0) {
+    appendWeightSegment(points, event, event.weight.lastAdoptedTurn, currentTurn, 1)
+    if (points.length > 0) {
+      const first = points[0]!
+      points[0] = { turn: first.turn, weight: first.weight, kind: 'creation', label: '创建' }
+    }
+  } else if (canInterpolate && historyComplete && adoptionTurns.length > 0) {
+    let anchorTurn = adoptionTurns[0]!
+    let mentionCount = 2
+    points.push({ turn: anchorTurn, weight: 1, kind: 'adoption', label: '采用' })
+    for (const [index, turn] of adoptionTurns.slice(1).entries()) {
+      appendWeightSegment(points, event, anchorTurn, turn, mentionCount)
+      points.push({ turn, weight: 1, kind: 'adoption', label: index === adoptionTurns.length - 2 ? '再次采用' : '采用' })
+      anchorTurn = turn
+      mentionCount += 1
+    }
+    appendWeightSegment(points, event, anchorTurn, currentTurn, mentionCount)
+  } else if (canInterpolate) {
+    appendWeightSegment(points, event, event.weight.lastAdoptedTurn, currentTurn, event.weight.mentionCount)
+    if (effectiveAdoptions > 0 && points.length > 0) {
+      const first = points[0]!
+      points[0] = { turn: first.turn, weight: first.weight, kind: 'adoption', label: '最近采用' }
+    }
+  }
+
+  const currentWeight = memoryWeightAt(event, currentTurn)
+  if (points.length === 0 || points.at(-1)?.turn !== currentTurn) {
+    points.push({ turn: currentTurn, weight: currentWeight, kind: 'current', label: '当前' })
+  } else if (points.at(-1)?.kind === 'creation' || points.at(-1)?.kind === 'adoption') {
+    points[points.length - 1] = {
+      ...points[points.length - 1]!,
+      weight: currentWeight,
+      label: `${points[points.length - 1]!.label} · 当前`,
+    }
+  } else {
+    points[points.length - 1] = { ...points[points.length - 1]!, weight: currentWeight, kind: 'current', label: '当前' }
+  }
+
+  return {
+    scale: 'conversation_turn',
+    currentTurn,
+    currentWeight,
+    effectiveAdoptions,
+    latestAdoptionTurn: effectiveAdoptions > 0 ? event.weight.lastAdoptedTurn : null,
+    turnsSinceLatestAdoption: effectiveAdoptions > 0
+      ? Math.max(0, currentTurn - event.weight.lastAdoptedTurn)
+      : null,
+    lastRetrievedAt: event.weight.lastRetrievedAt,
+    recordedAdoptionTurns: adoptionTurns,
+    historyComplete,
+    points,
+    note: !canInterpolate
+      ? '固定、封存或状态上限的变更轮次没有历史记录，因此仅显示当前真实权重。'
+      : effectiveAdoptions > 0 && !historyComplete
+        ? '部分早期采用记录缺少轮次；曲线仅从最近一次可确认的强化开始。'
+        : effectiveAdoptions > 0
+          ? '采用轮次来自使用回执；创建轮次未单独保存，因此不推测创建节点。'
+          : '尚未发生有效采用；创建锚点来自 Event 当前权重状态。',
+  }
+}
+
+function eventSummary(event: EventCard, snapshot?: StrataGateSnapshot): unknown {
   return {
     id: event.id,
     title: event.title,
@@ -189,6 +302,7 @@ function eventSummary(event: EventCard): unknown {
     status: event.status,
     supersededBy: event.supersededBy,
     weight: event.weight,
+    ...(snapshot ? { weightTrajectory: eventWeightTrajectory(snapshot, event) } : {}),
     createdAt: event.createdAt,
     updatedAt: event.updatedAt,
   }
@@ -682,7 +796,7 @@ async function memories(runtime: StrataGateRuntime, url: URL): Promise<unknown> 
       ?? event.temporal.mentionedAt ?? event.createdAt
     return time(right).localeCompare(time(left))
   }).map((event) => ({
-    ...(eventSummary(event) as object),
+    ...(eventSummary(event, snapshot) as object),
     relatedNodes: snapshot.graphNodes
       .filter(({ id, sourceEventIds }) => sourceEventIds.includes(event.id)
         || (event.temporal.participantNodeIds ?? []).includes(id))
@@ -699,7 +813,7 @@ async function memories(runtime: StrataGateRuntime, url: URL): Promise<unknown> 
       projectorVersion: KNOWLEDGE_GRAPH_PROJECTOR_VERSION,
       nodes: snapshot.graphNodes.map((node) => ({
         ...node,
-        supportingEvents: node.sourceEventIds.flatMap((id) => eventMap.get(id) ?? []).map(eventSummary),
+        supportingEvents: node.sourceEventIds.flatMap((id) => eventMap.get(id) ?? []).map((event) => eventSummary(event)),
       })),
       edges: snapshot.graphEdges,
       clusters: clusterKnowledgeGraph(snapshot.graphNodes, snapshot.graphEdges),
@@ -807,7 +921,7 @@ async function memories(runtime: StrataGateRuntime, url: URL): Promise<unknown> 
           jobs: projections.length,
           lastError: failedProjection?.lastError ?? null,
         } : null,
-        relatedEvents: relatedEvents.map(eventSummary),
+        relatedEvents: relatedEvents.map((event) => eventSummary(event)),
         relatedNodes,
       }
     })
@@ -877,7 +991,7 @@ async function sources(runtime: StrataGateRuntime, url: URL): Promise<unknown> {
       node,
       nodes: snapshot.graphNodes.filter(({ id }) => relatedNodeIds.has(id)),
       edges,
-      events: events.map(eventSummary),
+      events: events.map((event) => eventSummary(event)),
       messages: sourceMessages(snapshot, ids),
     }
   } else if (elementId) {
@@ -898,7 +1012,7 @@ async function sources(runtime: StrataGateRuntime, url: URL): Promise<unknown> {
     elements = snapshot.elements.filter(({ sourceEventIds }) => sourceEventIds.some((id) => eventIds.has(id)))
     return {
       namespace,
-      events: events.map(eventSummary),
+      events: events.map((event) => eventSummary(event)),
       elements: elements.map(elementSummary),
       messages: sourceMessages(snapshot, ids),
       layers: displayBlock ? virtualBlockLayers(displayBlock) : blockLayers(block),
@@ -909,7 +1023,7 @@ async function sources(runtime: StrataGateRuntime, url: URL): Promise<unknown> {
   }
   return {
     namespace,
-    events: events.map(eventSummary),
+    events: events.map((event) => eventSummary(event, eventId ? snapshot : undefined)),
     elements: elements.map(elementSummary),
     blocks: events.map((event) => snapshot.blocks.find(({ id }) => id === event.sourceBlockId))
       .filter((block): block is MemoryBlock => Boolean(block))
@@ -979,7 +1093,7 @@ function receiptSources(snapshot: StrataGateSnapshot, receipt: UsageReceipt): un
   const messageIds = new Set(supportingEvents.flatMap(({ sourceMessageIds }) => sourceMessageIds))
   return {
     ...receipt,
-    events: events.map(eventSummary),
+    events: events.map((event) => eventSummary(event)),
     elements: elements.map(elementSummary),
     sourceMessages: sourceMessages(snapshot, messageIds),
   }
