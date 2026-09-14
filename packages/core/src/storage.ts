@@ -4,6 +4,7 @@ import type { ElementCard, EventCard, ExternalMemoryImportJob, GraphEdge, GraphN
 
 export const STRATAGATE_STORAGE_SCHEMA_VERSION = 10;
 export const KNOWLEDGE_GRAPH_PROJECTOR_VERSION = 1;
+export const DERIVATION_MAX_ATTEMPTS = 3;
 
 export type ExtractionJobStatus = 'running' | 'succeeded' | 'skipped' | 'failed';
 
@@ -63,6 +64,7 @@ export interface GraphProjectionJob {
   edgeIds: string[];
   reason: string | null;
   lastError: string | null;
+  nextRetryAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -339,6 +341,11 @@ export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
     if (!Array.isArray(snapshot[key])) throw new TypeError(`Invalid StrataGate snapshot: ${key} must be an array`);
   }
   if (!Array.isArray(snapshot.successfulModelResponses)) snapshot.successfulModelResponses = [];
+  for (const job of snapshot.graphProjectionJobs) {
+    // Schema 10 stored Graph jobs as JSON. Treat legacy failures without an
+    // explicit retry time as terminal so upgrading cannot restart a cost loop.
+    if (job.nextRetryAt === undefined) job.nextRetryAt = null;
+  }
   for (const event of snapshot.events) {
     event.temporal = { ...event.temporal, eventType: normalizeStandardEventType(event.temporal.eventType) };
   }

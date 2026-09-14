@@ -178,4 +178,31 @@ describe('element projection and retrieval', () => {
     expect(memory.listEvents()).toHaveLength(1);
     expect(memory.listElements()).toHaveLength(0);
   });
+
+  it('stops automatically claiming an Element projection after three failures', async () => {
+    const memory = StrataGate.inMemory({ blockTurnSize: 1, summarizer });
+    await memory.appendTurn({ user: 'source', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    await memory.addEvent({
+      title: 'Permanent failure',
+      summary: 'This projection never succeeds.',
+      sourceBlockId: block.id,
+      sourceMessageIds: [block.l5Raw[0]!.id],
+    });
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const claim = await memory.claimNextElementProjection();
+      expect(claim).not.toBeNull();
+      await memory.failElementProjection(claim!.jobId, new Error('permanent failure'));
+    }
+
+    expect(await memory.claimNextElementProjection()).toBeNull();
+    expect(memory.listElementProjectionJobs()[0]).toMatchObject({
+      status: 'failed', attempts: 3, lastError: 'permanent failure',
+    });
+    const exhausted = memory.listElementProjectionJobs()[0]!;
+    exhausted.status = 'pending';
+    exhausted.attempts = 125;
+    expect(await memory.claimNextElementProjection()).toBeNull();
+  });
 });

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.70 - 2026-09-14
+
+- Bound Graph and Element projection work to three attempts with persisted retry timing, terminal failure handling, pending-job priority, and upgrade-safe normalization for existing Graph jobs.
+- Reduce Graph projection context and output size, avoid duplicate Graph calls after max-token truncation, and make scheduled versus terminal retries explicit in the status UI.
+
 ## 0.2.69 - 2026-09-14
 
 - Clearly separate retrieved memory candidates from the memories actually adopted by an answer, with compact answer-tail citations and an expandable, Evidence Gate-aware multi-round retrieval trace.

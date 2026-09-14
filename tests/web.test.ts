@@ -68,7 +68,7 @@ const snapshot: StrataGateSnapshot = {
   graphEdges: [],
   graphProjectionJobs: [{
     id: 'gproj_1', sourceEventIds: ['evt_1'], projectorVersion: 1, status: 'completed', attempts: 1,
-    priority: 1, nodeIds: ['node_1'], edgeIds: [], reason: 'projected', lastError: null,
+    priority: 1, nodeIds: ['node_1'], edgeIds: [], reason: 'projected', lastError: null, nextRetryAt: null,
     createdAt: '2026-08-18T00:00:00.000Z', updatedAt: '2026-08-18T00:00:00.000Z',
   }],
   elements: [{
@@ -383,7 +383,7 @@ describe('StrataGate admin routes', () => {
       }],
       graphProjectionJobs: [{
         ...snapshot.graphProjectionJobs[0]!, id: 'gproj_failed', status: 'failed' as const,
-        attempts: 2, lastError: 'graph failed', nodeIds: [],
+        attempts: 2, lastError: 'graph failed', nextRetryAt: '2026-08-18T00:05:00.000Z', nodeIds: [],
       }],
     }
     const retryRuntime = {
@@ -417,16 +417,50 @@ describe('StrataGate admin routes', () => {
       adminSnapshot: async () => failedSnapshot,
       adminWorkspaceName: () => 'Retry workspace',
     } as unknown as StrataGateRuntime)
+    expect(overview.body.namespaces[0]).toMatchObject({
+      processingJobs: 1,
+      processingJobDetails: [expect.objectContaining({
+        kind: 'graph-projection', id: 'gproj_failed', status: 'failed',
+        nextRetryAt: '2026-08-18T00:05:00.000Z',
+      })],
+    })
     expect(overview.body.namespaces[0].failedJobDetails).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: 'event-extraction', id: 'blk_1', nextRetryAt: null,
         blockIds: ['blk_1'], threadIds: ['thread-retry'], turnRange: [1, 4],
       }),
       expect.objectContaining({
-        kind: 'graph-projection', id: 'gproj_failed', nextRetryAt: null,
+        kind: 'graph-projection', id: 'gproj_failed', nextRetryAt: '2026-08-18T00:05:00.000Z',
         blockIds: ['blk_1'], threadIds: ['thread-retry'], sourceEventIds: ['evt_1'],
       }),
     ]))
+
+    const exhaustedOverview = await request('/api/stratagate/overview', 'GET', {
+      adminNamespaces: async () => ['dsh:project:test'],
+      adminSnapshot: async () => ({
+        ...failedSnapshot,
+        graphProjectionJobs: failedSnapshot.graphProjectionJobs.map((job) => ({ ...job, status: 'pending' as const, attempts: 125 })),
+      }),
+      adminWorkspaceName: () => 'Retry workspace',
+    } as unknown as StrataGateRuntime)
+    expect(exhaustedOverview.body.namespaces[0]).toMatchObject({ processingJobs: 0, processingJobDetails: [] })
+
+    const finalAttemptOverview = await request('/api/stratagate/overview', 'GET', {
+      adminNamespaces: async () => ['dsh:project:test'],
+      adminSnapshot: async () => ({
+        ...failedSnapshot,
+        graphProjectionJobs: failedSnapshot.graphProjectionJobs.map((job) => ({
+          ...job, status: 'running' as const, attempts: 3, nextRetryAt: null,
+        })),
+      }),
+      adminWorkspaceName: () => 'Retry workspace',
+    } as unknown as StrataGateRuntime)
+    expect(finalAttemptOverview.body.namespaces[0]).toMatchObject({
+      processingJobs: 1,
+      processingJobDetails: [expect.objectContaining({
+        kind: 'graph-projection', status: 'running', attempts: 3,
+      })],
+    })
   })
 
   it('summarizes namespaces and returns paginated memories', async () => {
