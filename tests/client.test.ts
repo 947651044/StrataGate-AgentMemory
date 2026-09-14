@@ -1191,6 +1191,7 @@ describe('StrataGate Web client contract', () => {
     expect(statusSource).toContain('等待更多对话')
     expect(statusSource).toContain('查看技术详情')
     expect(statusSource).toContain('计划重试：')
+    expect(statusSource).toContain('自动重试已停止')
     expect(statusSource).toContain('只读取最新状态，不会触发模型调用。')
     expect(statusSource).toContain('正在读取…')
     expect(statusSource).toContain('状态已更新')

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import type { Context } from '@deepseek-ai/cordis'
 import {
+  DERIVATION_MAX_ATTEMPTS,
   deterministicBlockLayers,
   estimateTokens,
   EXTERNAL_MEMORY_EXPORT_PROMPT_ZH_CN,
@@ -32,6 +33,16 @@ function currentPluginVersion(): string {
 }
 
 const STRATAGATE_DSH_VERSION = currentPluginVersion()
+
+function graphProjectionIsProcessing(job: {
+  status: string
+  attempts: number
+  nextRetryAt: string | null
+}): boolean {
+  if (job.status === 'running') return true
+  return job.attempts < DERIVATION_MAX_ATTEMPTS && (job.status === 'pending'
+    || (job.status === 'failed' && job.nextRetryAt !== null))
+}
 
 function installedPackageVersion(names: readonly string[]): string {
   for (const name of names) {
@@ -410,7 +421,7 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
         kind: 'graph-projection' as const,
         status: job.status,
         attempts: job.attempts,
-        nextRetryAt: null,
+        nextRetryAt: job.nextRetryAt,
         lastError: job.lastError?.slice(0, 500) ?? null,
         lastErrorFull: job.lastError,
         updatedAt: job.updatedAt,
@@ -426,7 +437,7 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
       + snapshot.graphProjectionJobs.filter(({ status }) => status === 'failed').length
     const processingJobs = snapshot.summaryJobs.filter(({ status, nextRetryAt }) => status === 'pending' || status === 'running' || (status === 'failed' && nextRetryAt !== null)).length
       + snapshot.extractionJobs.filter(({ status, nextRetryAt }) => status === 'running' || (status === 'failed' && nextRetryAt !== null)).length
-      + snapshot.graphProjectionJobs.filter(({ status }) => status === 'pending' || status === 'running').length
+      + snapshot.graphProjectionJobs.filter(graphProjectionIsProcessing).length
     const failedJobDetails = [
       ...snapshot.summaryJobs
         .filter(({ status }) => status === 'failed')
@@ -446,7 +457,7 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
         .filter(({ status, nextRetryAt }) => status === 'running' || (status === 'failed' && nextRetryAt !== null))
         .map((job) => describeBlockJob('event-extraction', job)),
       ...snapshot.graphProjectionJobs
-        .filter(({ status }) => status === 'pending' || status === 'running')
+        .filter(graphProjectionIsProcessing)
         .map(describeGraphJob),
     ]
     const timestamps = [

@@ -290,6 +290,93 @@ describe('DeepSeek Harness model JSON retries', () => {
     expect(calls.mock.calls[0]?.[0].tools?.[0]?.parameters?.properties?.nodes?.items?.required).toContain('tags')
     expect(calls.mock.calls[0]?.[0].system).toContain('tags describe the node')
   })
+
+  it('compacts historical Graph context before sending it to the model', async () => {
+    const event = {
+      id: 'evt_compact', title: 'Compact graph', summary: 'Only touched records should be returned.',
+      narrative: '', tags: [], quotes: [], sourceMessageIds: ['msg_compact'], sourceBlockId: 'blk_compact',
+      temporal: {}, scope: 'project' as const, criticality: 'routine' as const, confidence: 0.9,
+      status: 'active' as const, supersededBy: null,
+      weight: { mentionCount: 1, lastAdoptedTurn: 1, lastRetrievedAt: null, pinned: false, floorWeight: 0, forcedCap: null },
+      createdAt: '2026-09-14T00:00:00.000Z', updatedAt: '2026-09-14T00:00:00.000Z',
+    }
+    const existingNodes = Array.from({ length: 38 }, (_, index) => ({
+      id: `node_${index}`, name: `Node ${index}`, type: 'project' as const, aliases: [], tags: ['project'],
+      currentState: 'state '.repeat(300), status: 'active' as const, confidence: 0.95,
+      sourceEventIds: Array.from({ length: 24 }, (__, source) => `evt_${source}`),
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-09-14T00:00:00.000Z',
+      facts: Array.from({ length: 20 }, (__, fact) => ({
+        id: `fact_${index}_${fact}`, key: `key_${fact}`, value: 'value '.repeat(100), status: 'active' as const,
+        confidence: 0.8, sourceEventIds: [event.id], createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-09-14T00:00:00.000Z',
+      })),
+    }))
+    const existingEdges = Array.from({ length: 113 }, (_, index) => ({
+      id: `edge_${index}`, fromNodeId: `node_${index % 38}`, toNodeId: `node_${(index + 1) % 38}`,
+      relation: 'related', status: 'active' as const, confidence: 0.8, sourceEventIds: [event.id],
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-09-14T00:00:00.000Z',
+    }))
+    const context = { jobId: 'gproj_compact', projectorVersion: 1, events: [event], existingNodes, existingEdges }
+    const proposedNodes = [
+      ...Array.from({ length: 6 }, (_, index) => ({
+        ref: `invalid_${index}`, name: `Invalid ${index}`, type: 'project', tags: [], sourceEventIds: ['evt_unknown'],
+      })),
+      ...Array.from({ length: 30 }, (_, index) => ({
+        ref: `proposal_${index}`, name: `Proposal ${index}`, type: 'project', tags: [], sourceEventIds: [event.id],
+      })),
+    ]
+    const proposedEdges = [
+      ...Array.from({ length: 6 }, (_, index) => ({
+        fromRef: `proposal_${index}`, toRef: `proposal_${index + 1}`,
+        relation: 'invalid provenance', sourceEventIds: ['evt_unknown'],
+      })),
+      ...Array.from({ length: 40 }, (_, index) => ({
+        fromRef: `proposal_${index % 24}`, toRef: `proposal_${(index + 1) % 24}`,
+        relation: 'related', sourceEventIds: [event.id],
+      })),
+    ]
+    const { bridge, session, calls } = modelBridge([{
+      tool: { reason: 'projected', nodes: proposedNodes, edges: proposedEdges },
+    }])
+
+    const result = await bridge.run(session, () => bridge.graphProjector(context))
+
+    const request = calls.mock.calls[0]?.[0] as any
+    const payload = JSON.parse(request.messages[0].content[0].text)
+    expect(payload.existingNodes).toHaveLength(32)
+    expect(payload.existingEdges).toHaveLength(60)
+    expect(payload.existingNodes[0].currentState).toHaveLength(600)
+    expect(payload.existingNodes[0].facts).toHaveLength(12)
+    expect(payload.existingNodes[0]).not.toHaveProperty('confidence')
+    expect(payload.existingNodes[0]).not.toHaveProperty('createdAt')
+    expect(payload.existingNodes[0].facts[0]).not.toHaveProperty('id')
+    expect(payload.existingEdges[0]).not.toHaveProperty('id')
+    expect(JSON.stringify(payload).length).toBeLessThan(JSON.stringify(context).length * 0.35)
+    expect(request.system).toContain('never echo unchanged historical graph records')
+    expect(result.nodes).toHaveLength(24)
+    expect(result.edges).toHaveLength(32)
+    expect(result.nodes[0]?.name).toBe('Proposal 0')
+    expect(result.edges[0]?.relation).toBe('related')
+  })
+
+  it('does not pay for an identical second Graph call after max-token truncation', async () => {
+    const event = {
+      id: 'evt_truncated', title: 'Truncated graph', summary: 'Graph output reached its token limit.',
+      narrative: '', tags: [], quotes: [], sourceMessageIds: ['msg_truncated'], sourceBlockId: 'blk_truncated',
+      temporal: {}, scope: 'project' as const, criticality: 'routine' as const, confidence: 0.9,
+      status: 'active' as const, supersededBy: null,
+      weight: { mentionCount: 1, lastAdoptedTurn: 1, lastRetrievedAt: null, pinned: false, floorWeight: 0, forcedCap: null },
+      createdAt: '2026-09-14T00:00:00.000Z', updatedAt: '2026-09-14T00:00:00.000Z',
+    }
+    const { bridge, session, calls } = modelBridge([
+      { text: '{"reason":"truncated",', finish: 'max-tokens' },
+      { tool: { reason: 'must not run', nodes: [], edges: [] } },
+    ])
+
+    await expect(bridge.run(session, () => bridge.graphProjector({
+      jobId: 'gproj_truncated', projectorVersion: 1, events: [event], existingNodes: [], existingEdges: [],
+    }))).rejects.toThrow('after 1 attempt')
+    expect(calls).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('reasoningEffort off compatibility', () => {

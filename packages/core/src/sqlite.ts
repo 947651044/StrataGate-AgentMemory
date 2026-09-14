@@ -4,6 +4,7 @@ import {
   StorageConflictError,
   assertValidSnapshot,
   cloneSnapshot,
+  normalizeSnapshot,
   type ElementProjectionJob,
   type ExtractionJob,
   type BlockSummaryJob,
@@ -793,8 +794,7 @@ export class SqliteStorage implements StorageAdapter {
       externalMemoryImportJobs,
       successfulModelResponses,
     };
-    assertValidSnapshot(snapshot);
-    return { snapshot: cloneSnapshot(snapshot), revision: space.revision };
+    return { snapshot: cloneSnapshot(normalizeSnapshot(snapshot)), revision: space.revision };
   }
 
   async save(namespace: string, snapshot: StrataGateSnapshot, expectedRevision: number): Promise<number> {

@@ -257,6 +257,54 @@ function renderBlocksForDiagnostics(blocks: readonly ContentBlock[], finish: str
   return rendered || `[no model blocks; finish=${finish}]`
 }
 
+function compactGraphProjectionContext(context: GraphProjectionContext): unknown {
+  const compactValue = (value: string | string[]): string | string[] => Array.isArray(value)
+    ? value.slice(0, 12).map((entry) => entry.slice(0, 160))
+    : value.slice(0, 400)
+  return {
+    jobId: context.jobId,
+    projectorVersion: context.projectorVersion,
+    events: context.events.map((event) => ({
+      id: event.id,
+      title: event.title,
+      summary: event.summary,
+      narrative: event.narrative,
+      tags: event.tags,
+      quotes: event.quotes,
+      temporal: event.temporal,
+      scope: event.scope,
+      criticality: event.criticality,
+      status: event.status,
+    })),
+    existingNodes: context.existingNodes.slice(0, 32).map((node) => ({
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      aliases: node.aliases.slice(0, 12),
+      tags: node.tags?.slice(0, 12),
+      currentState: node.currentState.slice(0, 600),
+      facts: node.facts
+        .filter(({ status }) => status === 'active' || status === 'disputed')
+        .slice(-12)
+        .map((fact) => ({
+          key: fact.key,
+          value: compactValue(fact.value),
+          status: fact.status,
+          sourceEventIds: fact.sourceEventIds.slice(-16),
+        })),
+      status: node.status,
+      sourceEventIds: node.sourceEventIds.slice(-16),
+    })),
+    existingEdges: context.existingEdges.slice(-60).map((edge) => ({
+      fromNodeId: edge.fromNodeId,
+      toNodeId: edge.toNodeId,
+      relation: edge.relation,
+      status: edge.status,
+      sourceEventIds: edge.sourceEventIds.slice(-16),
+    })),
+  }
+}
+
 export class DshModelBridge {
   private readonly sessions = new AsyncLocalStorage<{ session?: Session; sessionId: Session['id'] }>()
   private readonly successfulResponses: SuccessfulModelResponse[] = []
@@ -373,8 +421,8 @@ export class DshModelBridge {
   readonly graphProjector: GraphProjector = async (context: GraphProjectionContext): Promise<GraphProjectionResult> => {
     const eventIds = new Set(context.events.map((event) => event.id))
     const raw = object(await this.callStructured('graphProjector',
-      `Project the supplied Events into the current Knowledge Graph, then call ${STRUCTURED_TOOLS.graphProjector.name} exactly once. Events are the sole source of truth; never use legacy Element data. Return stable entity nodes for people, projects, organizations, tools, and places. Use aliases to merge spelling/case/separator variants. Give every returned node 1-6 concise semantic role tags such as benchmark, evaluation, memory-plugin, parser, or development-tool; tags describe the node's specific role and never replace its person/project/organization/tool/place type. Reuse stable tag wording when possible. Put attributes in node facts and every relationship in a directed edge using fromRef/toRef—never encode a relationship as a fact string. Prefer concise canonical Chinese relation labels such as 使用、属于、创建、参与、贡献、依赖、位于、相关. Every node, fact, and edge must cite only supplied Event ids. Do not return text.`,
-      context,
+      `Project the supplied Events into the current Knowledge Graph, then call ${STRUCTURED_TOOLS.graphProjector.name} exactly once. Events are the sole source of truth; never use legacy Element data. Return only nodes and edges touched by the supplied Events; never echo unchanged historical graph records. Return at most 24 nodes and 32 edges. Use stable entity nodes for people, projects, organizations, tools, and places. Use aliases to merge spelling/case/separator variants. Give every returned node 1-6 concise semantic role tags such as benchmark, evaluation, memory-plugin, parser, or development-tool; tags describe the node's specific role and never replace its person/project/organization/tool/place type. Reuse stable tag wording when possible. Put attributes in node facts and every relationship in a directed edge using fromRef/toRef—never encode a relationship as a fact string. Prefer concise canonical Chinese relation labels such as 使用、属于、创建、参与、贡献、依赖、位于、相关. Every node, fact, and edge must cite only supplied Event ids. Do not return text.`,
+      compactGraphProjectionContext(context),
     ))
     const nodes = (Array.isArray(raw.nodes) ? raw.nodes : []).flatMap((candidate) => {
       const item = object(candidate)
@@ -397,7 +445,7 @@ export class DshModelBridge {
         ...(text(item.validTo) ? { validTo: text(item.validTo) } : {}),
         ...(typeof item.confidence === 'number' ? { confidence: item.confidence } : {}), sourceEventIds,
       }]
-    })
+    }).slice(0, 24)
     const refs = new Set(nodes.map(({ ref }) => ref))
     const edges = (Array.isArray(raw.edges) ? raw.edges : []).flatMap((candidate) => {
       const item = object(candidate)
@@ -411,7 +459,7 @@ export class DshModelBridge {
         ...(text(item.validTo) ? { validTo: text(item.validTo) } : {}),
         ...(typeof item.confidence === 'number' ? { confidence: item.confidence } : {}), sourceEventIds,
       }]
-    })
+    }).slice(0, 32)
     return { reason: text(raw.reason, 'Projected Event evidence into the Knowledge Graph.'), nodes, edges }
   }
 
@@ -461,7 +509,9 @@ export class DshModelBridge {
     let useOff = await this.shouldUseOff(baseRoute)
     let lastError: ModelJsonResponseError | undefined
     let lastResponse = ''
+    let attemptsUsed = 0
     for (let attempt = 1; attempt <= JSON_RESPONSE_ATTEMPTS; attempt += 1) {
+      attemptsUsed = attempt
       const message = createUserMessage({
         content: [{ type: 'text', text: JSON.stringify(payload) }],
         source: { kind: 'plugin', plugin: 'stratagate-memory' },
@@ -572,13 +622,14 @@ export class DshModelBridge {
             { cause: error, response: responseForError },
           )
           : error
+        if (kind === 'graphProjector' && finish.kind === 'max-tokens') break
         if (attempt < JSON_RESPONSE_ATTEMPTS) {
           this.ctx.logger.warn(`stratagate-memory model returned an invalid structured tool call; retrying (${attempt}/${JSON_RESPONSE_ATTEMPTS})`)
         }
       }
     }
     throw new ModelJsonResponseError(
-      `StrataGate model did not produce a valid ${STRUCTURED_TOOLS[kind].name} call after ${JSON_RESPONSE_ATTEMPTS} attempts`,
+      `StrataGate model did not produce a valid ${STRUCTURED_TOOLS[kind].name} call after ${attemptsUsed} attempt${attemptsUsed === 1 ? '' : 's'}`,
       { cause: lastError, response: lastResponse },
     )
   }

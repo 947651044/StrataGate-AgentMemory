@@ -512,6 +512,42 @@ describe('SQLite persistence', () => {
     migrated.close();
   });
 
+  it('normalizes legacy Graph jobs missing retry metadata at the SQLite load boundary', async () => {
+    const filename = await databasePath();
+    const namespace = 'legacy:graph-retry';
+    const memory = await StrataGate.open({
+      database: filename,
+      namespace,
+      blockTurnSize: 1,
+      summarizer: nonExtractingSummarizer,
+      graphProjector: async () => ({ reason: 'unused', nodes: [], edges: [] }),
+      now: fixedNow,
+    });
+    await memory.appendTurn({ user: 'source', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    await memory.addEvent({
+      title: 'Legacy Graph job', summary: 'Retry metadata did not exist yet.',
+      sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id],
+    });
+    const claim = await memory.claimNextGraphProjection();
+    await memory.failGraphProjection(claim!.jobId, new Error('legacy failure'));
+    await memory.close();
+
+    const legacy = new Database(filename);
+    const row = legacy.prepare('SELECT jobs_json FROM graph_state WHERE namespace = ?')
+      .get(namespace) as { jobs_json: string };
+    const jobs = JSON.parse(row.jobs_json) as Array<{ nextRetryAt?: string | null }>;
+    delete jobs[0]!.nextRetryAt;
+    legacy.prepare('UPDATE graph_state SET jobs_json = ? WHERE namespace = ?')
+      .run(JSON.stringify(jobs), namespace);
+    legacy.close();
+
+    const storage = new SqliteStorage({ filename });
+    const loaded = await storage.load(namespace);
+    expect(loaded?.snapshot.graphProjectionJobs[0]?.nextRetryAt).toBeNull();
+    await storage.close();
+  });
+
   it('adds nullable thread ownership when migrating a schema-v4 database', async () => {
     const filename = await databasePath();
     const legacy = new Database(filename);

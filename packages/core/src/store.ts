@@ -24,6 +24,7 @@ import {
 import {
   STRATAGATE_STORAGE_SCHEMA_VERSION,
   KNOWLEDGE_GRAPH_PROJECTOR_VERSION,
+  DERIVATION_MAX_ATTEMPTS,
   cloneSnapshot,
   normalizeSnapshot,
   type ElementProjectionJob,
@@ -209,7 +210,6 @@ const EXTERNAL_MEMORY_AUTO_APPLY_CONFIDENCE = 0.85;
 function externalMemoryFingerprint(value: Pick<ExternalMemoryCandidate, 'title' | 'summary'>): string {
   return `${normalizeSearchText(value.title)}\u0000${normalizeSearchText(value.summary)}`;
 }
-const DERIVATION_MAX_ATTEMPTS = 3;
 const DERIVATION_BACKOFF_MS = 1_000;
 
 export class StrataGate {
@@ -401,6 +401,7 @@ export class StrataGate {
               ...job,
               status: 'failed',
               lastError: 'Graph projection was interrupted before completion.',
+              nextRetryAt: memory.retryAt(job.attempts),
               updatedAt: now,
             });
           }
@@ -578,6 +579,7 @@ export class StrataGate {
         job.status = 'pending';
         job.attempts = 0;
         job.lastError = null;
+        job.nextRetryAt = null;
         job.updatedAt = toUtc8Iso(this.now());
       });
       const batch = await this.claimGraphProjection(jobId);
@@ -1282,7 +1284,10 @@ export class StrataGate {
   async claimNextElementProjection(): Promise<ElementProjectionContext | null> {
     return this.commitMutation(() => {
       const job = [...this.elementProjectionJobs.values()]
-        .find((candidate) => candidate.status === 'pending' || candidate.status === 'failed');
+        .filter((candidate) => candidate.attempts < DERIVATION_MAX_ATTEMPTS
+          && (candidate.status === 'pending' || candidate.status === 'failed'))
+        .sort((left, right) => Number(left.status !== 'pending') - Number(right.status !== 'pending')
+          || left.createdAt.localeCompare(right.createdAt))[0];
       if (!job) return null;
       const events = job.sourceEventIds.flatMap((id) => this.events.find((event) => event.id === id) ?? []);
       if (events.length === 0) {
@@ -1343,10 +1348,15 @@ export class StrataGate {
 
   private async claimGraphProjection(jobId?: string): Promise<GraphProjectionContext | null> {
     return this.commitMutation(() => {
+      const now = this.now().getTime();
       const job = [...this.graphProjectionJobs.values()]
         .filter((candidate) => (jobId === undefined || candidate.id === jobId)
-          && (candidate.status === 'pending' || candidate.status === 'failed'))
-        .sort((left, right) => right.priority - left.priority || left.createdAt.localeCompare(right.createdAt))[0];
+          && candidate.attempts < DERIVATION_MAX_ATTEMPTS
+          && (candidate.status === 'pending'
+            || (candidate.status === 'failed' && candidate.nextRetryAt !== null
+              && Date.parse(candidate.nextRetryAt) <= now)))
+        .sort((left, right) => Number(left.status !== 'pending') - Number(right.status !== 'pending')
+          || right.priority - left.priority || left.createdAt.localeCompare(right.createdAt))[0];
       if (!job) return null;
       const events = job.sourceEventIds.flatMap((id) => this.events.find((event) => event.id === id) ?? []);
       if (events.length === 0) throw new Error(`Graph projection ${job.id} has no available source events`);
@@ -1360,14 +1370,14 @@ export class StrataGate {
       const relevantNodes = this.graphNodes.filter((node) => [node.name, ...node.aliases]
         .some((name) => eventText.includes(normalizeSearchText(name))))
         .concat([...this.graphNodes].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 24));
-      const existingNodes = [...new Map(relevantNodes.map((node) => [node.id, node])).values()].slice(0, 80);
+      const existingNodes = [...new Map(relevantNodes.map((node) => [node.id, node])).values()].slice(0, 32);
       const nodeIds = new Set(existingNodes.map(({ id }) => id));
       return {
         jobId: job.id,
         projectorVersion: job.projectorVersion,
         events: structuredClone(events),
         existingNodes: structuredClone(existingNodes),
-        existingEdges: structuredClone(this.graphEdges.filter(({ fromNodeId, toNodeId }) => nodeIds.has(fromNodeId) && nodeIds.has(toNodeId)).slice(-120)),
+        existingEdges: structuredClone(this.graphEdges.filter(({ fromNodeId, toNodeId }) => nodeIds.has(fromNodeId) && nodeIds.has(toNodeId)).slice(-60)),
       };
     });
   }
@@ -1395,6 +1405,7 @@ export class StrataGate {
       job.edgeIds = touched.edgeIds;
       job.reason = typeof result.reason === 'string' ? result.reason.trim().replace(/\s+/g, ' ').slice(0, 500) || null : null;
       job.lastError = null;
+      job.nextRetryAt = null;
       job.updatedAt = toUtc8Iso(this.now());
       return touched;
     });
@@ -1406,6 +1417,7 @@ export class StrataGate {
       if (job.status === 'completed') return;
       job.status = 'failed';
       job.lastError = errorMessage(error);
+      job.nextRetryAt = this.retryAt(job.attempts);
       job.updatedAt = toUtc8Iso(this.now());
     });
   }
@@ -1819,7 +1831,7 @@ export class StrataGate {
       id: this.graphIdFactory('gproj'), sourceEventIds: ids,
       projectorVersion: KNOWLEDGE_GRAPH_PROJECTOR_VERSION,
       status: 'pending', attempts: 0, priority, nodeIds: [], edgeIds: [],
-      reason: null, lastError: null, createdAt: now, updatedAt: now,
+      reason: null, lastError: null, nextRetryAt: null, createdAt: now, updatedAt: now,
     };
     this.graphProjectionJobs.set(job.id, job);
     return job;
