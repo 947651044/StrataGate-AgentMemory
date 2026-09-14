@@ -6,7 +6,7 @@ function loadSupportHelpers(stateValues: unknown[] = [], globals: Record<string,
   const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
   const instrumented = source.replace(
     "    exports.name = 'stratagate-dsh'",
-    "    exports.__test = { feedbackDraftMarkdown, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, consumeFeedbackDeepLink, feedbackLinkTarget, navigateToFeedback, installFeedbackLinkNavigation, ProcessingStatus, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
+    "    exports.__test = { feedbackDraftMarkdown, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, consumeFeedbackDeepLink, feedbackLinkTarget, navigateToFeedback, installFeedbackLinkNavigation, ProcessingStatus, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
   )
   let definition: any
   runInNewContext(instrumented, {
@@ -728,7 +728,16 @@ describe('StrataGate Web client contract', () => {
     const settingsSource = source.slice(source.indexOf('function SettingsPage'), source.indexOf('function MemoryPage'))
     expect(settingsSource).toContain("['system', '✓', '系统状态'")
     expect(settingsSource).toContain("['audit', '↗', '使用记录'")
-    expect(settingsSource).toContain("['raw', '{}', '原始数据'")
+    expect(settingsSource).toContain("['raw', '{}', '查看原始数据'")
+    expect(settingsSource).toContain("'记忆配置'")
+    expect(settingsSource).toContain("'数据与存储'")
+    expect(settingsSource).toContain("'运行与诊断'")
+    expect(settingsSource).toContain("'Schema、模型与项目配置'")
+    expect(settingsSource).toContain("'数据目录与原始数据'")
+    expect(settingsSource).toContain("'系统状态、使用记录与后台任务'")
+    expect(settingsSource).toContain("['status', '↻', '后台任务'")
+    expect(settingsSource).toContain("api('storage/open-directory', {}, { method: 'POST' })")
+    expect(settingsSource).toContain('navigator.clipboard.writeText(dataDirectory)')
     expect(settingsSource).toContain("back: { name: 'settings' }")
     expect(source).toContain("function ImportPage({ namespace, onBack, refresh })")
     expect(source).toContain("api('import', { namespace }")
@@ -742,6 +751,33 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain("operation: 'status', namespace, jobId: job.jobId")
     expect(source).toContain('连接暂时中断，正在自动重试')
     expect(source).toContain('撤销本次导入')
+  })
+
+  it('copies the real data directory and sends the native open request from Advanced settings', async () => {
+    let copied = ''
+    const requests: Array<{ url: string; method?: string }> = []
+    const { SettingsPage } = loadSupportHelpers([], {
+      navigator: { clipboard: { writeText: async (value: string) => { copied = value } } },
+      fetch: async (url: string, options: { method?: string } = {}) => {
+        requests.push({ url, ...(options.method ? { method: options.method } : {}) })
+        return { ok: true, json: async () => ({ opened: true }) }
+      },
+    })
+    const dataDirectory = 'C:\\Users\\tester\\.dsh\\stratagate'
+    const tree = SettingsPage({
+      selected: { schemaVersion: 10, blockTurnSize: 6, blockDecayLambda: 0.3, currentTurn: 8, workspaceName: 'StrataGate' },
+      namespace: 'dsh:project:test', dataDirectory, onBack: () => {}, setView: () => {},
+      updateSettings: () => Promise.resolve(), savingSettings: false, usePluginSettings: null,
+      setEffort: null, resetEffort: null,
+    })
+    const storageButtons = elementProps(tree).filter((props) => props.className === 'sg-storage-button')
+    expect(storageButtons).toHaveLength(2)
+    storageButtons[0]!.onClick()
+    storageButtons[1]!.onClick()
+    await Promise.resolve()
+    expect(requests).toEqual([{ url: '/api/stratagate/storage/open-directory', method: 'POST' }])
+    expect(copied).toBe(dataDirectory)
+    expect(elementProps(tree).find((props) => props.className === 'sg-storage-path')?.title).toBe(dataDirectory)
   })
 
   it('inherits the resolved light, dark, or system appearance from DSH theme tokens', () => {
@@ -1073,7 +1109,7 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain('原始内容已经保存，不会丢失。')
     expect(source).toContain('原始对话已保存，不会丢失')
     expect(source).toContain('没有记录技术错误。')
-    expect(source).toContain("['raw', '{}', '原始数据'")
+    expect(source).toContain("['raw', '{}', '查看原始数据'")
     expect(source).toContain("['audit', '↗', '使用记录'")
     expect(source).toContain("['settings', '⚙', '高级设置'")
     expect(source).not.toContain("['responses', '模型响应']")

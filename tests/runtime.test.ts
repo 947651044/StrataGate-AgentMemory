@@ -1,6 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { StrataGate } from '@diqier/stratagate'
@@ -51,6 +51,23 @@ function turnEvents(turn = 1): SessionEvent[] {
 }
 
 describe('DSH runtime ingestion', () => {
+  it('derives the displayed data directory from the resolved database path and opens that exact directory', async () => {
+    const database = join('relative-stratagate-data', 'memory.db')
+    const opened: string[] = []
+    const runtime = new StrataGateRuntime({
+      database, namespaceMode: 'project', namespacePrefix: 'dsh', globalNamespace: 'global',
+      blockTurnSize: 6, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048,
+    }, fakeModels, undefined, undefined, undefined, async (path) => { opened.push(path) })
+    try {
+      const expected = resolve('relative-stratagate-data')
+      expect(runtime.adminDataDirectory()).toBe(expected)
+      await expect(runtime.adminOpenDataDirectory(new AbortController().signal)).resolves.toEqual({ opened: true, path: expected })
+      expect(opened).toEqual([expected])
+    } finally {
+      await runtime.close()
+    }
+  })
+
   it('consumes persisted graph jobs without a new host session event', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-background-worker-'))
     const database = join(directory, 'memory.db')

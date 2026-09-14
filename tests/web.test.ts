@@ -122,6 +122,7 @@ const runtime = {
   adminNamespaces: async () => ['dsh:project:test'],
   adminSnapshot: async (namespace: string) => namespace === 'dsh:project:test' ? snapshot : null,
   adminSnapshotEntries: async () => [{ namespace: 'dsh:project:test', revision: 7, snapshot }],
+  adminDataDirectory: () => 'C:\\Users\\tester\\.dsh\\stratagate',
   adminWorkspaceName: () => 'StrataGate',
   adminSetBlockTurnSize: async (value: number) => {
     updatedTurnSize = value
@@ -164,6 +165,23 @@ async function request(url: string, method = 'GET', targetRuntime = runtime, bod
 }
 
 describe('StrataGate admin routes', () => {
+  it('reports and opens only the configured StrataGate data directory', async () => {
+    const opened: string[] = []
+    const storageRuntime = {
+      adminDataDirectory: () => 'C:\\Users\\tester\\.dsh\\stratagate',
+      adminOpenDataDirectory: async () => {
+        const path = 'C:\\Users\\tester\\.dsh\\stratagate'
+        opened.push(path)
+        return { opened: true, path }
+      },
+    } as unknown as StrataGateRuntime
+    const result = await request('/api/stratagate/storage/open-directory', 'POST', storageRuntime)
+    expect(result).toMatchObject({ status: 200, body: { opened: true, path: 'C:\\Users\\tester\\.dsh\\stratagate' } })
+    expect(opened).toEqual(['C:\\Users\\tester\\.dsh\\stratagate'])
+    const rejected = await request('/api/stratagate/storage/open-directory?path=C%3A%5Cother', 'GET', storageRuntime)
+    expect(rejected.status).toBe(405)
+  })
+
   it('reads and saves local feedback drafts through the feedback route', async () => {
     const calls: unknown[] = []
     const feedbackRuntime = {
@@ -418,6 +436,7 @@ describe('StrataGate admin routes', () => {
     expect(overview.body).toMatchObject({
       readonly: true,
       settingsWritable: true,
+      dataDirectory: 'C:\\Users\\tester\\.dsh\\stratagate',
       pluginVersion: packageVersion,
       namespaces: [{
         workspaceName: 'StrataGate',
