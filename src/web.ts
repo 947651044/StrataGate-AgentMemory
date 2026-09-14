@@ -379,6 +379,7 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
   return {
     readonly: true,
     settingsWritable: true,
+    dataDirectory: runtime.adminDataDirectory?.() ?? null,
     pluginVersion: STRATAGATE_DSH_VERSION,
     harnessVersion: installedPackageVersion(['@deepseek-ai/dsh', '@deepseek-ai/dsh-session']),
     namespaces: rows,
@@ -1095,6 +1096,9 @@ export async function handleAdminRequest(runtime: StrataGateRuntime, req: WebReq
     } else if (path === '/api/stratagate/settings') {
       if (req.method !== 'PATCH') throw new AdminHttpError(405, 'StrataGate settings require PATCH')
       sendJson(res, 200, await updateSettings(runtime, url))
+    } else if (path === '/api/stratagate/storage/open-directory') {
+      if (req.method !== 'POST') throw new AdminHttpError(405, 'StrataGate data directory open requires POST')
+      sendJson(res, 200, await runtime.adminOpenDataDirectory(AbortSignal.timeout(15_000)))
     } else if (path === '/api/stratagate/blocks/expand') {
       if (req.method !== 'PATCH') throw new AdminHttpError(405, 'StrataGate Block expansion requires PATCH')
       sendJson(res, 200, await expandBlock(runtime, url))

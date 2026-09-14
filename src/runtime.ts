@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { openNativePath } from '@deepseek-ai/dsh-native-command'
 import type { Session, SessionEvent, SessionSeq } from '@deepseek-ai/dsh-session'
 import {
   estimateTokens,
@@ -197,6 +198,7 @@ export class StrataGateRuntime {
     private readonly onIngestError: (error: unknown) => void = () => {},
     private readonly flushNativeSession: (session: Session) => Promise<void> = async () => {},
     private readonly feedbackOrigin: () => string | undefined = () => undefined,
+    private readonly openPath: (path: string, signal: AbortSignal) => Promise<void> = openNativePath,
   ) {
     this.blockTurnSize = config.blockTurnSize
     this.blockDecayLambda = config.blockDecayLambda
@@ -1339,6 +1341,18 @@ export class StrataGateRuntime {
     this.settingsTail = update.then(() => {}, () => {})
     await update
     return value
+  }
+
+  adminDataDirectory(): string | null {
+    if (this.config.database === ':memory:') return null
+    return dirname(resolve(this.config.database))
+  }
+
+  async adminOpenDataDirectory(signal: AbortSignal): Promise<{ opened: true; path: string }> {
+    const path = this.adminDataDirectory()
+    if (!path) throw new Error('StrataGate is using in-memory storage, so no data directory is available')
+    await this.openPath(path, signal)
+    return { opened: true, path }
   }
 
   async adminExpandBlock(namespace: string, id: string, target: string | number): Promise<unknown> {

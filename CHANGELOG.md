@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.68 - 2026-09-14
+
+- Reorganize Advanced Settings into Memory Configuration, Data & Storage, and Runtime & Diagnostics while keeping existing memory and diagnostic behavior intact.
+- Show the resolved StrataGate data directory with copy and native folder-open actions, and move raw data, system status, usage records, and background jobs into their corresponding advanced sections.
+
 ## 0.2.67 - 2026-09-13
 
 - Repackage the current StrataGate settings and display-preference release as npm package `0.2.67`.
