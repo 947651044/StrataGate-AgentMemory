@@ -1197,7 +1197,8 @@ describe('DSH runtime ingestion', () => {
       })
       expect(runtime.needsRecordUse(activeSession)).toBe(true)
       const selectedRefs = [batch.evidenceRefs[0]!]
-      await runtime.recordUse(activeSession, 'call-audit-1', selectedRefs)
+      const recorded = await runtime.recordUse(activeSession, 'call-audit-1', selectedRefs) as Record<string, unknown>
+      expect(recorded).toMatchObject({ verdict: 'sufficient', missing: '', nextStrategy: 'answer' })
       expect(runtime.needsRecordUse(activeSession)).toBe(false)
 
       const audit = (await runtime.adminSnapshot(namespace))?.usageReceipts[0]

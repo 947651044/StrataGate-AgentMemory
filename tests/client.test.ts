@@ -400,6 +400,9 @@ describe('StrataGate Web client contract', () => {
                   { kind: 'block', id: 'block-1', title: 'Package manager', evidenceRef: 'block:block-1:level:4', batchId: 'batch_1', detailKind: 'blockId', level: 4, expanded: true },
                   { kind: 'block', id: 'block-2', title: 'Tooling notes', evidenceRef: 'block:block-2:level:2', batchId: 'batch_1', detailKind: 'blockId', level: 2 },
                 ],
+                verdict: 'sufficient',
+                missing: '',
+                nextStrategy: 'answer',
                 citations: [
                   { kind: 'event', id: 'event-1', title: 'Use pnpm', evidenceRef: 'event:event-1', batchId: 'batch_1', detailKind: 'eventId' },
                   { kind: 'graph', id: 'node-1', title: 'pnpm', evidenceRef: 'graph-node:node-1:expanded', batchId: 'batch_1', detailKind: 'nodeId', expanded: true },
@@ -424,6 +427,12 @@ describe('StrataGate Web client contract', () => {
     expect(matched.retrievedCount).toBe(5)
     expect(matched.retrievalGroups).toHaveLength(1)
     expect(matched.retrievalGroups[0].memories).toHaveLength(5)
+    expect(matched.retrievalGroups[0]).toMatchObject({ verdict: 'sufficient', nextStrategy: 'answer' })
+    const rendered = tail.render({ matched })
+    const renderedTail = JSON.stringify(rendered)
+    expect(renderedTail).toContain('本回答采用了 3 条记忆')
+    expect(renderedTail).toContain('· 查看检索过程')
+    expect(JSON.stringify(rendered[3])).not.toContain('pnpm compatibility')
     expect(tail.metadata.select({ turn: { turn: 7, data: { get: (key: string) => locationData.get(key) } }, seq: 2 })).toMatchObject({ turn: 7, citations: [], retrievalGroups: [] })
     const legacyUpdated = conversationDefinition.update({ state: started }, {
       event: {
@@ -440,14 +449,16 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain("event.data.name === 'memory_record_use'")
     expect(source).toContain("api('sources', { namespace: citation.namespace, [citation.detailKind]: citation.id })")
     expect(source).toContain('展开到 L')
-    expect(source).toContain("'本回答参考了 ' + citations.length + ' 条记忆'")
-    expect(source).toContain("'已进行 ' + retrievalGroups.length + ' 次检索，共返回 ' + retrievedCount + ' 条记忆，未采用'")
+    expect(source).toContain("'本回答采用了 ' + citations.length + ' 条记忆'")
+    expect(source).not.toContain('本回答参考了')
+    expect(source).toContain("'· 查看检索过程'")
+    expect(source).toContain("'检索 ' + retrievalGroups.length + ' 轮 · 返回 ' + retrievedCount + ' 条 · 未采用'")
     expect(source).toContain('sg-answer-retrieval-toggle')
     expect(source).toContain("'aria-expanded': showRetrieved")
     expect(source).toContain("'检索过程'")
     expect(source).toContain('retrievalGroupLabel(groupIndex)')
     expect(source).toContain("memoryIndex + 1 + '.'")
-    expect(source).toContain("open(memory, false)")
+    expect(source).toContain("open(memory, adopted)")
     expect(source).toContain("'检索候选 · 未采用'")
     expect(source).toContain("function CitationGraph({ citation, detail, primary, adopted = true })")
     expect(source).toContain("title: '关联信息'")
@@ -595,7 +606,7 @@ describe('StrataGate Web client contract', () => {
     expect(matched.retrievalGroups[0].memories.map((memory: any) => memory.title)).toEqual(['更早的检索结果'])
     expect(matched.retrievalGroups[1].memories.map((memory: any) => memory.title)).toEqual(['编辑器选择', '开发环境讨论'])
     const rendered = tail.render({ matched })
-    expect(JSON.stringify(rendered)).toContain('已进行 2 次检索，共返回 3 条记忆，未采用')
+    expect(JSON.stringify(rendered)).toContain('检索 2 轮 · 返回 3 条 · 未采用')
     expect(JSON.stringify(rendered)).not.toContain('stratagate-answer-citations')
     const retrievalHidden = tail.render({
       matched,
@@ -630,13 +641,12 @@ describe('StrataGate Web client contract', () => {
     })
     const expandedTail = expandedRegistrations.find(({ metadata }) => metadata.name === 'conversation.chat.turnTail')
     const expanded = expandedTail.render({ matched })
-    expect(JSON.stringify(expanded)).toContain('检索过程')
-    expect(JSON.stringify(expanded)).toContain('第一次检索')
-    expect(JSON.stringify(expanded)).toContain('第二次检索')
-    expect(JSON.stringify(expanded)).toContain('更早的检索结果')
-    expect(JSON.stringify(expanded)).toContain('编辑器选择')
-    expect(JSON.stringify(expanded)).toContain('开发环境讨论')
-    expect(JSON.stringify(expanded)).toContain('未采用')
+    expect(JSON.stringify(expanded)).toContain('retrievalGroups')
+    expect(source).toContain("retrievalGroupLabel(groupIndex) + ' · 返回 ' + group.count + ' 条'")
+    expect(source).toContain("adopted ? '最终采用' : '检索到 · 未采用'")
+    expect(source).toContain("'最终采用 ' + citations.length + ' 条'")
+    expect(source).toContain("if (group.verdict === 'sufficient') return '证据充分'")
+    expect(source).toContain("return '证据不足，继续检索'")
   })
 
   it('shows the unified project brand, mascot, usage count, and GitHub Star link', () => {
@@ -700,6 +710,15 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain('事件时间线')
     expect(source).toContain("{ '今天': [], '本周': [], '更早': [] }")
     expect(source).toContain('发生时间未知')
+    expect(source).toContain('记忆权重轨迹')
+    expect(source).toContain('当前权重')
+    expect(source).toContain('有效采用')
+    expect(source).toContain('最近采用')
+    expect(source).toContain('ⓘ 权重如何变化？')
+    expect(source).toContain('机制示意 · 非当前 Event 数据')
+    expect(source).toContain('检索不改变权重')
+    expect(source).toContain("event.weightTrajectory ? h('section'")
+    expect(source).toContain("event.weightTrajectory ? h('div', { className: 'sg-detail-section' }")
     expect(source).toContain('正在升级长期记忆')
     expect(source).toContain('搜索记忆、人物、项目、概念')
     expect(source).not.toContain("['overview', '概览']")

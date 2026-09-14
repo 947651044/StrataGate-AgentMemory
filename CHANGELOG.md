@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.69 - 2026-09-14
+
+- Clearly separate retrieved memory candidates from the memories actually adopted by an answer, with compact answer-tail citations and an expandable, Evidence Gate-aware multi-round retrieval trace.
+- Add per-Event memory weight trajectories derived from persisted adoption receipts and the existing decay function, including current weight and adoption metrics without treating retrievals as reinforcement.
+
 ## 0.2.68 - 2026-09-14
 
 - Reorganize Advanced Settings into Memory Configuration, Data & Storage, and Runtime & Diagnostics while keeping existing memory and diagnostic behavior intact.

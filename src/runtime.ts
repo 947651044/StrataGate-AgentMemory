@@ -656,6 +656,11 @@ export class StrataGateRuntime {
       retrievedMemories,
       incremented: eventIds.size + elementIds.size,
       evidenceRefs: selectedRefs,
+      ...(assessment === undefined ? {} : {
+        verdict: assessment.verdict,
+        missing: assessment.missing,
+        nextStrategy: assessment.nextStrategy,
+      }),
       duplicateEvidenceRefs,
       eventIds: [...eventIds],
       elementIds: [...elementIds],
