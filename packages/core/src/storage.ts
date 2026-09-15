@@ -2,7 +2,7 @@ import { BLOCK_DECAY_LAMBDA } from './blocks.js';
 import { normalizeStandardEventType } from './events.js';
 import type { ElementCard, EventCard, ExternalMemoryImportJob, GraphEdge, GraphNode, MemoryBlock, RawMessage } from './types.js';
 
-export const STRATAGATE_STORAGE_SCHEMA_VERSION = 10;
+export const STRATAGATE_STORAGE_SCHEMA_VERSION = 11;
 export const KNOWLEDGE_GRAPH_PROJECTOR_VERSION = 1;
 export const DERIVATION_MAX_ATTEMPTS = 3;
 
@@ -198,6 +198,10 @@ interface LegacySnapshotV9 extends Omit<StrataGateSnapshot, 'schemaVersion' | 'e
   schemaVersion: 9;
 }
 
+interface LegacySnapshotV10 extends Omit<StrataGateSnapshot, 'schemaVersion'> {
+  schemaVersion: 10;
+}
+
 function readyLegacyBlocks<T extends Omit<MemoryBlock, 'processingStatus'>>(blocks: readonly T[]): MemoryBlock[] {
   return blocks.map((block) => ({ ...structuredClone(block), processingStatus: 'ready' }));
 }
@@ -322,6 +326,11 @@ export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
       schemaVersion: STRATAGATE_STORAGE_SCHEMA_VERSION,
       externalMemoryImportJobs: [],
     };
+  } else if (schemaVersion === 10) {
+    snapshot = {
+      ...structuredClone(value as LegacySnapshotV10),
+      schemaVersion: STRATAGATE_STORAGE_SCHEMA_VERSION,
+    };
   } else if (schemaVersion === STRATAGATE_STORAGE_SCHEMA_VERSION) {
     snapshot = structuredClone(value) as StrataGateSnapshot;
   } else {
@@ -346,8 +355,17 @@ export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
     // explicit retry time as terminal so upgrading cannot restart a cost loop.
     if (job.nextRetryAt === undefined) job.nextRetryAt = null;
   }
+  const sourceBlockMap = new Map(snapshot.blocks.map((block) => [block.id, block]));
   for (const event of snapshot.events) {
     event.temporal = { ...event.temporal, eventType: normalizeStandardEventType(event.temporal.eventType) };
+    if (event.formedTurn === undefined) {
+      const sourceBlock = sourceBlockMap.get(event.sourceBlockId);
+      const reliableSource = sourceBlock && !sourceBlock.threadId?.startsWith('external-import:')
+        && Number.isSafeInteger(sourceBlock.endTurn) && sourceBlock.endTurn >= 0;
+      if (reliableSource) event.formedTurn = sourceBlock.endTurn;
+    } else if (!Number.isSafeInteger(event.formedTurn) || event.formedTurn < 0) {
+      throw new TypeError('Invalid StrataGate snapshot: Event formedTurn must be a non-negative integer');
+    }
   }
   for (const block of snapshot.blocks) {
     if (block.processingStatus !== 'pending' && block.processingStatus !== 'ready') {

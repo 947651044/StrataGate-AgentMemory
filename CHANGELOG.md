@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.71 - 2026-09-15
+
+- Persist each Event's formation turn in the version 11 storage schema and migrate reliable legacy values from source Blocks, keeping decay and adoption trajectories anchored to the Event's actual lifecycle.
+- Rework Event details and citations with formation metadata, participant links and aliases, complete adoption history, and responsive memory-weight trajectory charts with explicit provenance and fallback states.
+- Harden release-candidate verification by staging temporary packages outside the repository and deriving the tarball name and supported DSH compatibility matrix from the package manifest.
+
 ## 0.2.70 - 2026-09-14
 
 - Bound Graph and Element projection work to three attempts with persisted retry timing, terminal failure handling, pending-job priority, and upgrade-safe normalization for existing Graph jobs.

@@ -8,7 +8,7 @@ import { handleAdminRequest, type WebResponse } from '../src/web.js'
 const fullFailure = 'StrataGate model response was not valid JSON\nRaw response (full):\n' + 'x'.repeat(600)
 
 const snapshot: StrataGateSnapshot = {
-  schemaVersion: 10,
+  schemaVersion: 11,
   currentTurn: 8,
   blockTurnSize: 4,
   blockDecayLambda: 0.3,
@@ -43,6 +43,7 @@ const snapshot: StrataGateSnapshot = {
   summaryJobs: [],
   events: [{
     id: 'evt_1',
+    formedTurn: 4,
     title: 'Use pnpm',
     summary: 'The project uses pnpm.',
     narrative: 'The user selected pnpm.',
@@ -507,7 +508,12 @@ describe('StrataGate admin routes', () => {
           turnsSinceLatestAdoption: 0,
           recordedAdoptionTurns: [8],
           historyComplete: true,
-          points: [{ turn: 8, weight: 1, kind: 'adoption', label: '采用 · 当前' }],
+          formedTurn: 4,
+          points: expect.arrayContaining([
+            expect.objectContaining({ turn: 4, weight: 1, kind: 'creation', label: '形成' }),
+            expect.objectContaining({ turn: 8, weight: 1, kind: 'adoption', label: '采纳' }),
+            expect.objectContaining({ turn: 8, weight: 1, kind: 'current', label: '当前' }),
+          ]),
         },
       }],
     })
@@ -601,15 +607,45 @@ describe('StrataGate admin routes', () => {
       scale: 'conversation_turn',
       currentTurn: 12,
       effectiveAdoptions: 2,
+      floorWeight: 0,
+      criticality: 'routine',
       latestAdoptionTurn: 10,
       turnsSinceLatestAdoption: 2,
       recordedAdoptionTurns: [5, 10],
       historyComplete: true,
+      adoptionHistoryComplete: true,
+      adoptionHistory: [
+        { createdAt: '2026-08-18T00:01:00.000Z', sessionId: 's1', turn: 5 },
+        { createdAt: '2026-08-18T00:01:00.000Z', sessionId: 's1', turn: 10 },
+      ],
     })
     expect(trajectory.points).toContainEqual(expect.objectContaining({ turn: 5, weight: 1, kind: 'adoption' }))
-    expect(trajectory.points).toContainEqual(expect.objectContaining({ turn: 10, weight: 1, kind: 'adoption', label: '再次采用' }))
+    expect(trajectory.points).toContainEqual(expect.objectContaining({ turn: 10, weight: 1, kind: 'adoption', label: '采纳' }))
+    expect(trajectory.segments).toEqual(expect.arrayContaining([expect.objectContaining({ certainty: 'known' })]))
     expect(trajectory.points.find((point: { turn: number; kind: string }) => point.turn === 10 && point.kind === 'sample').weight).toBeLessThan(1)
     expect(trajectory.currentWeight).toBeLessThan(1)
+  })
+
+  it('keeps the adoption count but hides incomplete legacy receipt history', async () => {
+    const legacyReceiptRuntime = {
+      adminSnapshot: async () => ({
+        ...snapshot,
+        events: [{
+          ...snapshot.events[0]!,
+          weight: { ...snapshot.events[0]!.weight, mentionCount: 2, lastAdoptedTurn: 8 },
+        }],
+        usageReceipts: [{
+          ...snapshot.usageReceipts[0]!,
+          audit: { turn: 8 },
+        }],
+      }),
+    } as unknown as StrataGateRuntime
+    const result = await request('/api/stratagate/memories?namespace=legacy-receipt&kind=events', 'GET', legacyReceiptRuntime)
+    expect(result.body.items[0].weightTrajectory).toMatchObject({
+      effectiveAdoptions: 1,
+      adoptionHistoryComplete: false,
+      adoptionHistory: [],
+    })
   })
 
   it('does not turn a retrieval timestamp into a weight reinforcement node', async () => {
@@ -629,6 +665,100 @@ describe('StrataGate admin routes', () => {
     expect(trajectory).toMatchObject({ effectiveAdoptions: 0, recordedAdoptionTurns: [], lastRetrievedAt: '2026-08-18T00:04:00.000Z' })
     expect(trajectory.currentWeight).toBeLessThan(1)
     expect(trajectory.points.some((point: { kind: string }) => point.kind === 'adoption')).toBe(false)
+  })
+
+  it('uses a dashed bounded trend for a migrated Event with a delayed legacy weight anchor', async () => {
+    const legacy = structuredClone(snapshot);
+    legacy.usageReceipts = [];
+    legacy.events[0]!.weight.mentionCount = 1;
+    legacy.events[0]!.weight.lastAdoptedTurn = 6;
+    const before = structuredClone(legacy);
+    const result = await request('/api/stratagate/memories?namespace=legacy-anchor&kind=events', 'GET', {
+      adminSnapshot: async () => legacy,
+    } as unknown as StrataGateRuntime);
+    const trajectory = result.body.items[0].weightTrajectory;
+    expect(trajectory.historyComplete).toBe(false);
+    expect(trajectory.segments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ certainty: 'incomplete' }),
+    ]));
+    expect(trajectory.points).toContainEqual(expect.objectContaining({ turn: 4, weight: 1, kind: 'creation', label: '形成' }));
+    expect(trajectory.points).toContainEqual(expect.objectContaining({ turn: 8, weight: Math.exp(-0.15 * 2), kind: 'current', label: '当前' }));
+    expect(trajectory.segments.flatMap(({ points }: { points: Array<{ weight: number }> }) => points).every(({ weight }: { weight: number }) => weight >= 0 && weight <= 1)).toBe(true);
+    expect(legacy).toEqual(before);
+  });
+
+  it('draws every confirmed adoption and a solid tail when older adoption turns are missing', async () => {
+    const partial = structuredClone(snapshot)
+    partial.currentTurn = 14
+    partial.events[0]!.weight = { ...partial.events[0]!.weight, mentionCount: 4, lastAdoptedTurn: 11, floorWeight: 0.3 }
+    partial.usageReceipts = [{ ...partial.usageReceipts[0]!, id: 'known-6', audit: { ...partial.usageReceipts[0]!.audit, turn: 6 } }]
+    const result = await request('/api/stratagate/memories?namespace=partial-history&kind=events', 'GET', {
+      adminSnapshot: async () => partial,
+    } as unknown as StrataGateRuntime)
+    const trajectory = result.body.items[0].weightTrajectory
+    expect(trajectory).toMatchObject({ historyComplete: false, latestAdoptionTurn: 11, recordedAdoptionTurns: [6] })
+    expect(trajectory.points).toEqual(expect.arrayContaining([
+      expect.objectContaining({ turn: 6, weight: 1, kind: 'adoption' }),
+      expect.objectContaining({ turn: 11, weight: 1, kind: 'adoption' }),
+      expect.objectContaining({ turn: 14, kind: 'current' }),
+    ]))
+    expect(trajectory.points.some((point: { kind: string; turn: number }) => point.kind === 'adoption' && ![6, 11].includes(point.turn))).toBe(false)
+    expect(trajectory.segments.some(({ certainty }: { certainty: string }) => certainty === 'incomplete')).toBe(true)
+    expect(trajectory.segments.at(-1)).toMatchObject({ certainty: 'known' })
+    expect(trajectory.segments.flatMap(({ points }: { points: Array<{ weight: number }> }) => points).every(({ weight }: { weight: number }) => weight >= .3 && weight <= 1)).toBe(true)
+  })
+
+  it('merges multiple adoptions in the same turn into one trajectory node', async () => {
+    const sameTurn = structuredClone(snapshot)
+    sameTurn.events[0]!.weight = { ...sameTurn.events[0]!.weight, mentionCount: 3, lastAdoptedTurn: 8 }
+    sameTurn.usageReceipts = [
+      { ...sameTurn.usageReceipts[0]!, id: 'same-1' },
+      { ...sameTurn.usageReceipts[0]!, id: 'same-2' },
+    ]
+    const result = await request('/api/stratagate/memories?namespace=same-turn&kind=events', 'GET', {
+      adminSnapshot: async () => sameTurn,
+    } as unknown as StrataGateRuntime)
+    const adoptionNodes = result.body.items[0].weightTrajectory.points.filter((point: { kind: string }) => point.kind === 'adoption')
+    expect(adoptionNodes).toEqual([expect.objectContaining({ turn: 8, adoptionCount: 2, label: '采纳 ×2' })])
+  })
+
+  it('falls back from formedTurn to source Block, earliest adoption, then current-only', async () => {
+    const sourceFallback = structuredClone(snapshot)
+    delete sourceFallback.events[0]!.formedTurn
+    const sourceResult = await request('/api/stratagate/memories?namespace=source-fallback&kind=events', 'GET', {
+      adminSnapshot: async () => sourceFallback,
+    } as unknown as StrataGateRuntime)
+    expect(sourceResult.body.items[0].weightTrajectory).toMatchObject({
+      formedTurn: null,
+      trajectoryStartTurn: 4,
+      formationTurnSource: 'sourceBlock',
+      points: expect.arrayContaining([expect.objectContaining({ turn: 4, kind: 'creation', label: '来源' })]),
+    })
+
+    const adoptionFallback = structuredClone(sourceFallback)
+    adoptionFallback.blocks = []
+    const adoptionResult = await request('/api/stratagate/memories?namespace=adoption-fallback&kind=events', 'GET', {
+      adminSnapshot: async () => adoptionFallback,
+    } as unknown as StrataGateRuntime)
+    expect(adoptionResult.body.items[0].weightTrajectory).toMatchObject({
+      formedTurn: null,
+      trajectoryStartTurn: 8,
+      formationTurnSource: null,
+      points: expect.arrayContaining([expect.objectContaining({ turn: 8, kind: 'adoption' })]),
+    })
+
+    const currentOnly = structuredClone(adoptionFallback)
+    currentOnly.usageReceipts = []
+    currentOnly.events[0]!.weight = { ...currentOnly.events[0]!.weight, mentionCount: 1, lastAdoptedTurn: 6 }
+    const currentResult = await request('/api/stratagate/memories?namespace=current-fallback&kind=events', 'GET', {
+      adminSnapshot: async () => currentOnly,
+    } as unknown as StrataGateRuntime)
+    expect(currentResult.body.items[0].weightTrajectory).toMatchObject({
+      formedTurn: null,
+      trajectoryStartTurn: 8,
+      formationTurnSource: null,
+      points: [expect.objectContaining({ turn: 8, kind: 'current' })],
+    })
   })
 
   it('changes the dashboard ETag when the plugin version changes without a memory revision change', async () => {
@@ -747,7 +877,38 @@ describe('StrataGate admin routes', () => {
     expect(result.status).toBe(200)
     expect(result.body.messages[0].content).toBe('Use pnpm. api_key=[REDACTED]')
     expect(result.body.messages[0].toolCalls[0].arguments.authorization).toBe('Bearer [REDACTED]')
-    expect(result.body.events[0].weightTrajectory).toMatchObject({ currentWeight: 1, effectiveAdoptions: 1 })
+    expect(result.body.events[0].weightTrajectory).toMatchObject({
+      currentWeight: 1,
+      effectiveAdoptions: 1,
+      floorWeight: 0,
+      criticality: 'routine',
+      adoptionHistoryComplete: true,
+      adoptionHistory: [{ sessionId: 's1', turn: 8, createdAt: '2026-08-18T00:01:00.000Z' }],
+    })
+  })
+
+  it('returns only participant node ids with aliases for Event participant pills', async () => {
+    const participantSnapshot = structuredClone(snapshot)
+    participantSnapshot.events[0]!.temporal = {
+      participantNodeIds: ['node_1'],
+      participants: ['pnpm', 'package-manager', 'Alice'],
+    }
+    participantSnapshot.graphNodes[0]!.aliases = ['package-manager']
+    participantSnapshot.graphNodes.push({
+      ...participantSnapshot.graphNodes[0]!,
+      id: 'node_related_only',
+      name: 'Related only by source Event',
+      aliases: [],
+    })
+    const participantRuntime = { adminSnapshot: async () => participantSnapshot } as unknown as StrataGateRuntime
+    const memories = await request('/api/stratagate/memories?namespace=participants&kind=events', 'GET', participantRuntime)
+    expect(memories.body.items[0].relatedNodes).toEqual([{
+      id: 'node_1', name: 'pnpm', type: 'tool', aliases: ['package-manager'],
+    }])
+    const source = await request('/api/stratagate/sources?namespace=participants&eventId=evt_1', 'GET', participantRuntime)
+    expect(source.body.relatedNodes).toEqual([{
+      id: 'node_1', name: 'pnpm', type: 'tool', aliases: ['package-manager'],
+    }])
   })
 
   it('reports the actual decayed layer and its size relative to L5', async () => {
