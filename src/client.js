@@ -42,11 +42,38 @@ window.__ModuleLoader__.load({
       return readFeedbackNavigationState(state)
     }
 
+    function readGraphNodeNavigationState(state) {
+      if (!state || state.view !== 'graph-node') return null
+      const namespace = String(state.namespace || '').trim()
+      const nodeId = String(state.nodeId || '').trim()
+      return namespace && nodeId ? { namespace, nodeId } : null
+    }
+
+    function readGraphNodeDeepLink(locationRef = window.location) {
+      const params = new URLSearchParams(String(locationRef?.search || ''))
+      if (params.get('settings') !== FEEDBACK_SETTINGS_ID || params.get('stratagateView') !== 'graph-node') return null
+      const namespace = String(params.get('namespace') || '').trim()
+      const nodeId = String(params.get('nodeId') || '').trim()
+      return namespace && nodeId ? { namespace, nodeId } : null
+    }
+
     function consumeFeedbackDeepLink(locationRef = window.location, historyRef = window.history) {
       const params = new URLSearchParams(String(locationRef?.search || ''))
       params.delete('settings')
       params.delete('stratagateView')
       params.delete('namespace')
+      const search = params.toString()
+      const next = String(locationRef?.pathname || '/') + (search ? '?' + search : '') + String(locationRef?.hash || '')
+      historyRef?.replaceState?.(historyRef.state, '', next)
+      return next
+    }
+
+    function consumeGraphNodeDeepLink(locationRef = window.location, historyRef = window.history) {
+      const params = new URLSearchParams(String(locationRef?.search || ''))
+      params.delete('settings')
+      params.delete('stratagateView')
+      params.delete('namespace')
+      params.delete('nodeId')
       const search = params.toString()
       const next = String(locationRef?.pathname || '/') + (search ? '?' + search : '') + String(locationRef?.hash || '')
       historyRef?.replaceState?.(historyRef.state, '', next)
@@ -76,6 +103,33 @@ window.__ModuleLoader__.load({
       }
       if (allowHttpFallback) locationRef.assign(targetUrl.href)
       return 'http'
+    }
+
+    function navigateToGraphNode(ctx, namespace, nodeId, locationRef = window.location, allowHttpFallback = true) {
+      const targetNamespace = String(namespace || '').trim()
+      const targetNodeId = String(nodeId || '').trim()
+      if (!targetNamespace || !targetNodeId) return Promise.resolve(false)
+      const navigation = ctx?.get?.('settingsNavigation')
+      if (typeof navigation?.openSection !== 'function') {
+        if (!allowHttpFallback || typeof locationRef?.assign !== 'function') return Promise.resolve(false)
+        try {
+          const targetUrl = new URL(String(locationRef.href || ''))
+          targetUrl.searchParams.set('settings', FEEDBACK_SETTINGS_ID)
+          targetUrl.searchParams.set('stratagateView', 'graph-node')
+          targetUrl.searchParams.set('namespace', targetNamespace)
+          targetUrl.searchParams.set('nodeId', targetNodeId)
+          locationRef.assign(targetUrl.href)
+          return Promise.resolve(true)
+        } catch {
+          return Promise.resolve(false)
+        }
+      }
+      try {
+        return Promise.resolve(navigation.openSection(FEEDBACK_SETTINGS_ID, { view: 'graph-node', namespace: targetNamespace, nodeId: targetNodeId }))
+          .then((result) => result !== false, () => false)
+      } catch {
+        return Promise.resolve(false)
+      }
     }
 
     function installFeedbackLinkNavigation(ctx, documentRef = document, locationRef = window.location) {
@@ -171,6 +225,42 @@ window.__ModuleLoader__.load({
       }
     }
 
+    function openGraphNodeDeepLink(ctx, documentRef = document, locationRef = window.location, historyRef = window.history) {
+      const graphLink = readGraphNodeDeepLink(locationRef)
+      if (!graphLink) return () => {}
+      const navigation = ctx?.get?.('settingsNavigation')
+      if (typeof navigation?.openSection === 'function') {
+        void navigateToGraphNode(ctx, graphLink.namespace, graphLink.nodeId, locationRef, false).then((opened) => {
+          if (opened) consumeGraphNodeDeepLink(locationRef, historyRef)
+        })
+        return () => {}
+      }
+      let legacyCleanup = () => {}
+      const timer = window.setTimeout(() => { legacyCleanup = openLegacyFeedbackDeepLink(documentRef) }, 250)
+      ctx?.inject?.(['settingsNavigation'], (scope) => {
+        void navigateToGraphNode(scope, graphLink.namespace, graphLink.nodeId, locationRef, false).then((opened) => {
+          if (!opened) return
+          window.clearTimeout(timer)
+          legacyCleanup()
+          consumeGraphNodeDeepLink(locationRef, historyRef)
+        })
+      })
+      return () => {
+        window.clearTimeout(timer)
+        legacyCleanup()
+      }
+    }
+
+    const eventDetailCss = `
+      .sg-event-metadata{display:flex;align-items:center;gap:7px 16px;flex-wrap:wrap;margin-top:8px;color:var(--sg-muted);font-size:12px;line-height:1.45}.sg-event-metadata-item{display:inline-flex;align-items:center;gap:5px;min-width:0}.sg-event-metadata b{color:var(--sg-muted);font-weight:620}.sg-event-participants{display:inline-flex;align-items:center;gap:5px;flex-wrap:wrap}.sg-event-metadata .sg-entity-pill{padding:2px 7px}.sg-entity-pill-static{cursor:default;opacity:.82}.sg-entity-pill-static:hover{transform:none!important;background:transparent!important}.sg-event-section{display:grid;gap:9px;padding:17px 0;border-bottom:1px solid var(--sg-border)}.sg-event-section-title{margin:0;color:var(--sg-text);font-size:14px;font-weight:730}.sg-event-memory-copy{max-width:65ch;margin:0;color:var(--sg-text);font-size:14px;line-height:1.72;white-space:pre-wrap;overflow-wrap:anywhere;text-wrap:pretty}.sg-event-weight-section{gap:0}
+      .sg-weight-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:9px}.sg-weight-header .sg-section-title,.sg-long-detail .sg-weight-header h3{margin:0}.sg-weight-metrics{display:grid!important;grid-template-columns:1fr!important;gap:0!important;margin:0 0 13px!important}.sg-weight-metric{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:14px;min-width:0;padding:7px 2px!important;border-bottom:1px solid color-mix(in srgb,var(--sg-border) 72%,transparent);border-radius:0!important;background:transparent!important}.sg-weight-metric:last-child{border-bottom:0}.sg-weight-metric>span:first-child{color:var(--sg-muted);font-size:12px}.sg-weight-metric strong{margin:0!important;color:var(--sg-text);font-size:15px!important;font-weight:740;font-variant-numeric:tabular-nums;white-space:nowrap}.sg-weight-value{display:inline-flex!important;align-items:center;justify-content:flex-end;gap:6px;color:var(--sg-text)!important}
+      .sg-info-disclosure{position:relative;display:inline-flex}.sg-info-trigger{display:grid;place-items:center;width:19px;height:19px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--sg-muted);font-size:13px;line-height:1;cursor:pointer}.sg-info-trigger:hover,.sg-info-trigger[aria-expanded="true"]{background:var(--sg-soft);color:var(--sg-text)}.sg-info-popover{position:absolute;right:0;top:calc(100% + 7px);z-index:20;width:min(320px,calc(100vw - 40px));padding:13px 14px;border:1px solid color-mix(in srgb,var(--sg-accent) 20%,var(--sg-border));border-radius:9px;background:var(--sg-page);color:var(--sg-text);box-shadow:0 14px 36px color-mix(in srgb,var(--sg-text) 18%,transparent);font-size:12px;line-height:1.58;text-align:left}.sg-info-title{display:block;margin-bottom:7px;font-size:13px}.sg-info-popover p{margin:0;color:var(--sg-muted)}.sg-info-popover p+p{margin-top:7px}.sg-adoption-history{display:grid;gap:10px;margin:0;padding:0;list-style:none;counter-reset:history}.sg-adoption-history li{display:grid;gap:1px;padding-bottom:9px;border-bottom:1px solid var(--sg-border)}.sg-adoption-history li:last-child{padding-bottom:0;border-bottom:0}.sg-adoption-history time,.sg-adoption-history span{color:var(--sg-muted)}.sg-floor-table{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 14px;margin:10px 0 0;padding-top:9px;border-top:1px solid var(--sg-border)}.sg-floor-table dt,.sg-floor-table dd{margin:0;color:var(--sg-muted)}.sg-floor-table .current{color:var(--sg-accent);font-weight:720}
+      .sg-weight-chart{position:relative;padding:10px 9px 3px!important;border:1px solid var(--sg-border);border-radius:9px;background:color-mix(in srgb,var(--sg-surface) 72%,transparent)}.sg-weight-chart svg{display:block;width:100%;height:auto;min-height:190px!important}.sg-weight-grid{stroke:var(--sg-border);stroke-width:1}.sg-weight-tick{stroke:var(--sg-border);stroke-width:1}.sg-weight-axis-label{fill:var(--sg-muted);font-size:11px}.sg-weight-line{fill:none;stroke:var(--sg-accent);stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}.sg-weight-line.incomplete{stroke:var(--sg-muted);stroke-width:2.4;opacity:.52}.sg-weight-line-hit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:help}.sg-weight-tooltip{position:absolute;z-index:4;max-width:250px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--sg-accent) 22%,var(--sg-border));border-radius:7px;background:var(--sg-page);color:var(--sg-text);box-shadow:0 8px 24px color-mix(in srgb,var(--sg-text) 16%,transparent);font-size:11px;line-height:1.5;pointer-events:none;transform:translate(-50%,calc(-100% - 8px));white-space:normal}.sg-weight-tooltip.below{transform:translate(-50%,8px)}.sg-weight-tooltip small{display:block;color:var(--sg-muted);font-size:10px}.sg-weight-floor{stroke:color-mix(in srgb,var(--sg-accent) 58%,var(--sg-muted));stroke-width:1.5;stroke-dasharray:7 5}.sg-weight-floor-label{fill:var(--sg-muted);font-size:11px;font-weight:650}.sg-weight-node{fill:var(--sg-page);stroke:var(--sg-accent);stroke-width:2.5}.sg-weight-node.adoption{fill:var(--sg-accent);stroke:var(--sg-page);stroke-width:3}.sg-weight-node.current{fill:var(--sg-text);stroke:var(--sg-page);stroke-width:2.5}.sg-weight-node-label{fill:var(--sg-text);font-size:11px;font-weight:700}
+      .sg-citation-disclosure{border-top:1px solid var(--sg-border)}.sg-citation-disclosure:last-child{border-bottom:1px solid var(--sg-border)}.sg-citation-disclosure summary{padding:11px 2px;color:var(--sg-muted);cursor:pointer;font-weight:650}.sg-citation-disclosure[open] summary{color:var(--sg-text)}.sg-citation-disclosure-body{padding:1px 2px 13px}.sg-provenance-note{margin:0 0 10px;color:var(--sg-muted);font-size:12px}.sg-citation-messages{display:grid;gap:8px}.sg-citation-message{padding:9px 10px;border-left:3px solid var(--sg-border);background:color-mix(in srgb,var(--sg-soft) 72%,transparent);white-space:pre-wrap;overflow-wrap:anywhere}.sg-citation-message-role{display:block;margin-bottom:3px;color:var(--sg-muted);font-size:11px;text-transform:uppercase}.sg-event-technical{display:grid;grid-template-columns:92px minmax(0,1fr);gap:8px 12px;margin:0;font-size:12px}.sg-event-technical dt{color:var(--sg-muted)}.sg-event-technical dd{display:flex;align-items:flex-start;gap:8px;min-width:0;margin:0}.sg-event-technical code{min-width:0;overflow-wrap:anywhere;color:var(--sg-muted);font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.sg-copy-id{flex:0 0 auto;padding:1px 6px;border:1px solid var(--sg-border);border-radius:5px;background:transparent;color:var(--sg-muted);font-size:11px;cursor:pointer}.sg-copy-id:hover{border-color:var(--sg-accent);color:var(--sg-accent)}
+      .sg-citation-dialog-heading{min-width:0;flex:1}.sg-citation-dialog-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}.sg-citation-status{display:inline-flex;align-items:center;padding:3px 8px;border:1px solid var(--sg-border);border-radius:6px;color:var(--sg-muted);font-size:11px;font-weight:690;white-space:nowrap}.sg-citation-status.adopted{border-color:color-mix(in srgb,var(--sg-accent) 25%,var(--sg-border));background:color-mix(in srgb,var(--sg-accent) 9%,var(--sg-page));color:var(--sg-accent)}.sg-status-info .sg-info-popover{right:-35px}.sg-event-detail-kicker{display:block;margin-bottom:3px;color:var(--sg-accent);font-size:11px;font-weight:720}.sg-event-detail-head h2{margin:0;font-size:16px;line-height:1.4}.sg-event-page-header .sg-event-detail-kicker{margin-bottom:4px}
+      @media(max-width:560px){.sg-citation-dialog-head{align-items:flex-start}.sg-citation-dialog-actions{gap:2px}.sg-citation-status{font-size:10px}.sg-info-popover{position:fixed;left:12px;right:12px;top:auto;bottom:16px;width:auto}.sg-event-technical{grid-template-columns:1fr}.sg-weight-chart svg{min-height:170px!important}}
+    `
+
     const css = `
       .sg-memory {
         color-scheme:inherit;
@@ -252,6 +342,7 @@ window.__ModuleLoader__.load({
       .sg-support-ai-notice{position:sticky;top:8px;z-index:8;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:10px;margin:12px 0;padding:13px 14px;border:1px solid color-mix(in srgb,var(--sg-good) 45%,var(--sg-border));border-radius:8px;background:color-mix(in srgb,var(--sg-good-soft) 92%,var(--sg-surface));color:var(--sg-text);box-shadow:0 8px 24px rgba(0,0,0,.16);scroll-margin-top:8px}.sg-support-ai-notice-mark{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--sg-good);color:#fff;font-weight:800}.sg-support-ai-notice strong{display:block;color:var(--sg-good);font-size:13px}.sg-support-ai-notice p{margin:4px 0 0;color:var(--sg-text);font-size:12px;line-height:1.5}.sg-support-ai-notice .sg-quiet-button{margin-top:9px}.sg-support-ai-notice-close{display:grid;place-items:center;width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--sg-muted);font-size:20px;line-height:1;cursor:pointer}.sg-support-ai-notice-close:hover{background:var(--sg-soft);color:var(--sg-text)}
       @media (max-width:560px){.sg-decay-head{align-items:flex-start;flex-direction:column}.sg-conversation{width:100%;justify-content:flex-start}.sg-conversation select{max-width:100%;flex:1}}
       @media (prefers-reduced-motion:reduce){.sg-memory *,.sg-memory *:before,.sg-memory *:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.sg-processing-icon,.sg-memory-alert-mark{animation:none}.sg-skeleton:after{display:none}}
+      ${eventDetailCss}
     `
 
     const citationCss = `
@@ -344,6 +435,7 @@ window.__ModuleLoader__.load({
       .sg-citation-loading,.sg-citation-error{padding:12px;border-radius:8px;background:var(--sg-soft)}
       .sg-citation-error{color:var(--dsw-alias-state-error-primary,#c42b1c)}
       @media(max-width:560px){.sg-answer-citations{grid-template-columns:1fr}.sg-answer-citations-list{display:grid}.sg-answer-citation{max-width:100%;width:100%}.sg-retrieved-memory{grid-template-columns:20px auto minmax(0,1fr)}.sg-retrieved-memory-state{grid-column:3}.sg-citation-overlay{padding:8px}.sg-citation-dialog{width:100%;max-height:calc(100vh - 16px)}.sg-citation-graph-frame{height:280px}}
+      ${eventDetailCss}
     `
 
     function api(path, params, options) {
@@ -651,7 +743,7 @@ window.__ModuleLoader__.load({
       }))
     }
 
-    function CitationDetail({ citation, detail, adopted = true }) {
+    function CitationDetail({ citation, detail, adopted = true, onNode }) {
       const messages = Array.isArray(detail?.messages) ? detail.messages : []
       const sourceMessages = Array.isArray(detail?.sourceMessages) ? detail.sourceMessages : messages
       let primary = null
@@ -676,16 +768,16 @@ window.__ModuleLoader__.load({
       const relatedEvents = (Array.isArray(detail?.events) ? detail.events : []).filter((event) => citation.kind !== 'event' || event.id !== primary?.id)
       const primaryTitle = adopted ? '已用于回答' : '检索候选 · 未采用'
       return h(React.Fragment, null,
-        h('p', { className: 'sg-citation-context-note' }, adopted ? '弹窗中的关联信息与来源内容用于查看依据；只有标记为“本次采用”的内容参与了回答。' : '这是本次检索到的候选记忆，但它没有参与回答。关联信息与来源内容仅供核对。'),
+        !adopted ? h('p', { className: 'sg-citation-context-note' }, '这是本次检索到的候选记忆，但它没有参与回答。关联信息与来源内容仅供核对。') : null,
         citation.kind === 'graph' ? h(CitationSection, { title: primaryTitle },
           summary ? h('p', { className: 'sg-citation-copy' }, summary) : null,
           adoptedFacts.length ? h('ul', { className: 'sg-citation-facts' }, adoptedFacts.map((fact, index) => h('li', { key: fact.id || index, className: 'sg-citation-fact' }, h('strong', null, String(fact.key || '事实') + '：'), Array.isArray(fact.value) ? fact.value.join('、') : String(fact.value || '')))) : null,
           h(CitationGraph, { citation, detail, primary, adopted })) : null,
-        citation.kind === 'event' ? h(CitationSection, { title: primaryTitle }, h('p', { className: 'sg-citation-copy' }, summary || '暂无可展示的摘要。')) : null,
+        citation.kind === 'event' && primary ? h(EventMemoryDetails, { event: primary, sourceMessages, citation, relatedEvents }) : null,
         citation.kind === 'block' ? h(CitationSection, { title: 'L0–L5 记忆层级' }, h(CitationLayers, { citation, layers: Array.isArray(detail?.layers) ? detail.layers : [], adopted })) : null,
-        relatedEvents.length ? h(CitationDisclosure, { title: '关联信息' }, h('div', { className: 'sg-citation-events' }, relatedEvents.map((event, index) => h('article', { key: event.id || index, className: 'sg-citation-event' }, h('strong', null, event.title || '关联事件'), h('p', null, event.summary || event.narrative || '暂无摘要'))))) : null,
-        sourceMessages.length ? h(CitationDisclosure, { title: adopted ? '来源对话 ·未作为加入本次上下文' : '来源对话 · 未用于本次回答' }, h('div', { className: 'sg-citation-messages' }, sourceMessages.map((message, index) => h('div', { key: message.id || index, className: 'sg-citation-message' }, h('span', { className: 'sg-citation-message-role' }, message.role || 'message'), String(message.content || ''))))) : null,
-        h(CitationDisclosure, { title: '详细情况' }, h('div', { className: 'sg-citation-tech' }, citation.evidenceRef + '\n' + citation.detailKind + ': ' + citation.id)))
+        citation.kind !== 'event' && relatedEvents.length ? h(CitationDisclosure, { title: '关联信息' }, h('div', { className: 'sg-citation-events' }, relatedEvents.map((event, index) => h('article', { key: event.id || index, className: 'sg-citation-event' }, h('strong', null, event.title || '关联事件'), h('p', null, event.summary || event.narrative || '暂无摘要'))))) : null,
+        citation.kind !== 'event' && sourceMessages.length ? h(CitationDisclosure, { title: '来源与证据' }, h('div', { className: 'sg-citation-messages' }, sourceMessages.map((message, index) => h('div', { key: message.id || index, className: 'sg-citation-message' }, h('span', { className: 'sg-citation-message-role' }, message.role || 'message'), String(message.content || ''))))) : null,
+        citation.kind !== 'event' ? h(CitationDisclosure, { title: '技术信息' }, h('div', { className: 'sg-citation-tech' }, citation.evidenceRef + '\n' + citation.detailKind + ': ' + citation.id)) : null)
     }
 
     const shortTermMemoryFeeds = new Map()
@@ -995,7 +1087,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'sg-retrieved-final' }, h('span', null, '最终采用 ' + citations.length + ' 条'), h('span', null, '检索命中不会自动强化记忆')))
     }
 
-    function MemoryCitationTail({ matched, sessionId, useSession, useSessions, useWorkspaces, usePluginSettings }) {
+    function MemoryCitationTail({ matched, sessionId, useSession, useSessions, useWorkspaces, usePluginSettings, onOpenGraphNode }) {
       const citations = matched.citations
       const retrievedCount = matched.retrievedCount
       const retrievalGroups = matched.retrievalGroups
@@ -1006,6 +1098,22 @@ window.__ModuleLoader__.load({
       const [loading, setLoading] = React.useState(false)
       const [error, setError] = React.useState('')
       const close = () => { setSelected(null); setDetail(null); setError(''); setLoading(false) }
+      const openGraphNode = (nodeId, event) => {
+        event?.stopPropagation?.()
+        const namespace = selected?.namespace
+        if (!namespace || !nodeId || typeof onOpenGraphNode !== 'function') {
+          setError('暂时无法打开对应的知识图谱节点，请稍后重试。')
+          return
+        }
+        setError('')
+        Promise.resolve(onOpenGraphNode(namespace, nodeId)).then((opened) => {
+          if (opened === false) {
+            setError('暂时无法打开对应的知识图谱节点，请稍后重试。')
+            return
+          }
+          close()
+        }).catch((reason) => setError('暂时无法打开对应的知识图谱节点：' + String(reason?.message || reason)))
+      }
       const open = (citation, adopted = true) => {
         setSelected({ ...citation, adopted })
         setDetail(null)
@@ -1018,7 +1126,11 @@ window.__ModuleLoader__.load({
       }
       React.useEffect(() => {
         if (!selected) return undefined
-        const onKeyDown = (event) => { if (event.key === 'Escape') close() }
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape') return
+          if (document.querySelector('.sg-citation-dialog .sg-info-trigger[aria-expanded="true"]')) return
+          close()
+        }
         document.addEventListener('keydown', onKeyDown)
         return () => document.removeEventListener('keydown', onKeyDown)
       }, [selected])
@@ -1046,11 +1158,14 @@ window.__ModuleLoader__.load({
             h('span', { className: 'sg-answer-retrieval-chevron ' + (showRetrieved ? 'open' : ''), 'aria-hidden': 'true' }, '›')),
           showRetrieved ? h(RetrievalProcessPanel, { retrievalGroups, retrievedCount, citations, open }) : null) : null,
         retrievalStatusVisible(pluginSettings) && selected ? h('div', { className: 'sg-citation-overlay', onMouseDown: (event) => { if (event.target === event.currentTarget) close() } },
-          h('section', { className: 'sg-citation-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': citationKindLabel(selected) + ' 详情' },
+          h(InfoPopoverGroup, null, h('section', { className: 'sg-citation-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': citationKindLabel(selected) + ' 详情' },
             h('header', { className: 'sg-citation-dialog-head' },
-              h('div', null, h('div', { className: 'sg-citation-dialog-kicker' }, (selected.adopted ? '' : '检索候选 · ') + citationKindLabel(selected) + (citationActionLabel(selected) ? ' · ' + citationActionLabel(selected) : '')), h('h3', { className: 'sg-citation-dialog-title' }, selected.title)),
-              h('button', { type: 'button', className: 'sg-citation-close', onClick: close, 'aria-label': '关闭记忆详情' }, '×')),
-            h('div', { className: 'sg-citation-dialog-body' }, loading ? h('div', { className: 'sg-citation-loading' }, '正在读取来源…') : error ? h('div', { className: 'sg-citation-error' }, error) : h(CitationDetail, { citation: selected, detail, adopted: selected.adopted })))) : null)
+              h('div', { className: 'sg-citation-dialog-heading' }, h('div', { className: 'sg-citation-dialog-kicker' }, citationKindLabel(selected)), h('h3', { className: 'sg-citation-dialog-title' }, (selected.kind === 'event' ? detail?.events?.find((item) => item.id === selected.id)?.title || detail?.events?.[0]?.title : '') || selected.title), selected.kind === 'event' ? h(EventMetadata, { event: detail?.events?.find((item) => item.id === selected.id) || detail?.events?.[0], nodes: detail?.relatedNodes || [], onNode: openGraphNode }) : null),
+              h('div', { className: 'sg-citation-dialog-actions' },
+                h('span', { className: 'sg-citation-status ' + (selected.adopted ? 'adopted' : 'retrieved') }, selected.adopted ? '已用于回答' : '检索候选 · 未采用'),
+                selected.adopted ? h(InfoPopover, { label: '本次采用说明', className: 'sg-status-info' }, h('p', null, '只有标记为本次采用的记忆内容参与了本次回答；关联信息和来源内容仅用于查看与追溯依据。')) : null,
+                h('button', { type: 'button', className: 'sg-citation-close', onClick: close, 'aria-label': '关闭记忆详情' }, '×'))),
+            h('div', { className: 'sg-citation-dialog-body' }, loading ? h('div', { className: 'sg-citation-loading' }, '正在读取来源…') : error ? h('div', { className: 'sg-citation-error' }, error) : h(CitationDetail, { citation: selected, detail, adopted: selected.adopted, onNode: openGraphNode }))))) : null)
     }
 
     function dashboardApi(params, options = {}) {
@@ -1270,7 +1385,17 @@ window.__ModuleLoader__.load({
 
     function NodePill({ node, onClick }) {
       const meta = NODE_META[node.type] || ['实体', '#64748b', '•']
-      return h('button', { className: 'sg-entity-pill', onClick }, h('span', { style: { color: meta[1] } }, meta[2]), node.name)
+      return h('button', {
+        type: 'button',
+        className: 'sg-entity-pill',
+        onPointerDown: (event) => event.stopPropagation(),
+        onClick: (event) => { event.stopPropagation(); onClick?.(event) },
+        title: '在知识图谱中查看 ' + node.name,
+      }, h('span', { style: { color: meta[1] }, 'aria-hidden': 'true' }, meta[2]), node.name)
+    }
+
+    function StaticEntityPill({ name }) {
+      return h('span', { className: 'sg-entity-pill sg-entity-pill-static' }, name)
     }
 
     function NodeSummaryBubble({ node, x, y, width, height = 560, onViewDetails }) {
@@ -1459,6 +1584,7 @@ window.__ModuleLoader__.load({
         if (!selected.length) { setSelectedPoint(null); return }
         selected.select()
         selected.connectedEdges().addClass('selected-relation')
+        graph.center(selected)
         const point = selected.renderedPosition()
         const container = containerRef.current
         setSelectedPoint({ x: point.x, y: point.y, width: container?.clientWidth || 760, height: container?.clientHeight || 522 })
@@ -1500,78 +1626,296 @@ window.__ModuleLoader__.load({
         h('section', null, h('h3', null, '支撑事件'), (node.sourceEventIds || []).flatMap((id) => eventMap.get(id) || []).slice(0, 8).map((event) => h('button', { key: event.id, className: 'sg-support-event', onClick: () => onEvent(event.id) }, h('span', null, exactTime(eventOccurrence(event).value) + ' · ' + event.title), h('b', null, '›')))))
     }
 
-    function WeightMechanismHelp() {
-      return h('details', { className: 'sg-weight-help' },
-        h('summary', null, 'ⓘ 权重如何变化？'),
-        h('div', { className: 'sg-weight-help-body' },
-          h('p', { className: 'sg-weight-help-copy' }, '新 Event 初始权重较高，并随对话推进逐渐衰减。只有被回答真正采用时才会恢复或强化；采用次数越多，后续衰减越慢。检索本身不会强化。'),
-          h('div', { className: 'sg-weight-demo' },
-            h('span', { className: 'sg-weight-demo-label' }, '机制示意 · 非当前 Event 数据'),
-            h('svg', { viewBox: '0 0 320 76', role: 'img', 'aria-label': '权重衰减并在采用后恢复的通用示意曲线' },
-              h('path', { d: 'M8 15 C35 18 55 35 82 50 C98 58 104 59 112 58 L112 20 C150 23 177 40 204 49 L204 23 C243 25 269 35 312 43' }),
-              h('circle', { cx: '8', cy: '15', r: '3' }),
-              h('circle', { cx: '112', cy: '20', r: '4' }),
-              h('circle', { cx: '204', cy: '23', r: '4' })))))
+    const CRITICALITY_INFO = {
+      routine: ['普通事件', 0],
+      preference: ['用户偏好', .3],
+      identity: ['身份信息', .9],
+      safety: ['安全相关', 1],
+    }
+
+    function eventDate(value) {
+      if (!value) return ''
+      const date = new Date(value)
+      return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date).replaceAll('/', '-')
+    }
+
+    function participantIdentity(value) {
+      return String(value || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/[\s._\-·•/\\]+/g, '')
+    }
+
+    function EventMetadata({ event, nodes = [], onNode }) {
+      if (!event) return null
+      const temporal = event.temporal || {}
+      const start = eventDate(temporal.happenedStart)
+      const end = eventDate(temporal.happenedEnd)
+      const happened = start ? start + (end && end !== start ? ' — ' + end : '') : end
+      const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+      const linked = [...new Set(temporal.participantNodeIds || [])].map((id) => nodeMap.get(id)).filter(Boolean)
+      const linkedNames = new Set(linked.flatMap((node) => [node.name, ...(node.aliases || [])]).map(participantIdentity).filter(Boolean))
+      const seenText = new Set()
+      const unlinked = (temporal.participants || []).map((name) => String(name || '').trim()).filter((name) => {
+        const identity = participantIdentity(name)
+        if (!identity || linkedNames.has(identity) || seenText.has(identity)) return false
+        seenText.add(identity)
+        return true
+      })
+      const mentioned = eventDate(temporal.mentionedAt)
+      if (!happened && !Number.isSafeInteger(event.formedTurn) && !linked.length && !unlinked.length && !mentioned) return null
+      return h('div', { className: 'sg-event-metadata' },
+        happened ? h('span', { className: 'sg-event-metadata-item' }, h('b', null, '实际发生：'), happened) : null,
+        Number.isSafeInteger(event.formedTurn) ? h('span', { className: 'sg-event-metadata-item' }, h('b', null, '记忆形成：'), '第 ' + event.formedTurn + ' 轮') : null,
+        linked.length || unlinked.length ? h('span', { className: 'sg-event-metadata-item' }, h('b', null, '参与：'), h('span', { className: 'sg-event-participants' },
+          linked.map((node) => h(NodePill, { key: node.id, node, onClick: onNode ? (event) => onNode(node.id, event) : undefined })),
+          unlinked.map((name) => h(StaticEntityPill, { key: name, name })))) : null,
+        mentioned ? h('span', { className: 'sg-event-metadata-item' }, h('b', null, '提及：'), mentioned) : null)
+    }
+
+    const InfoPopoverContext = React.createContext(null)
+
+    function InfoPopoverGroup({ children }) {
+      const [openId, setOpenId] = React.useState(null)
+      return h(InfoPopoverContext.Provider, { value: { openId, setOpenId } }, children)
+    }
+
+    function InfoPopover({ label, children, className = '' }) {
+      const id = React.useId()
+      const rootRef = React.useRef(null)
+      const group = React.useContext(InfoPopoverContext)
+      const [localOpenId, setLocalOpenId] = React.useState(null)
+      const openId = group?.openId ?? localOpenId
+      const setOpenId = group?.setOpenId ?? setLocalOpenId
+      const open = openId === id
+      React.useEffect(() => {
+        if (!open) return undefined
+        const onPointerDown = (event) => {
+          if (!rootRef.current?.contains(event.target)) setOpenId(null)
+        }
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') setOpenId(null)
+        }
+        document.addEventListener('pointerdown', onPointerDown, true)
+        document.addEventListener('keydown', onKeyDown)
+        return () => {
+          document.removeEventListener('pointerdown', onPointerDown, true)
+          document.removeEventListener('keydown', onKeyDown)
+        }
+      }, [open, setOpenId])
+      return h('span', { ref: rootRef, className: 'sg-info-disclosure ' + className },
+        h('button', { type: 'button', className: 'sg-info-trigger', 'aria-label': label, title: label, 'aria-expanded': open, 'aria-controls': id, onClick: () => setOpenId((current) => current === id ? null : id) }, 'ⓘ'),
+        open ? h('div', { id, className: 'sg-info-popover', role: 'dialog', 'aria-label': label, onPointerDown: (event) => event.stopPropagation() }, h('strong', { className: 'sg-info-title' }, label), children) : null)
+    }
+
+    function AdoptionHistoryInfo({ trajectory }) {
+      const history = Array.isArray(trajectory?.adoptionHistory) ? trajectory.adoptionHistory : []
+      const total = Number.isSafeInteger(trajectory?.effectiveAdoptions) ? trajectory.effectiveAdoptions : 0
+      return h(InfoPopover, { label: '采纳历史' },
+        total === 0 ? h('p', null, '该 Event 尚未被 Agent 采纳。') : !history.length ? h('p', null, '当前没有可展示的采纳回执详情。') : null,
+        history.length ? h('ol', { className: 'sg-adoption-history' }, history.map((receipt, index) => h('li', { key: receipt.receiptId || index },
+          h('strong', null, '已确认采纳'),
+          h('time', { dateTime: receipt.createdAt }, exactTime(receipt.createdAt)),
+          h('span', null, '会话：' + receipt.sessionId + ' · 第 ' + receipt.turn + ' 轮'),
+          Number.isFinite(receipt.relativeTurn) ? h('span', null, '距记忆形成 +' + receipt.relativeTurn + ' 轮') : null))) : null)
+    }
+
+    function FloorWeightInfo({ event, floorWeight }) {
+      const type = CRITICALITY_INFO[event?.criticality]
+      return h(InfoPopover, { label: '最低权重' },
+        type ? h('p', null, '此 Event 被识别为「' + type[0] + '」，因此最低权重为 ' + Number(floorWeight).toFixed(2) + '。') : h('p', null, '此 Event 的最低权重为 ' + Number(floorWeight).toFixed(2) + '。'),
+        h('p', null, '记忆会随对话推进逐渐衰减，但不会低于对应类型的最低权重。'),
+        type ? h('dl', { className: 'sg-floor-table' }, Object.entries(CRITICALITY_INFO).map(([key, value]) => h(React.Fragment, { key }, h('dt', { className: key === event.criticality ? 'current' : '' }, value[0]), h('dd', { className: key === event.criticality ? 'current' : '' }, Number(value[1]).toFixed(2))))) : null)
+    }
+
+    function denseWeightPath(points, x, y) {
+      return points.reduce((path, point, index) => {
+        const px = x(point.turn)
+        const py = y(point.weight)
+        if (index === 0) return 'M' + px.toFixed(1) + ' ' + py.toFixed(1)
+        return path + ' L' + px.toFixed(1) + ' ' + py.toFixed(1)
+      }, '')
+    }
+
+    function relativeTurnTicks(maximum) {
+      if (maximum <= 0) return [0]
+      const target = Math.max(1, maximum / 5)
+      const magnitude = 10 ** Math.floor(Math.log10(target))
+      const candidates = [1, 2, 5, 10].map((value) => value * magnitude)
+      const step = candidates.reduce((best, value) => Math.abs(value - target) < Math.abs(best - target) ? value : best)
+      const ticks = []
+      for (let value = 0; value <= maximum; value += step) ticks.push(Math.round(value))
+      if (ticks.at(-1) !== maximum) ticks.push(maximum)
+      return [...new Set(ticks)]
     }
 
     function MemoryWeightTrajectory({ event }) {
+      const [hoveredSegment, setHoveredSegment] = React.useState(null)
       const trajectory = event?.weightTrajectory
-      if (!trajectory || !Array.isArray(trajectory.points) || trajectory.points.length === 0) return null
-      const points = trajectory.points.filter((point) => Number.isFinite(point?.turn) && Number.isFinite(point?.weight))
-      if (points.length === 0) return null
-      const minTurn = Math.min(...points.map((point) => point.turn))
+      const points = Array.isArray(trajectory?.points) ? trajectory.points.filter((point) => Number.isFinite(point?.turn) && Number.isFinite(point?.weight)) : []
+      const formedTurn = Number.isSafeInteger(event?.formedTurn) ? event.formedTurn : Number.isSafeInteger(trajectory?.formedTurn) ? trajectory.formedTurn : null
+      const trajectoryStartTurn = Number.isSafeInteger(trajectory?.trajectoryStartTurn) ? trajectory.trajectoryStartTurn : points[0]?.turn
+      const currentWeight = Number.isFinite(trajectory?.currentWeight) ? trajectory.currentWeight : Number(event?.weight?.forcedCap ?? 1)
+      const effectiveAdoptions = Number.isSafeInteger(trajectory?.effectiveAdoptions) ? trajectory.effectiveAdoptions : Math.max(0, Number(event?.weight?.mentionCount || 1) - 1)
+      const floorWeight = Number.isFinite(event?.weight?.floorWeight) ? event.weight.floorWeight : Number.isFinite(trajectory?.floorWeight) ? trajectory.floorWeight : 0
+      const metrics = h('div', { className: 'sg-weight-metrics' },
+        h('div', { className: 'sg-weight-metric' }, h('span', null, '当前权重'), h('strong', null, Number(currentWeight).toFixed(2))),
+        h('div', { className: 'sg-weight-metric' }, h('span', null, 'Agent 已采纳'), h('span', { className: 'sg-weight-value' }, h('strong', null, effectiveAdoptions + ' 次'), h(AdoptionHistoryInfo, { trajectory }))),
+        h('div', { className: 'sg-weight-metric' }, h('span', null, '最低权重'), h('span', { className: 'sg-weight-value' }, h('strong', null, Number(floorWeight).toFixed(2)), h(FloorWeightInfo, { event, floorWeight }))))
+      if (!trajectory || points.length === 0) return h(React.Fragment, null, h('div', { className: 'sg-weight-header' }, h('h3', { className: 'sg-section-title' }, '记忆状态')), metrics)
+      const rawSegments = Array.isArray(trajectory.segments) ? trajectory.segments : [points]
+      const segments = rawSegments.map((segment) => {
+        const source = Array.isArray(segment) ? segment : segment?.points
+        const certainty = Array.isArray(segment) ? 'known' : segment?.certainty === 'incomplete' ? 'incomplete' : 'known'
+        return {
+          certainty,
+          points: (Array.isArray(source) ? source : []).filter((point) => Number.isFinite(point?.turn) && Number.isFinite(point?.weight)).map((point) => ({ ...point, weight: Math.max(certainty === 'incomplete' ? floorWeight : 0, Math.min(1, point.weight)) })),
+        }
+      }).filter((segment) => segment.points.length)
       const maxTurn = Math.max(...points.map((point) => point.turn))
-      const span = Math.max(1, maxTurn - minTurn)
-      const x = (turn) => 42 + (turn - minTurn) / span * 540
-      const y = (weight) => 16 + (1 - Math.max(0, Math.min(1, weight))) * 146
-      const path = points.map((point, index) => (index ? 'L' : 'M') + x(point.turn).toFixed(1) + ' ' + y(point.weight).toFixed(1)).join(' ')
-      const nodes = points.filter((point) => point.kind !== 'sample')
-      const latestText = trajectory.turnsSinceLatestAdoption === null
-        ? '尚未采用'
-        : Number(trajectory.turnsSinceLatestAdoption) === 0 ? '本轮' : trajectory.turnsSinceLatestAdoption + ' 轮前'
+      const minTurn = Math.min(Number.isSafeInteger(trajectoryStartTurn) ? trajectoryStartTurn : maxTurn, ...points.map((point) => point.turn))
+      const turnSpan = Math.max(0, maxTurn - minTurn)
+      const x = (turn) => turnSpan === 0 ? 307 : 48 + (turn - minTurn) / turnSpan * 518
+      const y = (weight) => 22 + (1 - Math.max(0, Math.min(1, weight))) * 154
+      const nodeByTurn = new Map()
+      for (const point of points.filter((candidate) => candidate.kind !== 'sample')) {
+        const existing = nodeByTurn.get(point.turn)
+        if (!existing || point.kind === 'adoption' || (point.kind === 'current' && existing.kind !== 'adoption')) nodeByTurn.set(point.turn, { ...point, isCurrent: point.kind === 'current' || existing?.isCurrent })
+        else if (point.kind === 'current') nodeByTurn.set(point.turn, { ...existing, isCurrent: true })
+      }
+      const nodes = [...nodeByTurn.values()].sort((left, right) => left.turn - right.turn)
+      const adoptionNodes = nodes.filter((point) => point.kind === 'adoption')
+      const ticks = relativeTurnTicks(turnSpan)
+      const relativeAxis = formedTurn !== null
+      const nodeLabel = (point) => {
+        if (point.kind === 'creation') return point.label || ''
+        if (point.kind === 'current') return '当前'
+        if (point.kind !== 'adoption') return ''
+        if (point.isCurrent) return '最近采纳 · 当前'
+        if (adoptionNodes.length <= 3 || point.turn === trajectory.latestAdoptionTurn) return point.adoptionCount > 1 ? '采纳 ×' + point.adoptionCount : '采纳'
+        return ''
+      }
+      const nodeTooltip = (point) => {
+        const count = point.kind === 'adoption' && point.adoptionCount > 1 ? '（同轮 ' + point.adoptionCount + ' 次）' : ''
+        const prefix = point.kind === 'creation' ? (trajectory.formationTurnSource === 'sourceBlock' ? '来源 Block 结束' : '记忆形成') : point.kind === 'adoption' ? 'Agent 采纳' + count : '当前权重'
+        return prefix + ' · 第 ' + point.turn + ' 轮 · 权重：' + Number(point.weight).toFixed(2)
+      }
+      const occupiedLabels = []
+      const labelPositions = new Map()
+      for (const [index, point] of nodes.entries()) {
+        const label = nodeLabel(point)
+        if (!label) continue
+        const px = x(point.turn)
+        const anchor = index === 0 ? 'start' : index === nodes.length - 1 ? 'end' : 'middle'
+        const width = Math.max(28, label.length * 6.6)
+        const left = anchor === 'start' ? px : anchor === 'end' ? px - width : px - width / 2
+        const candidates = [y(point.weight) - 11, y(point.weight) - 27, y(point.weight) + 24, y(point.weight) + 40]
+        const py = candidates.map((value) => Math.max(13, Math.min(169, value))).find((value) => !occupiedLabels.some((box) => left < box.right + 7 && left + width > box.left - 7 && Math.abs(value - box.y) < 15)) ?? Math.max(13, Math.min(169, candidates.at(-1)))
+        occupiedLabels.push({ left, right: left + width, y: py })
+        labelPositions.set(point, { x: px, y: py, anchor, label })
+      }
+      const showSegmentTooltip = (event, segment) => {
+        const bounds = event.currentTarget?.ownerSVGElement?.parentElement?.getBoundingClientRect?.()
+        if (!bounds) return
+        const first = segment.points[0]
+        const last = segment.points.at(-1)
+        setHoveredSegment({
+          x: Math.max(128, Math.min(bounds.width - 128, event.clientX - bounds.left)),
+          y: Math.max(18, event.clientY - bounds.top),
+          below: event.clientY - bounds.top < 72,
+          certainty: segment.certainty,
+          startTurn: first.turn,
+          endTurn: last.turn,
+          startWeight: first.weight,
+          endWeight: last.weight,
+        })
+      }
       return h(React.Fragment, null,
-        h('div', { className: 'sg-weight-header' }, h('h3', { className: 'sg-section-title' }, '记忆权重轨迹')),
-        h('div', { className: 'sg-weight-metrics' },
-          h('div', { className: 'sg-weight-metric' }, h('span', null, '当前权重'), h('strong', null, Number(trajectory.currentWeight).toFixed(2))),
-          h('div', { className: 'sg-weight-metric' }, h('span', null, '有效采用'), h('strong', null, trajectory.effectiveAdoptions + ' 次')),
-          h('div', { className: 'sg-weight-metric' }, h('span', null, '最近采用'), h('strong', null, latestText))),
+        h('div', { className: 'sg-weight-header' }, h('h3', { className: 'sg-section-title' }, '记忆状态')),
+        metrics,
         h('div', { className: 'sg-weight-chart' },
-          h('svg', { viewBox: '0 0 620 196', preserveAspectRatio: 'xMidYMid meet', role: 'img', 'aria-label': '该 Event 的真实记忆权重轨迹，横轴为对话轮次，纵轴为记忆权重' },
+          h('svg', { viewBox: '0 0 620 238', preserveAspectRatio: 'xMidYMid meet', role: 'img', 'aria-label': '该 Event 的记忆权重轨迹，横轴为' + (relativeAxis ? '距记忆形成的对话轮次' : '对话轮次') + '，纵轴为记忆权重，最低权重为 ' + Number(floorWeight).toFixed(2) },
             [0, .5, 1].map((weight) => h(React.Fragment, { key: weight },
-              h('line', { className: 'sg-weight-grid', x1: '42', y1: String(y(weight)), x2: '582', y2: String(y(weight)) }),
-              h('text', { className: 'sg-weight-axis-label', x: '34', y: String(y(weight) + 3), textAnchor: 'end' }, weight.toFixed(1)))),
-            h('path', { className: 'sg-weight-line', d: path }),
+              h('line', { className: 'sg-weight-grid', x1: '48', y1: String(y(weight)), x2: '566', y2: String(y(weight)) }),
+              h('text', { className: 'sg-weight-axis-label', x: '39', y: String(y(weight) + 4), textAnchor: 'end' }, weight.toFixed(1)))),
+            h('line', { className: 'sg-weight-floor', x1: '48', y1: String(y(floorWeight)), x2: '566', y2: String(y(floorWeight)) }),
+            h('text', { className: 'sg-weight-floor-label', x: '562', y: String(y(floorWeight) + 16), textAnchor: 'end' }, '最低权重 ' + Number(floorWeight).toFixed(2)),
+            segments.filter((segment) => segment.points.length > 1).map((segment, index) => h(React.Fragment, { key: 'segment:' + index },
+              h('path', { className: 'sg-weight-line ' + (segment.certainty === 'incomplete' ? 'incomplete' : 'known'), d: denseWeightPath(segment.points, x, y) }),
+              h('path', {
+                className: 'sg-weight-line-hit',
+                d: denseWeightPath(segment.points, x, y),
+                onPointerEnter: (event) => showSegmentTooltip(event, segment),
+                onPointerMove: (event) => showSegmentTooltip(event, segment),
+                onPointerLeave: () => setHoveredSegment(null),
+                'aria-label': segment.certainty === 'incomplete' ? '旧数据推算的记忆权重轨迹' : '已确认的记忆权重轨迹',
+              }))),
             nodes.map((point, index) => h(React.Fragment, { key: point.kind + ':' + point.turn + ':' + index },
-              h('circle', { className: 'sg-weight-node ' + point.kind, cx: String(x(point.turn)), cy: String(y(point.weight)), r: point.kind === 'adoption' ? '5' : '4' },
-                h('title', null, (point.label || point.kind) + ' · Turn ' + point.turn + ' · 权重 ' + Number(point.weight).toFixed(2))),
-              h('text', { className: 'sg-weight-node-label', x: String(x(point.turn)), y: String(Math.max(10, y(point.weight) - 9 - index % 2 * 10)), textAnchor: index === 0 ? 'start' : index === nodes.length - 1 ? 'end' : 'middle' }, point.label || ''))),
-            h('text', { className: 'sg-weight-axis-label', x: '42', y: '181', textAnchor: 'start' }, 'Turn ' + minTurn),
-            h('text', { className: 'sg-weight-axis-label', x: '582', y: '181', textAnchor: 'end' }, 'Turn ' + maxTurn),
-            h('text', { className: 'sg-weight-axis-label', x: '312', y: '193', textAnchor: 'middle' }, '对话轮次'))),
-        trajectory.lastRetrievedAt ? h('div', { className: 'sg-weight-retrieval' }, '最近检索：' + formatTime(trajectory.lastRetrievedAt) + '。检索不改变权重；当前记录没有检索轮次，因此不绘制为强化节点。') : null,
-        trajectory.note ? h('p', { className: 'sg-weight-note' }, trajectory.note) : null,
-        h(WeightMechanismHelp))
+              h('circle', { className: 'sg-weight-node ' + point.kind, cx: String(x(point.turn)), cy: String(y(point.weight)), r: point.kind === 'adoption' ? '6' : '5' },
+                h('title', null, nodeTooltip(point))),
+              labelPositions.has(point) ? h('text', { className: 'sg-weight-node-label', x: String(labelPositions.get(point).x), y: String(labelPositions.get(point).y), textAnchor: labelPositions.get(point).anchor }, labelPositions.get(point).label) : null)),
+            ticks.map((offset) => {
+              const turn = minTurn + offset
+              return h(React.Fragment, { key: 'tick:' + turn },
+                h('line', { className: 'sg-weight-tick', x1: String(x(turn)), y1: '176', x2: String(x(turn)), y2: '181' }),
+                h('text', { className: 'sg-weight-axis-label', x: String(x(turn)), y: '215', textAnchor: offset === 0 ? 'start' : offset === turnSpan ? 'end' : 'middle' }, relativeAxis ? turn - formedTurn : turn))
+            }),
+            h('text', { className: 'sg-weight-axis-label', x: '307', y: '232', textAnchor: 'middle' }, relativeAxis ? '距记忆形成的对话轮次' : '对话轮次')),
+          hoveredSegment ? h('div', { className: 'sg-weight-tooltip ' + (hoveredSegment.below ? 'below' : 'above'), style: { left: hoveredSegment.x + 'px', top: hoveredSegment.y + 'px' }, role: 'tooltip' },
+            h('strong', null, hoveredSegment.certainty === 'incomplete' ? '旧数据推算轨迹' : '已确认轨迹'),
+            h('small', null, '第 ' + hoveredSegment.startTurn + '–' + hoveredSegment.endTurn + ' 轮 · ' + Number(hoveredSegment.startWeight).toFixed(2) + ' → ' + Number(hoveredSegment.endWeight).toFixed(2)),
+            hoveredSegment.certainty === 'incomplete' ? h('small', null, '旧版本未记录部分采纳的准确轮次') : null) : null))
+    }
+
+    function CopyEventId({ value }) {
+      const [copied, setCopied] = React.useState(false)
+      const copy = () => {
+        if (!globalThis.navigator?.clipboard?.writeText) return
+        void globalThis.navigator.clipboard.writeText(String(value)).then(() => {
+          setCopied(true)
+          window.setTimeout(() => setCopied(false), 1400)
+        })
+      }
+      return h('button', { type: 'button', className: 'sg-copy-id', onClick: copy, disabled: !globalThis.navigator?.clipboard?.writeText }, copied ? '已复制' : '复制')
+    }
+
+    function EventSourceDisclosure({ sourceMessages }) {
+      if (!sourceMessages?.length) return null
+      return h(CitationDisclosure, { title: '来源与证据' },
+        h('p', { className: 'sg-provenance-note' }, '以下原始内容用于查看与追溯依据，不代表全部内容都参与了某次回答。'),
+        h('div', { className: 'sg-citation-messages' }, sourceMessages.map((message, index) => h('div', { key: message.id || index, className: 'sg-citation-message' },
+          h('span', { className: 'sg-citation-message-role' }, (message.role || 'message') + (message.createdAt ? ' · ' + exactTime(message.createdAt) : '')),
+          String(message.content || '')))))
+    }
+
+    function EventTechnicalDisclosure({ event, citation }) {
+      const evidenceRef = String(citation?.evidenceRef || '')
+      const redundantEvidenceRef = !evidenceRef || evidenceRef === event.id || evidenceRef === 'event:' + event.id
+      return h(CitationDisclosure, { title: '技术信息' }, h('dl', { className: 'sg-event-technical' },
+        h('dt', null, 'Event ID'), h('dd', null, h('code', null, event.id), h(CopyEventId, { value: event.id })),
+        !redundantEvidenceRef ? h(React.Fragment, null, h('dt', null, 'evidenceRef'), h('dd', null, h('code', null, evidenceRef))) : null,
+        citation?.detailKind ? h(React.Fragment, null, h('dt', null, 'detailKind'), h('dd', null, h('code', null, citation.detailKind))) : null,
+        event.sourceBlockId ? h(React.Fragment, null, h('dt', null, '来源 Block'), h('dd', null, h('code', null, event.sourceBlockId))) : null))
+    }
+
+    function EventMemoryDetails({ event, sourceMessages = [], citation = null, relatedEvents = [] }) {
+      const memoryContent = event?.narrative || event?.summary
+      return h(React.Fragment, null,
+        h('section', { className: 'sg-event-section' }, h('h3', { className: 'sg-event-section-title' }, '记忆内容'), h('p', { className: 'sg-event-memory-copy' }, memoryContent || '暂无可展示的记忆内容。')),
+        h('section', { className: 'sg-event-section sg-event-weight-section' }, h(MemoryWeightTrajectory, { event })),
+        relatedEvents.length ? h(CitationDisclosure, { title: '关联信息' }, h('div', { className: 'sg-citation-events' }, relatedEvents.map((related, index) => h('article', { key: related.id || index, className: 'sg-citation-event' }, h('strong', null, related.title || '关联事件'), h('p', null, related.summary || related.narrative || '暂无摘要'))))) : null,
+        h(EventSourceDisclosure, { sourceMessages }),
+        h(EventTechnicalDisclosure, { event, citation }))
     }
 
     function EventDetailPanel({ event, nodes, events, onNode, openSource, className = '', onMouseEnter, onMouseLeave }) {
       if (!event) return h('aside', { className: 'sg-long-detail sg-placeholder-detail' }, '选择事件查看完整时间、关系与证据')
-      const temporal = event.temporal || {}; const eventMap = new Map(events.map((item) => [item.id, item])); const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+      const temporal = event.temporal || {}; const eventMap = new Map(events.map((item) => [item.id, item]))
       const relations = EVENT_RELATIONS.flatMap(([key, label]) => { const value = temporal[key]; const ids = Array.isArray(value) ? value : value ? [value] : []; return ids.map((id) => ({ id, label })) })
-      return h('aside', { className: 'sg-long-detail ' + className, onMouseEnter, onMouseLeave },
-        h('div', { className: 'sg-event-detail-head' }, h('h2', null, event.title), h('span', { className: 'sg-event-status ' + (temporal.status || 'unknown') }, EVENT_STATUS_TEXT[temporal.status] || '未知')),
-        h('span', { className: 'sg-type-badge' }, EVENT_TYPE_TEXT[temporal.eventType] || temporal.eventType || '其他'),
-        h('section', null, h('h3', null, '摘要'), h('p', { className: 'sg-detail-copy' }, event.summary || '暂无摘要')),
-        event.narrative && event.narrative !== event.summary ? h('section', null, h('h3', null, '事件叙述'), h('p', { className: 'sg-detail-copy' }, event.narrative)) : null,
-        h('section', null, h('h3', null, '时间信息'), h('dl', { className: 'sg-time-grid' },
-          h('dt', null, '实际发生时间'), h('dd', null, temporal.happenedStart ? exactTime(temporal.happenedStart) + (temporal.happenedEnd && temporal.happenedEnd !== temporal.happenedStart ? ' — ' + exactTime(temporal.happenedEnd) : '') : '未知'),
-          h('dt', null, '提及时间'), h('dd', null, exactTime(temporal.mentionedAt || event.createdAt)),
-          h('dt', null, '时间精度'), h('dd', null, temporal.precision || 'unknown'),
-          h('dt', null, '原始表达'), h('dd', null, temporal.originalText || '未记录'))),
-        h('section', null, h('h3', null, '参与实体'), h('div', { className: 'sg-tags' }, (temporal.participantNodeIds || []).flatMap((id) => nodeMap.get(id) || []).map((node) => h(NodePill, { key: node.id, node, onClick: () => onNode(node.id) })), !(temporal.participantNodeIds || []).length ? (temporal.participants || []).map((name) => h('span', { key: name, className: 'sg-tag' }, name)) : null)),
+      return h(InfoPopoverGroup, { key: event.id }, h('aside', { className: 'sg-long-detail ' + className, onMouseEnter, onMouseLeave },
+        h('div', { className: 'sg-event-detail-head' }, h('div', null, h('span', { className: 'sg-event-detail-kicker' }, 'Event'), h('h2', null, event.title)), h('span', { className: 'sg-event-status ' + (temporal.status || 'unknown') }, EVENT_STATUS_TEXT[temporal.status] || '未知')),
+        h(EventMetadata, { event, nodes, onNode }),
+        h('section', null, h('h3', null, '记忆内容'), h('p', { className: 'sg-detail-copy' }, event.narrative || event.summary || '暂无可展示的记忆内容。')),
         relations.length ? h('section', null, h('h3', null, '事件关系'), relations.map((relation) => h('div', { key: relation.label + relation.id, className: 'sg-relation-row' }, h('span', null, relation.label), h('strong', null, eventMap.get(relation.id)?.title || relation.id)))) : null,
         event.weightTrajectory ? h('section', null, h(MemoryWeightTrajectory, { event })) : null,
-        h('section', null, h('h3', null, '证据来源'), h('div', { className: 'sg-evidence-row' }, h('span', null, '来源 Block'), h('code', null, event.sourceBlockId)), h('div', { className: 'sg-evidence-row' }, h('span', null, '置信度'), h('strong', null, Math.round((event.confidence || 0) * 100) + '%'))),
-        h('button', { className: 'sg-source-button', onClick: () => openSource(event) }, '查看来源原始消息 →'))
+        h('button', { className: 'sg-source-button', onClick: () => openSource(event) }, '查看来源与证据 →')))
     }
 
     function TimelineList({ events, nodes, query, filters, onSelect, selectedId, floating = false, onNode, openSource }) {
@@ -1618,7 +1962,7 @@ window.__ModuleLoader__.load({
         h(EventDetailPanel, { event: preview.event, nodes, events, onNode, openSource })) : null)
     }
 
-    function LongTermPage({ events, eventPage, graph, project, query, setQuery, openEvent, namespace }) {
+    function LongTermPage({ events, eventPage, graph, project, query, setQuery, openEvent, namespace, focusNodeId }) {
       const [mode, setMode] = React.useState('graph')
       const [selectedNodeId, setSelectedNodeId] = React.useState('')
       const [selectedEventId, setSelectedEventId] = React.useState('')
@@ -1634,10 +1978,25 @@ window.__ModuleLoader__.load({
       const nodeImportance = React.useMemo(() => graphNodeImportance(nodes, edges, project), [nodes, edges, project])
       const nodeTags = [...new Set(nodes.flatMap((node) => node.tags || []))].sort((left, right) => left.localeCompare(right))
       React.useEffect(() => {
+        if (!focusNodeId || !nodes.some((node) => node.id === focusNodeId)) return
+        setMode('graph')
+        setNodeType('')
+        setNodeTag('')
+        const rank = [...nodes].sort((left, right) => (nodeImportance.get(right.id)?.score || 0) - (nodeImportance.get(left.id)?.score || 0)).findIndex((node) => node.id === focusNodeId)
+        if (rank >= 0) setGraphNodeLimit((current) => Math.max(current, rank + 1))
+        setSelectedNodeId(focusNodeId)
+        setFullScreen(true)
+      }, [focusNodeId, nodes, nodeImportance])
+      React.useEffect(() => {
         if (!fullScreen) return undefined
         const previous = document.body.style.overflow
         document.body.style.overflow = 'hidden'
-        const onKeyDown = (event) => { if (event.key === 'Escape') { setFullScreen(false); setFiltersOpen(false) } }
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape') return
+          if (document.querySelector('.sg-long-explorer .sg-info-trigger[aria-expanded="true"]')) return
+          setFullScreen(false)
+          setFiltersOpen(false)
+        }
         window.addEventListener('keydown', onKeyDown)
         return () => { document.body.style.overflow = previous; window.removeEventListener('keydown', onKeyDown) }
       }, [fullScreen])
@@ -1875,14 +2234,12 @@ window.__ModuleLoader__.load({
           messages.length ? messages.map((message) => h('div', { key: message.id, className: 'sg-raw-message' }, h('div', { className: 'sg-muted' }, String(message.role || '') + ' · ' + formatTime(message.createdAt)), h('div', { className: 'sg-code' }, String(message.content || '')))) : h('div', { className: 'sg-muted' }, '当前数据中没有可显示的来源消息。'))))
     }
 
-    function EventDetail({ event, project, source, onBack, backLabel }) {
-      return h(React.Fragment, null,
+    function EventDetail({ event, project, source, onBack, backLabel, onNode }) {
+      const detailedEvent = source?.events?.find((item) => item.id === event.id) || event
+      return h(InfoPopoverGroup, null,
         h(BackBar, { label: backLabel, onBack }),
-        h('header', { className: 'sg-detail-header' }, h('h2', { className: 'sg-detail-title' }, event.title || '记忆详情'), event.summary ? h('p', { className: 'sg-detail-subtitle' }, event.summary) : null, h('div', { className: 'sg-meta' }, h('span', null, formatTime(event.updatedAt || event.createdAt)), h('span', { className: 'sg-meta-sep' }, project))),
-        event.narrative ? h('div', { className: 'sg-detail-section' }, h('h3', { className: 'sg-section-title' }, 'AI 对这段经历的理解'), h('p', { className: 'sg-prose' }, event.narrative)) : null,
-        h('div', { className: 'sg-detail-section' }, h('h3', { className: 'sg-section-title' }, '参与实体'), (event.temporal?.participants || []).length ? h('div', { className: 'sg-tags' }, event.temporal.participants.map((name) => h('span', { key: name, className: 'sg-tag' }, name))) : h('span', { className: 'sg-muted' }, '未记录')),
-        event.weightTrajectory ? h('div', { className: 'sg-detail-section' }, h(MemoryWeightTrajectory, { event })) : null,
-        h(SourceDetails, { item: event, source, kind: 'event' }))
+        h('header', { className: 'sg-detail-header sg-event-page-header' }, h('span', { className: 'sg-event-detail-kicker' }, 'Event'), h('h2', { className: 'sg-detail-title' }, detailedEvent.title || '记忆详情'), h(EventMetadata, { event: detailedEvent, nodes: source?.relatedNodes || [], onNode })),
+        h(EventMemoryDetails, { event: detailedEvent, sourceMessages: source?.messages || [] }))
     }
 
     function ElementDetail({ element, events, source, openEvent, onBack, backLabel }) {
@@ -2299,6 +2656,7 @@ window.__ModuleLoader__.load({
       const weight = event?.weight
       return {
         id: event?.id,
+        formedTurn: event?.formedTurn,
         title: event?.title,
         summary: event?.summary,
         narrative: event?.narrative,
@@ -2817,6 +3175,7 @@ window.__ModuleLoader__.load({
       const [conversationId, setConversationId] = React.useState('')
       const [section, setSection] = React.useState('short')
       const [view, setView] = React.useState({ name: 'root' })
+      const [graphFocusNodeId, setGraphFocusNodeId] = React.useState('')
       const [data, setData] = React.useState({ events: [], graph: { nodes: [], edges: [], migration: null }, blocks: [], openBlock: null, conversations: [], activeThreadId: null, audit: [], pagination: { events: { total: 0, offset: 0, limit: 40 }, blocks: { total: 0, offset: 0, limit: 40 }, audit: { total: 0, offset: 0, limit: 100 } } })
       const [query, setQuery] = React.useState('')
       const [source, setSource] = React.useState(null)
@@ -2829,6 +3188,7 @@ window.__ModuleLoader__.load({
       const dashboardEtagsRef = React.useRef(new Map())
       const loadedNamespaceRef = React.useRef('')
       const feedbackDeepLinkRef = React.useRef(readFeedbackNavigationState(navigationState) || readFeedbackDeepLink())
+      const graphNodeNavigationRef = React.useRef(readGraphNodeNavigationState(navigationState) || readGraphNodeDeepLink())
       const feedbackNavigationStateRef = React.useRef(navigationState)
       const reportError = (reason) => {
         const message = String(reason?.message || reason)
@@ -2889,19 +3249,37 @@ window.__ModuleLoader__.load({
       }, [])
 
       React.useEffect(() => {
+        const graphLink = graphNodeNavigationRef.current
         const feedbackLink = feedbackDeepLinkRef.current
-        if (feedbackLink) {
+        if (graphLink) {
+          setSection('long')
+          setQuery('')
+          setView({ name: 'root' })
+          setSource(null)
+          setGraphFocusNodeId(graphLink.nodeId)
+          if (readGraphNodeDeepLink()) consumeGraphNodeDeepLink()
+        } else if (feedbackLink) {
           setSection('more')
           setView({ name: 'support' })
           setSource(null)
           if (readFeedbackDeepLink()) consumeFeedbackDeepLink()
         }
-        void loadDashboard(feedbackLink?.namespace || '')
+        void loadDashboard(graphLink?.namespace || feedbackLink?.namespace || '')
         return () => dashboardRequestRef.current?.abort()
       }, [loadDashboard])
       React.useEffect(() => {
+        const graphLink = navigationState !== feedbackNavigationStateRef.current ? readGraphNodeNavigationState(navigationState) : null
         const feedback = readNewFeedbackNavigationState(feedbackNavigationStateRef.current, navigationState)
         feedbackNavigationStateRef.current = navigationState
+        if (graphLink) {
+          setSection('long')
+          setView({ name: 'root' })
+          setSource(null)
+          setGraphFocusNodeId(graphLink.nodeId)
+          setNamespace(graphLink.namespace)
+          void loadDashboard(graphLink.namespace, { force: true })
+          return
+        }
         if (!feedback) return
         setSection('more')
         setView({ name: 'support' })
@@ -2978,6 +3356,13 @@ window.__ModuleLoader__.load({
         setView((current) => ({ name: kind, item, back: current })); loadSource(kind, item)
       }
       const openEvent = (event) => openWithSource('event', data.events.find((item) => item.id === event.id) || event)
+      const openGraphNode = (nodeId) => {
+        setSection('long')
+        setQuery('')
+        setView({ name: 'root' })
+        setSource(null)
+        setGraphFocusNodeId(nodeId)
+      }
       const goBack = () => {
         const previous = view.back || { name: 'root' }
         setView(previous)
@@ -3003,7 +3388,7 @@ window.__ModuleLoader__.load({
       let content = null
       if (loading && !selected) content = h(Loading)
       else if (!selected) content = h(Empty, { title: '还没有记忆', copy: '完成一些 DSH 对话后，短期记忆和长期记忆会出现在这里。' })
-      else if (view.name === 'event') content = h(EventDetail, { event: view.item, project, source, onBack: goBack, backLabel })
+      else if (view.name === 'event') content = h(EventDetail, { event: view.item, project, source, onBack: goBack, backLabel, onNode: openGraphNode })
       else if (view.name === 'status') content = h(ProcessingStatus, { overview: selected, blocks: data.blocks, conversations, namespace, serverVersion: overview.pluginVersion, onBack: view.back ? goBack : () => setView({ name: 'root' }), backLabel: view.back?.name === 'settings' ? '高级设置' : '返回', refresh })
       else if (view.name === 'import') content = h(ImportPage, { namespace, onBack: moreBack, refresh })
       else if (view.name === 'structure') content = h(StructurePage, { events: data.events, eventPage: data.pagination?.events, graph: data.graph, openEvent, namespace, onBack: moreBack })
@@ -3014,7 +3399,7 @@ window.__ModuleLoader__.load({
       else if (view.name === 'settings') content = h(SettingsPage, { selected, namespace, dataDirectory: overview.dataDirectory, onBack: moreBack, setView, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort })
       else if (view.name === 'support') content = h(SupportPage, { namespace, overview, selected, data, recentError, onBack: moreBack })
       else content = h(React.Fragment, null,
-        loading ? h(Loading) : section === 'short' ? h(ShortTermPage, { key: namespace + ':' + conversationId, blocks: data.blocks, blockPage: data.pagination?.blocks, openBlock: data.openBlock, conversations, activeThreadId: conversationId || data.activeThreadId || '', namespace, onConversationChange: selectConversation, refresh }) : section === 'long' ? h(LongTermPage, { key: namespace, events: data.events, eventPage: data.pagination?.events, graph: data.graph, project, query, setQuery, openEvent, namespace }) : h(MoreHome, { setView }))
+        loading ? h(Loading) : section === 'short' ? h(ShortTermPage, { key: namespace + ':' + conversationId, blocks: data.blocks, blockPage: data.pagination?.blocks, openBlock: data.openBlock, conversations, activeThreadId: conversationId || data.activeThreadId || '', namespace, onConversationChange: selectConversation, refresh }) : section === 'long' ? h(LongTermPage, { key: namespace, events: data.events, eventPage: data.pagination?.events, graph: data.graph, project, query, setQuery, openEvent, namespace, focusNodeId: graphFocusNodeId }) : h(MoreHome, { setView }))
 
       return h('main', { className: 'sg-memory', 'data-testid': 'stratagate-memory-ui' },
         h('style', null, css),
@@ -3050,7 +3435,10 @@ window.__ModuleLoader__.load({
         slots.inject('conversation.chat.turnTail', () => slots.register({
           name: 'conversation.chat.turnTail',
           select: selectMemoryCitations,
-          inject: () => pluginSettingsScope ? { hooks: { pluginSettings: pluginSettingsScope } } : {},
+          inject: () => ({
+            ...(pluginSettingsScope ? { hooks: { pluginSettings: pluginSettingsScope } } : {}),
+            onOpenGraphNode: (namespace, nodeId) => navigateToGraphNode(ctx, namespace, nodeId),
+          }),
         }, MemoryCitationTail))
       }
       slots.inject('settings.section', () => slots.register({
@@ -3071,9 +3459,11 @@ window.__ModuleLoader__.load({
         disposeFeedbackLinkNavigation?.()
         const disposeLinkNavigation = installFeedbackLinkNavigation(ctx)
         const disposeDeepLink = openFeedbackDeepLink(ctx)
+        const disposeGraphDeepLink = openGraphNodeDeepLink(ctx)
         disposeFeedbackLinkNavigation = () => {
           disposeLinkNavigation()
           disposeDeepLink()
+          disposeGraphDeepLink()
         }
       }
     }

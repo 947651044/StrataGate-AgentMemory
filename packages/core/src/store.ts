@@ -1710,8 +1710,12 @@ export class StrataGate {
     const sourceMessageIds = requestedRefs.length > 0 ? requestedRefs : sourceBlock.l5Raw.map((message) => message.id);
     const now = toUtc8Iso(this.now());
     const criticality = input.criticality ?? 'routine';
+    const formedTurn = sourceBlock.threadId?.startsWith('external-import:')
+      ? this.currentTurn
+      : sourceBlock.endTurn;
     const event: EventCard = {
       id: input.id ?? this.idFactory('evt'),
+      formedTurn,
       title: input.title.trim(),
       summary: input.summary.trim(),
       narrative: input.narrative?.trim() || input.summary.trim(),
@@ -1730,7 +1734,7 @@ export class StrataGate {
       supersededBy: null,
       weight: {
         mentionCount: 1,
-        lastAdoptedTurn: this.currentTurn,
+        lastAdoptedTurn: formedTurn,
         lastRetrievedAt: null,
         pinned: false,
         floorWeight: criticalityFloor(criticality),

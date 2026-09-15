@@ -125,6 +125,8 @@ export interface EventCardInput {
 
 export interface EventCard extends Omit<EventCardInput, 'id'> {
   id: string;
+  /** Conversation turn where this Event entered its long-term-memory lifecycle. */
+  formedTurn?: number;
   narrative: string;
   tags: string[];
   quotes: string[];

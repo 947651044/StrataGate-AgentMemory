@@ -28,11 +28,12 @@ function assert(condition, message) {
 let tarball
 let installRoot
 try {
-  const packOutput = run(['pack', '--json', '--ignore-scripts'], packageRoot)
+  installRoot = mkdtempSync(join(tmpdir(), 'stratagate-dsh-pack-'))
+  const packOutput = run(['pack', '--json', '--ignore-scripts', '--pack-destination', installRoot], packageRoot)
   const jsonStart = Math.max(packOutput.lastIndexOf('\n['), packOutput.startsWith('[') ? 0 : -1)
   assert(jsonStart >= 0, `npm pack did not return JSON:\n${packOutput}`)
   const packed = JSON.parse(packOutput.slice(jsonStart).trim())[0]
-  tarball = join(packageRoot, packed.filename)
+  tarball = join(installRoot, packed.filename)
   const files = new Set(packed.files.map(({ path }) => path.replaceAll('\\', '/')))
   const required = [
     'package.json',
@@ -66,7 +67,6 @@ try {
   const patch = readFileSync(join(packageRoot, 'cordis.patch.yml'), 'utf8')
   assert(patch.includes('name: stratagate-dsh'), 'Cordis patch does not install stratagate-dsh')
 
-  installRoot = mkdtempSync(join(tmpdir(), 'stratagate-dsh-pack-'))
   run(['init', '--yes'], installRoot)
   run(['install', tarball, '--ignore-scripts', '--package-lock=false'], installRoot)
   const installed = join(installRoot, 'node_modules', 'stratagate-dsh')
