@@ -4,6 +4,7 @@ import {
   StorageConflictError,
   assertValidSnapshot,
   cloneSnapshot,
+  normalizeSnapshot,
   type ElementProjectionJob,
   type ExtractionJob,
   type BlockSummaryJob,
@@ -99,6 +100,7 @@ interface EventRow {
   tags_json: string;
   quotes_json: string;
   source_block_id: string;
+  formed_turn: number | null;
   temporal_json: string;
   scope: MemoryScope;
   criticality: MemoryCriticality;
@@ -291,6 +293,7 @@ CREATE TABLE IF NOT EXISTS events (
   tags_json TEXT NOT NULL,
   quotes_json TEXT NOT NULL,
   source_block_id TEXT NOT NULL,
+  formed_turn INTEGER,
   temporal_json TEXT NOT NULL,
   scope TEXT NOT NULL,
   criticality TEXT NOT NULL,
@@ -607,6 +610,7 @@ export class SqliteStorage implements StorageAdapter {
       quotes: parseJson<string[]>(row.quotes_json, 'events.quotes_json'),
       sourceMessageIds: sourcesByEvent.get(row.id) ?? [],
       sourceBlockId: row.source_block_id,
+      ...(row.formed_turn === null ? {} : { formedTurn: row.formed_turn }),
       temporal: (() => {
         const temporal = parseJson<EventTemporal>(row.temporal_json, 'events.temporal_json');
         return { ...temporal, eventType: normalizeStandardEventType(temporal.eventType) };
@@ -793,8 +797,7 @@ export class SqliteStorage implements StorageAdapter {
       externalMemoryImportJobs,
       successfulModelResponses,
     };
-    assertValidSnapshot(snapshot);
-    return { snapshot: cloneSnapshot(snapshot), revision: space.revision };
+    return { snapshot: cloneSnapshot(normalizeSnapshot(snapshot)), revision: space.revision };
   }
 
   async save(namespace: string, snapshot: StrataGateSnapshot, expectedRevision: number): Promise<number> {
@@ -940,10 +943,10 @@ export class SqliteStorage implements StorageAdapter {
     const insertEvent = this.database.prepare(`
       INSERT INTO events (
         namespace, id, position, title, summary, narrative, tags_json, quotes_json, source_block_id,
-        temporal_json, scope, criticality, confidence, status, superseded_by,
+        formed_turn, temporal_json, scope, criticality, confidence, status, superseded_by,
         mention_count, last_adopted_turn, last_retrieved_at, pinned, floor_weight, forced_cap,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT (namespace, id) DO UPDATE SET
         position = excluded.position,
         title = excluded.title,
@@ -952,6 +955,7 @@ export class SqliteStorage implements StorageAdapter {
         tags_json = excluded.tags_json,
         quotes_json = excluded.quotes_json,
         source_block_id = excluded.source_block_id,
+        formed_turn = excluded.formed_turn,
         temporal_json = excluded.temporal_json,
         scope = excluded.scope,
         criticality = excluded.criticality,
@@ -982,6 +986,7 @@ export class SqliteStorage implements StorageAdapter {
         JSON.stringify(event.tags),
         JSON.stringify(event.quotes),
         event.sourceBlockId,
+        event.formedTurn ?? null,
         JSON.stringify(event.temporal),
         event.scope,
         event.criticality,
@@ -1261,6 +1266,23 @@ export class SqliteStorage implements StorageAdapter {
         if (!blockColumns.some(({ name }) => name === 'processing_status')) {
           this.database.exec("ALTER TABLE blocks ADD COLUMN processing_status TEXT NOT NULL DEFAULT 'ready' CHECK (processing_status IN ('pending', 'ready'))");
         }
+        const eventColumns = this.database.prepare("PRAGMA table_info('events')").all() as unknown as Array<{ name: string }>;
+        if (!eventColumns.some(({ name }) => name === 'formed_turn')) {
+          this.database.exec('ALTER TABLE events ADD COLUMN formed_turn INTEGER');
+        }
+        this.database.exec(`
+          UPDATE events
+          SET formed_turn = (
+            SELECT blocks.end_turn FROM blocks
+            WHERE blocks.namespace = events.namespace AND blocks.id = events.source_block_id
+          )
+          WHERE formed_turn IS NULL AND EXISTS (
+            SELECT 1 FROM blocks
+            WHERE blocks.namespace = events.namespace
+              AND blocks.id = events.source_block_id
+              AND (blocks.thread_id IS NULL OR blocks.thread_id NOT LIKE 'external-import:%')
+          )
+        `);
         const extractionColumns = this.database.prepare("PRAGMA table_info('extraction_jobs')").all() as unknown as Array<{ name: string }>;
         if (!extractionColumns.some(({ name }) => name === 'next_retry_at')) {
           this.database.exec('ALTER TABLE extraction_jobs ADD COLUMN next_retry_at TEXT');

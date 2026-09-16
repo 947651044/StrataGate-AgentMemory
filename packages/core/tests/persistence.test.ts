@@ -102,19 +102,84 @@ describe('SQLite persistence', () => {
     expect(ephemeral.storageRevision).toBe(0);
   });
 
-  it('creates schema version ten and rejects a newer database schema', async () => {
+  it('creates schema version eleven and rejects a newer database schema', async () => {
     const initializedFilename = await databasePath();
     const initialized = new SqliteStorage({ filename: initializedFilename });
     await initialized.close();
     const initializedDatabase = new Database(initializedFilename, { readonly: true });
-    expect(initializedDatabase.pragma('user_version', { simple: true })).toBe(10);
+    expect(initializedDatabase.pragma('user_version', { simple: true })).toBe(11);
     initializedDatabase.close();
 
     const newerFilename = await databasePath();
     const newerDatabase = new Database(newerFilename);
-    newerDatabase.pragma('user_version = 11');
+    newerDatabase.pragma('user_version = 12');
     newerDatabase.close();
     expect(() => new SqliteStorage({ filename: newerFilename })).toThrow('newer than supported');
+  });
+
+  it('persists the source Block endTurn rather than a delayed creation turn', async () => {
+    const filename = await databasePath();
+    const options = { database: filename, namespace: 'formed-turn', blockTurnSize: 1,
+      summarizer: nonExtractingSummarizer, now: fixedNow, idFactory: ids() };
+    const memory = await StrataGate.open(options);
+    const first = await memory.appendTurn({ user: 'remember this', assistant: 'okay' });
+    await memory.appendTurn({ user: 'later', assistant: 'context' });
+    const event = await memory.addEvent({ id: 'delayed', title: 'Delayed Event', summary: 'source remains first turn',
+      sourceBlockId: first.sealedBlock!.id, sourceMessageIds: [first.sealedBlock!.l5Raw[0]!.id] });
+    expect(memory.turn).toBe(2);
+    expect(event.formedTurn).toBe(1);
+    expect(event.weight.lastAdoptedTurn).toBe(1);
+    const expected = memory.exportSnapshot();
+    await memory.close();
+    const restored = await StrataGate.open(options);
+    expect(restored.exportSnapshot()).toEqual(expected);
+    await restored.close();
+  });
+
+  it('migrates v10 formedTurn without guessing or changing legacy weight state', async () => {
+    const filename = await databasePath();
+    const options = { database: filename, namespace: 'legacy:v10', blockTurnSize: 1,
+      summarizer: nonExtractingSummarizer, now: fixedNow, idFactory: ids() };
+    const memory = await StrataGate.open(options);
+    const expected = new Map();
+    for (const [id, threadId] of [['normal', 'conversation'], ['external', 'external-import:fixture'], ['missing', 'conversation']] as const) {
+      const result = await memory.appendTurn({ user: id, assistant: 'fixture', threadId });
+      const event = await memory.addEvent({ id, title: id, summary: 'disposable legacy fixture',
+        sourceBlockId: result.sealedBlock!.id, sourceMessageIds: [result.sealedBlock!.l5Raw[0]!.id] });
+      expected.set(id, event);
+    }
+    await memory.recordMemoryUse(['normal'], { receiptId: 'legacy-use', audit: { sessionId: 'conversation', turn: memory.turn } });
+    const before = memory.exportSnapshot();
+    await memory.close();
+    const database = new Database(filename);
+    // Simulate an old orphaned source only in this disposable fixture.
+    database.pragma('foreign_keys = OFF');
+    database.exec('ALTER TABLE events DROP COLUMN formed_turn; PRAGMA user_version = 10; UPDATE memory_spaces SET schema_version = 10;');
+    database.prepare('UPDATE events SET source_block_id = ? WHERE id = ?').run('unavailable-block', 'missing');
+    database.close();
+
+    const storage = new SqliteStorage({ filename });
+    const loaded = (await storage.load(options.namespace))!.snapshot;
+    expect(loaded.schemaVersion).toBe(11);
+    expect(loaded.events.find(({ id }) => id === 'normal')?.formedTurn).toBe(1);
+    expect(loaded.events.find(({ id }) => id === 'external')).not.toHaveProperty('formedTurn');
+    expect(loaded.events.find(({ id }) => id === 'missing')).not.toHaveProperty('formedTurn');
+    expect(loaded.blocks).toEqual(before.blocks);
+    expect(loaded.usageReceipts).toEqual(before.usageReceipts);
+    for (const event of loaded.events) {
+      expect(event.weight).toEqual(before.events.find(({ id }) => id === event.id)!.weight);
+      expect(event.summary).toBe(expected.get(event.id).summary);
+      expect(event.sourceMessageIds).toEqual(expected.get(event.id).sourceMessageIds);
+    }
+    await storage.close();
+    const reopened = new SqliteStorage({ filename });
+    expect((await reopened.load(options.namespace))!.snapshot).toEqual(loaded);
+    await reopened.close();
+    const migrated = new Database(filename, { readonly: true });
+    expect(migrated.pragma('user_version', { simple: true })).toBe(11);
+    expect(migrated.prepare('SELECT formed_turn FROM events WHERE id = ?').pluck().get('normal')).toBe(1);
+    expect(migrated.prepare('SELECT formed_turn FROM events WHERE id = ?').pluck().get('external')).toBeNull();
+    migrated.close();
   });
 
   it('migrates schema v6 Blocks with an unknown legacy expansion source', async () => {
@@ -140,7 +205,7 @@ describe('SQLite persistence', () => {
 
     const storage = new SqliteStorage({ filename });
     const loaded = await storage.load('legacy:v6');
-    expect(loaded?.snapshot.schemaVersion).toBe(10);
+    expect(loaded?.snapshot.schemaVersion).toBe(11);
     expect(loaded?.snapshot.blocks[0]?.lastLiftedBy).toBeNull();
     await storage.close();
 
@@ -175,7 +240,7 @@ describe('SQLite persistence', () => {
 
     const storage = new SqliteStorage({ filename });
     const loaded = await storage.load('legacy:v8');
-    expect(loaded?.snapshot).toMatchObject({ schemaVersion: 10, summaryJobs: [], externalMemoryImportJobs: [] });
+    expect(loaded?.snapshot).toMatchObject({ schemaVersion: 11, summaryJobs: [], externalMemoryImportJobs: [] });
     expect(loaded?.snapshot.blocks[0]?.processingStatus).toBe('ready');
     expect(loaded?.snapshot.extractionJobs[0]?.nextRetryAt).toBeNull();
     await storage.close();
@@ -486,7 +551,7 @@ describe('SQLite persistence', () => {
     const loaded = await storage.load('legacy:user');
     expect(loaded?.revision).toBe(7);
     expect(loaded?.snapshot).toMatchObject({
-      schemaVersion: 10,
+      schemaVersion: 11,
       blockDecayLambda: 0.3,
       elements: [],
       elementProjectionJobs: [],
@@ -498,7 +563,7 @@ describe('SQLite persistence', () => {
     await storage.close();
 
     const migrated = new Database(filename, { readonly: true });
-    expect(migrated.pragma('user_version', { simple: true })).toBe(10);
+    expect(migrated.pragma('user_version', { simple: true })).toBe(11);
     expect((migrated.pragma('table_info(usage_receipts)') as Array<{ name: string }>)
       .map(({ name }) => name)).toContain('element_ids_json');
     expect((migrated.pragma('table_info(usage_receipts)') as Array<{ name: string }>)
@@ -510,6 +575,42 @@ describe('SQLite persistence', () => {
     expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'ingestion_receipts'")
       .pluck().get()).toBe('ingestion_receipts');
     migrated.close();
+  });
+
+  it('normalizes legacy Graph jobs missing retry metadata at the SQLite load boundary', async () => {
+    const filename = await databasePath();
+    const namespace = 'legacy:graph-retry';
+    const memory = await StrataGate.open({
+      database: filename,
+      namespace,
+      blockTurnSize: 1,
+      summarizer: nonExtractingSummarizer,
+      graphProjector: async () => ({ reason: 'unused', nodes: [], edges: [] }),
+      now: fixedNow,
+    });
+    await memory.appendTurn({ user: 'source', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    await memory.addEvent({
+      title: 'Legacy Graph job', summary: 'Retry metadata did not exist yet.',
+      sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id],
+    });
+    const claim = await memory.claimNextGraphProjection();
+    await memory.failGraphProjection(claim!.jobId, new Error('legacy failure'));
+    await memory.close();
+
+    const legacy = new Database(filename);
+    const row = legacy.prepare('SELECT jobs_json FROM graph_state WHERE namespace = ?')
+      .get(namespace) as { jobs_json: string };
+    const jobs = JSON.parse(row.jobs_json) as Array<{ nextRetryAt?: string | null }>;
+    delete jobs[0]!.nextRetryAt;
+    legacy.prepare('UPDATE graph_state SET jobs_json = ? WHERE namespace = ?')
+      .run(JSON.stringify(jobs), namespace);
+    legacy.close();
+
+    const storage = new SqliteStorage({ filename });
+    const loaded = await storage.load(namespace);
+    expect(loaded?.snapshot.graphProjectionJobs[0]?.nextRetryAt).toBeNull();
+    await storage.close();
   });
 
   it('adds nullable thread ownership when migrating a schema-v4 database', async () => {
@@ -551,7 +652,7 @@ describe('SQLite persistence', () => {
 
     const storage = new SqliteStorage({ filename });
     const loaded = await storage.load('legacy:v4');
-    expect(loaded?.snapshot.schemaVersion).toBe(10);
+    expect(loaded?.snapshot.schemaVersion).toBe(11);
     expect(loaded?.snapshot.blockDecayLambda).toBe(0.3);
     await storage.close();
 
@@ -598,7 +699,7 @@ describe('SQLite persistence', () => {
 
     const storage = new SqliteStorage({ filename });
     const loaded = await storage.load('legacy:v5');
-    expect(loaded?.snapshot).toMatchObject({ schemaVersion: 10, blockDecayLambda: 0.3 });
+    expect(loaded?.snapshot).toMatchObject({ schemaVersion: 11, blockDecayLambda: 0.3 });
     expect(loaded?.snapshot.blocks.map(({ id, pointerAnchorBlockPosition }) =>
       [id, pointerAnchorBlockPosition])).toEqual([
       ['a1', 1],

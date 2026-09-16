@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { createUserMessage, type ContentBlock } from '@deepseek-ai/dsh-llm'
+import { openNativePath } from '@deepseek-ai/dsh-native-command'
 import type { Session, SessionEvent, SessionSeq } from '@deepseek-ai/dsh-session'
 import {
+  DERIVATION_MAX_ATTEMPTS,
   estimateTokens,
   memoryWeightAt,
   rrfRank,
@@ -45,6 +47,16 @@ const DRAIN_BASE_BACKOFF_MS = 2_000
 const DRAIN_MAX_BACKOFF_MS = 60_000
 const BACKGROUND_WORKER_INITIAL_DELAY_MS = 250
 const BACKGROUND_WORKER_INTERVAL_MS = 3_000
+
+function graphProjectionCanRun(
+  job: { status: string; attempts: number; nextRetryAt?: string | null },
+  now = Date.now(),
+): boolean {
+  return job.attempts < DERIVATION_MAX_ATTEMPTS && (job.status === 'pending'
+    || (job.status === 'failed'
+      && job.nextRetryAt != null && Date.parse(job.nextRetryAt) <= now)
+  )
+}
 
 interface EvidenceTarget {
   eventIds: string[]
@@ -197,6 +209,7 @@ export class StrataGateRuntime {
     private readonly onIngestError: (error: unknown) => void = () => {},
     private readonly flushNativeSession: (session: Session) => Promise<void> = async () => {},
     private readonly feedbackOrigin: () => string | undefined = () => undefined,
+    private readonly openPath: (path: string, signal: AbortSignal) => Promise<void> = openNativePath,
   ) {
     this.blockTurnSize = config.blockTurnSize
     this.blockDecayLambda = config.blockDecayLambda
@@ -253,7 +266,7 @@ export class StrataGateRuntime {
         ].some((job) => job.status === 'pending'
           || (job.status === 'failed' && job.nextRetryAt !== null
             && Date.parse(job.nextRetryAt) <= Date.now()))
-          || memory.listGraphProjectionJobs().some(({ status }) => status === 'pending')
+          || memory.listGraphProjectionJobs().some((job) => graphProjectionCanRun(job))
         if (!runnable) return
         const hasActiveSessionWork = [
           ...this.derivationTimers.keys(),
@@ -654,6 +667,11 @@ export class StrataGateRuntime {
       retrievedMemories,
       incremented: eventIds.size + elementIds.size,
       evidenceRefs: selectedRefs,
+      ...(assessment === undefined ? {} : {
+        verdict: assessment.verdict,
+        missing: assessment.missing,
+        nextStrategy: assessment.nextStrategy,
+      }),
       duplicateEvidenceRefs,
       eventIds: [...eventIds],
       elementIds: [...elementIds],
@@ -1341,6 +1359,18 @@ export class StrataGateRuntime {
     return value
   }
 
+  adminDataDirectory(): string | null {
+    if (this.config.database === ':memory:') return null
+    return dirname(resolve(this.config.database))
+  }
+
+  async adminOpenDataDirectory(signal: AbortSignal): Promise<{ opened: true; path: string }> {
+    const path = this.adminDataDirectory()
+    if (!path) throw new Error('StrataGate is using in-memory storage, so no data directory is available')
+    await this.openPath(path, signal)
+    return { opened: true, path }
+  }
+
   async adminExpandBlock(namespace: string, id: string, target: string | number): Promise<unknown> {
     const key = namespace.trim()
     if (!key) throw new TypeError('StrataGate admin namespace must not be empty')
@@ -1634,7 +1664,7 @@ export class StrataGateRuntime {
     const namespace = this.namespaceFor(session)
     if (this.closed || this.migrationTimers.has(namespace)) return
     if (typeof memory.listGraphProjectionJobs !== 'function') return
-    const pending = memory.listGraphProjectionJobs().some(({ status }) => status === 'pending' || status === 'failed')
+    const pending = memory.listGraphProjectionJobs().some((job) => graphProjectionCanRun(job))
     if (!pending) return
     const timer = setTimeout(() => {
       this.migrationTimers.delete(namespace)

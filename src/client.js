@@ -42,11 +42,38 @@ window.__ModuleLoader__.load({
       return readFeedbackNavigationState(state)
     }
 
+    function readGraphNodeNavigationState(state) {
+      if (!state || state.view !== 'graph-node') return null
+      const namespace = String(state.namespace || '').trim()
+      const nodeId = String(state.nodeId || '').trim()
+      return namespace && nodeId ? { namespace, nodeId } : null
+    }
+
+    function readGraphNodeDeepLink(locationRef = window.location) {
+      const params = new URLSearchParams(String(locationRef?.search || ''))
+      if (params.get('settings') !== FEEDBACK_SETTINGS_ID || params.get('stratagateView') !== 'graph-node') return null
+      const namespace = String(params.get('namespace') || '').trim()
+      const nodeId = String(params.get('nodeId') || '').trim()
+      return namespace && nodeId ? { namespace, nodeId } : null
+    }
+
     function consumeFeedbackDeepLink(locationRef = window.location, historyRef = window.history) {
       const params = new URLSearchParams(String(locationRef?.search || ''))
       params.delete('settings')
       params.delete('stratagateView')
       params.delete('namespace')
+      const search = params.toString()
+      const next = String(locationRef?.pathname || '/') + (search ? '?' + search : '') + String(locationRef?.hash || '')
+      historyRef?.replaceState?.(historyRef.state, '', next)
+      return next
+    }
+
+    function consumeGraphNodeDeepLink(locationRef = window.location, historyRef = window.history) {
+      const params = new URLSearchParams(String(locationRef?.search || ''))
+      params.delete('settings')
+      params.delete('stratagateView')
+      params.delete('namespace')
+      params.delete('nodeId')
       const search = params.toString()
       const next = String(locationRef?.pathname || '/') + (search ? '?' + search : '') + String(locationRef?.hash || '')
       historyRef?.replaceState?.(historyRef.state, '', next)
@@ -76,6 +103,33 @@ window.__ModuleLoader__.load({
       }
       if (allowHttpFallback) locationRef.assign(targetUrl.href)
       return 'http'
+    }
+
+    function navigateToGraphNode(ctx, namespace, nodeId, locationRef = window.location, allowHttpFallback = true) {
+      const targetNamespace = String(namespace || '').trim()
+      const targetNodeId = String(nodeId || '').trim()
+      if (!targetNamespace || !targetNodeId) return Promise.resolve(false)
+      const navigation = ctx?.get?.('settingsNavigation')
+      if (typeof navigation?.openSection !== 'function') {
+        if (!allowHttpFallback || typeof locationRef?.assign !== 'function') return Promise.resolve(false)
+        try {
+          const targetUrl = new URL(String(locationRef.href || ''))
+          targetUrl.searchParams.set('settings', FEEDBACK_SETTINGS_ID)
+          targetUrl.searchParams.set('stratagateView', 'graph-node')
+          targetUrl.searchParams.set('namespace', targetNamespace)
+          targetUrl.searchParams.set('nodeId', targetNodeId)
+          locationRef.assign(targetUrl.href)
+          return Promise.resolve(true)
+        } catch {
+          return Promise.resolve(false)
+        }
+      }
+      try {
+        return Promise.resolve(navigation.openSection(FEEDBACK_SETTINGS_ID, { view: 'graph-node', namespace: targetNamespace, nodeId: targetNodeId }))
+          .then((result) => result !== false, () => false)
+      } catch {
+        return Promise.resolve(false)
+      }
     }
 
     function installFeedbackLinkNavigation(ctx, documentRef = document, locationRef = window.location) {
@@ -171,6 +225,42 @@ window.__ModuleLoader__.load({
       }
     }
 
+    function openGraphNodeDeepLink(ctx, documentRef = document, locationRef = window.location, historyRef = window.history) {
+      const graphLink = readGraphNodeDeepLink(locationRef)
+      if (!graphLink) return () => {}
+      const navigation = ctx?.get?.('settingsNavigation')
+      if (typeof navigation?.openSection === 'function') {
+        void navigateToGraphNode(ctx, graphLink.namespace, graphLink.nodeId, locationRef, false).then((opened) => {
+          if (opened) consumeGraphNodeDeepLink(locationRef, historyRef)
+        })
+        return () => {}
+      }
+      let legacyCleanup = () => {}
+      const timer = window.setTimeout(() => { legacyCleanup = openLegacyFeedbackDeepLink(documentRef) }, 250)
+      ctx?.inject?.(['settingsNavigation'], (scope) => {
+        void navigateToGraphNode(scope, graphLink.namespace, graphLink.nodeId, locationRef, false).then((opened) => {
+          if (!opened) return
+          window.clearTimeout(timer)
+          legacyCleanup()
+          consumeGraphNodeDeepLink(locationRef, historyRef)
+        })
+      })
+      return () => {
+        window.clearTimeout(timer)
+        legacyCleanup()
+      }
+    }
+
+    const eventDetailCss = `
+      .sg-event-metadata{display:flex;align-items:center;gap:7px 16px;flex-wrap:wrap;margin-top:8px;color:var(--sg-muted);font-size:12px;line-height:1.45}.sg-event-metadata-item{display:inline-flex;align-items:center;gap:5px;min-width:0}.sg-event-metadata b{color:var(--sg-muted);font-weight:620}.sg-event-participants{display:inline-flex;align-items:center;gap:5px;flex-wrap:wrap}.sg-event-metadata .sg-entity-pill{padding:2px 7px}.sg-entity-pill-static{cursor:default;opacity:.82}.sg-entity-pill-static:hover{transform:none!important;background:transparent!important}.sg-event-section{display:grid;gap:9px;padding:17px 0;border-bottom:1px solid var(--sg-border)}.sg-event-section-title{margin:0;color:var(--sg-text);font-size:14px;font-weight:730}.sg-event-memory-copy{max-width:65ch;margin:0;color:var(--sg-text);font-size:14px;line-height:1.72;white-space:pre-wrap;overflow-wrap:anywhere;text-wrap:pretty}.sg-event-weight-section{gap:0}
+      .sg-weight-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:9px}.sg-weight-header .sg-section-title,.sg-long-detail .sg-weight-header h3{margin:0}.sg-weight-metrics{display:grid!important;grid-template-columns:1fr!important;gap:0!important;margin:0 0 13px!important}.sg-weight-metric{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:14px;min-width:0;padding:7px 2px!important;border-bottom:1px solid color-mix(in srgb,var(--sg-border) 72%,transparent);border-radius:0!important;background:transparent!important}.sg-weight-metric:last-child{border-bottom:0}.sg-weight-metric>span:first-child{color:var(--sg-muted);font-size:12px}.sg-weight-metric strong{margin:0!important;color:var(--sg-text);font-size:15px!important;font-weight:740;font-variant-numeric:tabular-nums;white-space:nowrap}.sg-weight-value{display:inline-flex!important;align-items:center;justify-content:flex-end;gap:6px;color:var(--sg-text)!important}
+      .sg-info-disclosure{position:relative;display:inline-flex}.sg-info-trigger{display:grid;place-items:center;width:19px;height:19px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--sg-muted);font-size:13px;line-height:1;cursor:pointer}.sg-info-trigger:hover,.sg-info-trigger[aria-expanded="true"]{background:var(--sg-soft);color:var(--sg-text)}.sg-info-popover{position:absolute;right:0;top:calc(100% + 7px);z-index:20;width:min(320px,calc(100vw - 40px));padding:13px 14px;border:1px solid color-mix(in srgb,var(--sg-accent) 20%,var(--sg-border));border-radius:9px;background:var(--sg-page);color:var(--sg-text);box-shadow:0 14px 36px color-mix(in srgb,var(--sg-text) 18%,transparent);font-size:12px;line-height:1.58;text-align:left}.sg-info-title{display:block;margin-bottom:7px;font-size:13px}.sg-info-popover p{margin:0;color:var(--sg-muted)}.sg-info-popover p+p{margin-top:7px}.sg-adoption-history{display:grid;gap:10px;margin:0;padding:0;list-style:none;counter-reset:history}.sg-adoption-history li{display:grid;gap:1px;padding-bottom:9px;border-bottom:1px solid var(--sg-border)}.sg-adoption-history li:last-child{padding-bottom:0;border-bottom:0}.sg-adoption-history time,.sg-adoption-history span{color:var(--sg-muted)}.sg-floor-table{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 14px;margin:10px 0 0;padding-top:9px;border-top:1px solid var(--sg-border)}.sg-floor-table dt,.sg-floor-table dd{margin:0;color:var(--sg-muted)}.sg-floor-table .current{color:var(--sg-accent);font-weight:720}
+      .sg-weight-chart{position:relative;padding:10px 9px 3px!important;border:1px solid var(--sg-border);border-radius:9px;background:color-mix(in srgb,var(--sg-surface) 72%,transparent)}.sg-weight-chart svg{display:block;width:100%;height:auto;min-height:190px!important}.sg-weight-grid{stroke:var(--sg-border);stroke-width:1}.sg-weight-tick{stroke:var(--sg-border);stroke-width:1}.sg-weight-axis-label{fill:var(--sg-muted);font-size:11px}.sg-weight-line{fill:none;stroke:var(--sg-accent);stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}.sg-weight-line.incomplete{stroke:var(--sg-muted);stroke-width:2.4;opacity:.52}.sg-weight-line-hit{fill:none;stroke:transparent;stroke-width:16;pointer-events:stroke;cursor:help}.sg-weight-tooltip{position:absolute;z-index:4;max-width:250px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--sg-accent) 22%,var(--sg-border));border-radius:7px;background:var(--sg-page);color:var(--sg-text);box-shadow:0 8px 24px color-mix(in srgb,var(--sg-text) 16%,transparent);font-size:11px;line-height:1.5;pointer-events:none;transform:translate(-50%,calc(-100% - 8px));white-space:normal}.sg-weight-tooltip.below{transform:translate(-50%,8px)}.sg-weight-tooltip small{display:block;color:var(--sg-muted);font-size:10px}.sg-weight-floor{stroke:color-mix(in srgb,var(--sg-accent) 58%,var(--sg-muted));stroke-width:1.5;stroke-dasharray:7 5}.sg-weight-floor-label{fill:var(--sg-muted);font-size:11px;font-weight:650}.sg-weight-node{fill:var(--sg-page);stroke:var(--sg-accent);stroke-width:2.5}.sg-weight-node.adoption{fill:var(--sg-accent);stroke:var(--sg-page);stroke-width:3}.sg-weight-node.current{fill:var(--sg-text);stroke:var(--sg-page);stroke-width:2.5}.sg-weight-node-label{fill:var(--sg-text);font-size:11px;font-weight:700}
+      .sg-citation-disclosure{border-top:1px solid var(--sg-border)}.sg-citation-disclosure:last-child{border-bottom:1px solid var(--sg-border)}.sg-citation-disclosure summary{padding:11px 2px;color:var(--sg-muted);cursor:pointer;font-weight:650}.sg-citation-disclosure[open] summary{color:var(--sg-text)}.sg-citation-disclosure-body{padding:1px 2px 13px}.sg-provenance-note{margin:0 0 10px;color:var(--sg-muted);font-size:12px}.sg-citation-messages{display:grid;gap:8px}.sg-citation-message{padding:9px 10px;border-left:3px solid var(--sg-border);background:color-mix(in srgb,var(--sg-soft) 72%,transparent);white-space:pre-wrap;overflow-wrap:anywhere}.sg-citation-message-role{display:block;margin-bottom:3px;color:var(--sg-muted);font-size:11px;text-transform:uppercase}.sg-event-technical{display:grid;grid-template-columns:92px minmax(0,1fr);gap:8px 12px;margin:0;font-size:12px}.sg-event-technical dt{color:var(--sg-muted)}.sg-event-technical dd{display:flex;align-items:flex-start;gap:8px;min-width:0;margin:0}.sg-event-technical code{min-width:0;overflow-wrap:anywhere;color:var(--sg-muted);font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}.sg-copy-id{flex:0 0 auto;padding:1px 6px;border:1px solid var(--sg-border);border-radius:5px;background:transparent;color:var(--sg-muted);font-size:11px;cursor:pointer}.sg-copy-id:hover{border-color:var(--sg-accent);color:var(--sg-accent)}
+      .sg-citation-dialog-heading{min-width:0;flex:1}.sg-citation-dialog-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}.sg-citation-status{display:inline-flex;align-items:center;padding:3px 8px;border:1px solid var(--sg-border);border-radius:6px;color:var(--sg-muted);font-size:11px;font-weight:690;white-space:nowrap}.sg-citation-status.adopted{border-color:color-mix(in srgb,var(--sg-accent) 25%,var(--sg-border));background:color-mix(in srgb,var(--sg-accent) 9%,var(--sg-page));color:var(--sg-accent)}.sg-status-info .sg-info-popover{right:-35px}.sg-event-detail-kicker{display:block;margin-bottom:3px;color:var(--sg-accent);font-size:11px;font-weight:720}.sg-event-detail-head h2{margin:0;font-size:16px;line-height:1.4}.sg-event-page-header .sg-event-detail-kicker{margin-bottom:4px}
+      @media(max-width:560px){.sg-citation-dialog-head{align-items:flex-start}.sg-citation-dialog-actions{gap:2px}.sg-citation-status{font-size:10px}.sg-info-popover{position:fixed;left:12px;right:12px;top:auto;bottom:16px;width:auto}.sg-event-technical{grid-template-columns:1fr}.sg-weight-chart svg{min-height:170px!important}}
+    `
+
     const css = `
       .sg-memory {
         color-scheme:inherit;
@@ -212,9 +302,10 @@ window.__ModuleLoader__.load({
       .sg-intro{margin-bottom:17px}.sg-intro h2,.sg-detail-title{margin:0;font-size:19px;line-height:1.28;font-weight:760;letter-spacing:-.025em;text-wrap:balance}.sg-intro p,.sg-detail-subtitle{max-width:65ch;margin:5px 0 0;color:var(--sg-muted);font-size:13px;text-wrap:pretty}.sg-search{position:relative;margin-bottom:7px}.sg-search-mark{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--sg-muted);font-size:16px;pointer-events:none}.sg-search input{width:100%;height:41px;padding:0 12px 0 37px;border:1px solid var(--sg-border);border-radius:9px;background:var(--sg-surface);outline:0}.sg-search input:hover{border-color:color-mix(in srgb,var(--sg-accent) 35%,var(--sg-border))}.sg-search input:focus{border-color:var(--sg-accent);box-shadow:0 0 0 3px var(--sg-focus)}
       .sg-feed{border-top:1px solid var(--sg-border)}.sg-entry{position:relative;width:100%;min-width:0;padding:17px 10px;margin:0 -10px;border:0;border-bottom:1px solid var(--sg-border);border-radius:8px;background:transparent;text-align:left}.sg-entry-button{cursor:pointer}.sg-entry-button:hover{background:color-mix(in srgb,var(--sg-accent) 5%,transparent);transform:translateX(2px)}.sg-entry-button:hover .sg-entry-title{color:var(--sg-accent)}.sg-entry-title{padding-right:22px;font-size:15px;line-height:1.42;font-weight:720;letter-spacing:-.01em}.sg-entry-summary{margin-top:5px;color:var(--sg-text);white-space:pre-wrap}.sg-entry-chevron{position:absolute;right:9px;top:18px;color:var(--sg-muted);font-size:18px}.sg-entry-button:hover .sg-entry-chevron{color:var(--sg-accent);transform:translateX(2px)}.sg-meta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:9px;color:var(--sg-muted);font-size:12px}.sg-meta-sep:before{content:"·";margin-right:7px}.sg-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.sg-tag{max-width:100%;padding:3px 8px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-soft);color:var(--sg-text);font-size:12px;line-height:1.45;text-overflow:ellipsis;overflow:hidden;white-space:nowrap}.sg-tag-button{cursor:pointer}.sg-tag-button:hover{border-color:var(--sg-accent);color:var(--sg-accent);transform:translateY(-1px)}
       .sg-status{display:inline-flex;align-items:center;gap:5px;padding:2px 7px;border-radius:5px;font-size:12px;font-weight:650}.sg-status:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}.sg-status.organized{color:var(--sg-good);background:var(--sg-good-soft)}.sg-status.processing{color:var(--sg-accent);background:var(--sg-accent-soft)}.sg-status.waiting{color:var(--sg-muted);background:var(--sg-soft)}.sg-status.failed{color:var(--sg-warn);background:var(--sg-warn-soft)}
-      .sg-backbar{display:flex;align-items:center;min-height:35px;margin:-4px 0 13px}.sg-back{display:inline-flex;align-items:center;gap:6px;margin-left:-7px;padding:6px 7px;border-radius:6px;font-weight:650}.sg-detail-header{padding-bottom:16px;border-bottom:1px solid var(--sg-border)}.sg-detail-section{padding:18px 0;border-bottom:1px solid var(--sg-border)}.sg-detail-section:last-child{border-bottom:0}.sg-section-title{margin:0 0 11px;font-size:14px;font-weight:730}.sg-prose{margin:0;white-space:pre-wrap}.sg-facts{margin:0;padding-left:20px}.sg-facts li+li{margin-top:7px}.sg-related-list{display:flex;flex-direction:column}.sg-related{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border:0;border-bottom:1px solid var(--sg-border);background:transparent;text-align:left;cursor:pointer}.sg-related:last-child{border-bottom:0}.sg-related-name{color:var(--sg-accent)}.sg-related-time{flex:0 0 auto;color:var(--sg-muted);font-size:12px}
+      .sg-backbar{display:flex;align-items:center;min-height:35px;margin:-4px 0 13px}.sg-back{display:inline-flex;align-items:center;gap:6px;margin-left:-7px;padding:6px 7px;border-radius:6px;font-weight:650}.sg-detail-header{padding-bottom:16px;border-bottom:1px solid var(--sg-border)}.sg-detail-section{padding:18px 0;border-bottom:1px solid var(--sg-border)}.sg-detail-section:last-child{border-bottom:0}.sg-section-title{margin:0 0 11px;font-size:14px;font-weight:730}.sg-prose{margin:0;white-space:pre-wrap}.sg-facts{margin:0;padding-left:20px}.sg-facts li+li{margin-top:7px}.sg-related-list{display:flex;flex-direction:column}.sg-related{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border:0;border-bottom:1px solid var(--sg-border);background:transparent;text-align:left}.sg-related-button,.sg-related:where(button){cursor:pointer}.sg-related:last-child{border-bottom:0}.sg-related-name{color:var(--sg-accent)}.sg-related-time{flex:0 0 auto;color:var(--sg-muted);font-size:12px}
+      .sg-weight-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}.sg-weight-header .sg-section-title,.sg-long-detail .sg-weight-header h3{margin:0}.sg-weight-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:10px}.sg-weight-metric{min-width:0;padding:8px 9px;border-radius:7px;background:var(--sg-soft)}.sg-weight-metric span{display:block;color:var(--sg-muted);font-size:10px}.sg-weight-metric strong{display:block;margin-top:2px;font-size:14px;font-weight:740;font-variant-numeric:tabular-nums;white-space:nowrap}.sg-weight-chart{position:relative;padding:8px 8px 4px;border:1px solid var(--sg-border);border-radius:9px;background:color-mix(in srgb,var(--sg-surface) 72%,transparent)}.sg-weight-chart svg{display:block;width:100%;height:auto;min-height:156px}.sg-weight-grid{stroke:var(--sg-border);stroke-width:1}.sg-weight-axis-label{fill:var(--sg-muted);font-size:9px}.sg-weight-line{fill:none;stroke:var(--sg-accent);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}.sg-weight-node{fill:var(--sg-page);stroke:var(--sg-accent);stroke-width:2}.sg-weight-node.adoption{fill:var(--sg-accent);stroke:var(--sg-page);stroke-width:2.5}.sg-weight-node.current{fill:var(--sg-text);stroke:var(--sg-page);stroke-width:2}.sg-weight-node-label{fill:var(--sg-text);font-size:9px;font-weight:680}.sg-weight-note{margin:7px 0 0;color:var(--sg-muted);font-size:10px;line-height:1.5}.sg-weight-retrieval{margin-top:6px;color:var(--sg-muted);font-size:10px}.sg-weight-help{margin-top:10px;border-top:1px solid var(--sg-border)}.sg-weight-help summary{padding:9px 2px 2px;color:var(--sg-muted);font-size:11px;font-weight:650;cursor:pointer}.sg-weight-help[open] summary{color:var(--sg-text)}.sg-weight-help-body{padding:8px 0 2px}.sg-weight-help-copy{margin:0 0 7px;color:var(--sg-muted);font-size:11px;line-height:1.58}.sg-weight-demo{padding:8px;border-radius:8px;background:var(--sg-soft)}.sg-weight-demo-label{display:block;margin-bottom:4px;color:var(--sg-muted);font-size:9px}.sg-weight-demo svg{display:block;width:100%;height:76px}.sg-weight-demo path{fill:none;stroke:var(--sg-accent);stroke-width:2}.sg-weight-demo circle{fill:var(--sg-accent)}
       .sg-source-label{display:flex;align-items:center;gap:8px}.sg-source-icon{color:var(--sg-muted)}.sg-tech{margin-top:13px}.sg-tech summary{color:var(--sg-muted);font-size:12px;cursor:pointer}.sg-tech-body{margin-top:10px;padding:11px;border-radius:7px;background:var(--sg-soft);font-size:12px}.sg-tech-row{display:grid;grid-template-columns:88px minmax(0,1fr);gap:9px;padding:3px 0}.sg-code{font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.sg-raw-message{padding-top:10px;margin-top:10px;border-top:1px solid var(--sg-border)}
-      .sg-result-count{margin:0 0 9px;color:var(--sg-muted);font-size:12px}.sg-result-event{padding:8px 0;border-bottom:1px solid var(--sg-border)}.sg-result-event:last-child{border-bottom:0}.sg-pipeline{display:flex;flex-direction:column}.sg-stage{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:9px 0;border-bottom:1px solid var(--sg-border)}.sg-stage:last-child{border-bottom:0}.sg-stage-value{font-size:12px}.sg-stage-value.done{color:var(--sg-good)}.sg-stage-value.processing{color:var(--sg-accent)}.sg-stage-value.failed{color:var(--sg-danger)}.sg-stage-value.waiting{color:var(--sg-muted)}.sg-lambda-control{display:flex;align-items:center;justify-content:flex-end;gap:7px}.sg-number-input,.sg-effort-select{padding:4px 5px;border:1px solid var(--sg-border);border-radius:6px;background:var(--sg-surface)}.sg-number-input{width:82px;text-align:right}.sg-effort-button{padding:4px 6px;border:0;border-radius:5px;background:transparent;color:var(--sg-muted);cursor:pointer;font-size:12px}.sg-effort-button:hover{background:var(--sg-soft);color:var(--sg-accent)}.sg-setting-switch{position:relative;width:38px;height:22px;padding:0;border:1px solid var(--sg-border);border-radius:999px;background:var(--sg-soft);cursor:pointer}.sg-setting-switch:before{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:var(--sg-muted);transition:transform var(--sg-fast) var(--sg-ease),background-color var(--sg-fast) var(--sg-ease)}.sg-setting-switch[aria-checked="true"]{border-color:var(--sg-accent);background:var(--sg-accent)}.sg-setting-switch[aria-checked="true"]:before{background:#fff;transform:translateX(16px)}.sg-setting-switch:disabled{cursor:not-allowed;opacity:.5}.sg-setting-note{margin:7px 0 11px;color:var(--sg-muted);font-size:12px}.sg-display-settings{display:grid;gap:2px}.sg-display-setting{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:14px;padding:13px 0;border-bottom:1px solid var(--sg-border)}.sg-display-setting.child{padding-left:18px}.sg-display-setting-copy{display:grid;gap:4px}.sg-display-setting-title{font-size:13px;font-weight:680}.sg-display-setting-description{max-width:62ch;color:var(--sg-muted);font-size:11px;line-height:1.5}.sg-display-disabled{opacity:.58}.sg-settings-group{margin-top:22px;padding-top:15px;border-top:1px solid var(--sg-border)}.sg-settings-group-title{margin:0;font-size:14px}.sg-settings-group-copy{margin:4px 0 10px;color:var(--sg-muted);font-size:12px}.sg-setting-suggestion{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;margin:4px 0 10px;border-radius:7px;background:var(--sg-soft);font-size:12px}.sg-save-button{align-self:flex-end;padding:7px 12px;margin-top:12px;border:0;border-radius:6px;background:var(--sg-accent);color:white;cursor:pointer}.sg-save-button:disabled{opacity:.5;cursor:not-allowed}.sg-safe-note{padding:11px 12px;margin-bottom:12px;border-radius:7px;background:var(--sg-good-soft);color:var(--sg-good);font-weight:650}.sg-error-note{margin:8px 0 0;color:var(--sg-muted);font-size:12px}.sg-job-list{display:grid;gap:10px}.sg-job{padding:12px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-surface)}.sg-job-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.sg-job-title{margin:0;font-size:14px}.sg-job-meta{display:grid;grid-template-columns:112px minmax(0,1fr);gap:5px 10px;margin:11px 0;color:var(--sg-muted);font-size:12px}.sg-job-meta dd,.sg-job-meta dt{min-width:0;margin:0}.sg-job-meta dd{color:var(--sg-text);overflow-wrap:anywhere}.sg-job-error{max-height:150px;margin:9px 0;padding:9px;overflow:auto;border-radius:6px;background:var(--sg-danger-soft);color:var(--sg-danger)}.sg-job-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.sg-job-actions .sg-save-button{margin-top:0}.sg-status-feedback{margin:9px 0 0;color:var(--sg-muted);font-size:12px}.sg-status-feedback.failed{color:var(--sg-danger)}
+      .sg-result-count{margin:0 0 9px;color:var(--sg-muted);font-size:12px}.sg-result-event{padding:8px 0;border-bottom:1px solid var(--sg-border)}.sg-result-event:last-child{border-bottom:0}.sg-pipeline{display:flex;flex-direction:column}.sg-stage{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:9px 0;border-bottom:1px solid var(--sg-border)}.sg-stage:last-child{border-bottom:0}.sg-stage-value{font-size:12px}.sg-stage-value.done{color:var(--sg-good)}.sg-stage-value.processing{color:var(--sg-accent)}.sg-stage-value.failed{color:var(--sg-danger)}.sg-stage-value.waiting{color:var(--sg-muted)}.sg-lambda-control{display:flex;align-items:center;justify-content:flex-end;gap:7px}.sg-number-input,.sg-effort-select{padding:4px 5px;border:1px solid var(--sg-border);border-radius:6px;background:var(--sg-surface)}.sg-number-input{width:82px;text-align:right}.sg-effort-button{padding:4px 6px;border:0;border-radius:5px;background:transparent;color:var(--sg-muted);cursor:pointer;font-size:12px}.sg-effort-button:hover{background:var(--sg-soft);color:var(--sg-accent)}.sg-setting-switch{position:relative;width:38px;height:22px;padding:0;border:1px solid var(--sg-border);border-radius:999px;background:var(--sg-soft);cursor:pointer}.sg-setting-switch:before{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:var(--sg-muted);transition:transform var(--sg-fast) var(--sg-ease),background-color var(--sg-fast) var(--sg-ease)}.sg-setting-switch[aria-checked="true"]{border-color:var(--sg-accent);background:var(--sg-accent)}.sg-setting-switch[aria-checked="true"]:before{background:#fff;transform:translateX(16px)}.sg-setting-switch:disabled{cursor:not-allowed;opacity:.5}.sg-setting-note{margin:7px 0 11px;color:var(--sg-muted);font-size:12px}.sg-display-settings{display:grid;gap:2px}.sg-display-setting{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:14px;padding:13px 0;border-bottom:1px solid var(--sg-border)}.sg-display-setting.child{padding-left:18px}.sg-display-setting-copy{display:grid;gap:4px}.sg-display-setting-title{font-size:13px;font-weight:680}.sg-display-setting-description{max-width:62ch;color:var(--sg-muted);font-size:11px;line-height:1.5}.sg-display-disabled{opacity:.58}.sg-settings-group{margin-top:24px;padding-top:18px;border-top:1px solid var(--sg-border)}.sg-settings-group:first-of-type{margin-top:0;padding-top:0;border-top:0}.sg-settings-group-title{margin:0;font-size:15px;letter-spacing:-.01em}.sg-settings-group-copy{margin:4px 0 11px;color:var(--sg-muted);font-size:12px}.sg-settings-panel{padding:2px 13px 12px;border:1px solid var(--sg-border);border-radius:10px;background:color-mix(in srgb,var(--sg-surface) 62%,transparent)}.sg-storage-card{padding:13px;border:1px solid var(--sg-border);border-radius:10px;background:color-mix(in srgb,var(--sg-surface) 62%,transparent)}.sg-storage-label{display:block;margin-bottom:6px;font-size:13px;font-weight:700}.sg-storage-path{display:block;width:100%;padding:9px 10px;border-radius:7px;background:var(--sg-soft);color:var(--sg-text);font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sg-storage-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px}.sg-storage-button{padding:6px 9px;border:1px solid var(--sg-border);border-radius:6px;background:var(--sg-surface);cursor:pointer;font-size:12px;font-weight:650}.sg-storage-button:hover{border-color:color-mix(in srgb,var(--sg-accent) 38%,var(--sg-border));color:var(--sg-accent);transform:translateY(-1px)}.sg-storage-button:disabled{cursor:not-allowed;opacity:.5}.sg-storage-feedback{min-height:18px;margin:7px 0 -3px;color:var(--sg-good);font-size:12px}.sg-storage-feedback.failed{color:var(--sg-danger)}.sg-settings-menu{margin-top:10px}.sg-setting-suggestion{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 10px;margin:4px 0 10px;border-radius:7px;background:var(--sg-soft);font-size:12px}.sg-save-button{align-self:flex-end;padding:7px 12px;margin-top:12px;border:0;border-radius:6px;background:var(--sg-accent);color:white;cursor:pointer}.sg-save-button:disabled{opacity:.5;cursor:not-allowed}.sg-safe-note{padding:11px 12px;margin-bottom:12px;border-radius:7px;background:var(--sg-good-soft);color:var(--sg-good);font-weight:650}.sg-error-note{margin:8px 0 0;color:var(--sg-muted);font-size:12px}.sg-job-list{display:grid;gap:10px}.sg-job{padding:12px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-surface)}.sg-job-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.sg-job-title{margin:0;font-size:14px}.sg-job-meta{display:grid;grid-template-columns:112px minmax(0,1fr);gap:5px 10px;margin:11px 0;color:var(--sg-muted);font-size:12px}.sg-job-meta dd,.sg-job-meta dt{min-width:0;margin:0}.sg-job-meta dd{color:var(--sg-text);overflow-wrap:anywhere}.sg-job-error{max-height:150px;margin:9px 0;padding:9px;overflow:auto;border-radius:6px;background:var(--sg-danger-soft);color:var(--sg-danger)}.sg-job-actions{display:flex;align-items:center;justify-content:space-between;gap:10px}.sg-job-actions .sg-save-button{margin-top:0}.sg-status-feedback{margin:9px 0 0;color:var(--sg-muted);font-size:12px}.sg-status-feedback.failed{color:var(--sg-danger)}
       .sg-process-summary{padding:12px 13px;margin-bottom:14px;border-radius:8px;background:var(--sg-good-soft);color:var(--sg-good)}.sg-process-summary strong{display:block;font-size:13px}.sg-process-summary span{display:block;margin-top:2px;font-size:12px}.sg-process-groups{display:grid;gap:14px}.sg-process-group{overflow:hidden;border:1px solid var(--sg-border);border-radius:10px;background:var(--sg-surface)}.sg-process-group-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;border-bottom:1px solid var(--sg-border);background:color-mix(in srgb,var(--sg-soft) 65%,transparent)}.sg-process-group-title{margin:0;font-size:14px;font-weight:730}.sg-process-group-count{color:var(--sg-muted);font-size:11px}.sg-process-card{padding:13px}.sg-process-card+.sg-process-card{border-top:1px solid var(--sg-border)}.sg-process-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.sg-process-range{font-weight:700}.sg-process-state{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:680}.sg-process-state.processing{color:var(--sg-accent)}.sg-process-state.waiting{color:var(--sg-muted)}.sg-process-state.failed{color:var(--sg-warn)}.sg-process-stages{display:grid;gap:7px;margin-top:12px}.sg-process-stage{display:grid;grid-template-columns:18px minmax(0,1fr) auto;align-items:center;gap:7px;color:var(--sg-muted);font-size:12px}.sg-process-stage-name{color:var(--sg-text)}.sg-process-stage-state.done{color:var(--sg-good)}.sg-process-stage-state.processing{color:var(--sg-accent)}.sg-process-stage-state.failed{color:var(--sg-danger)}.sg-process-stage-state.waiting,.sg-process-stage-state.skipped{color:var(--sg-muted)}.sg-process-tech{margin-top:12px;padding-top:9px;border-top:1px solid var(--sg-border)}.sg-process-tech>summary{color:var(--sg-muted);font-size:11px;cursor:pointer}.sg-process-job{padding:10px 0}.sg-process-job+.sg-process-job{border-top:1px solid var(--sg-border)}.sg-process-job-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}.sg-process-job-meta{margin-top:5px;color:var(--sg-muted);font-size:11px}.sg-process-job .sg-job-error{font-size:11px}.sg-process-job-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px}.sg-process-job-actions .sg-save-button{margin:0}.sg-process-footer{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:15px}.sg-process-footer .sg-quiet-button{padding:7px 9px;border-radius:6px;color:var(--sg-accent)}.sg-process-footer .sg-status-feedback{margin:0}
       .sg-process-notice{padding:12px 13px;margin:0 0 14px;border:1px solid color-mix(in srgb,var(--sg-warn) 30%,var(--sg-border));border-radius:8px;background:var(--sg-warn-soft)}.sg-process-notice strong{display:block;color:var(--sg-text);font-size:13px}.sg-process-notice span{display:block;margin-top:3px;color:var(--sg-muted);font-size:12px}.sg-process-unavailable{padding:24px 14px;text-align:center;color:var(--sg-muted)}.sg-process-unavailable strong{display:block;color:var(--sg-text);font-size:14px}.sg-process-unavailable span{display:block;margin-top:5px;font-size:12px}
       .sg-menu{display:grid;gap:7px}.sg-menu-row{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:11px;width:100%;padding:12px;border:1px solid transparent;border-radius:10px;background:color-mix(in srgb,var(--sg-surface) 48%,transparent);text-align:left;cursor:pointer}.sg-menu-row:hover{border-color:color-mix(in srgb,var(--sg-accent) 22%,var(--sg-border));background:color-mix(in srgb,var(--sg-accent) 6%,var(--sg-surface));transform:translateY(-1px);box-shadow:0 8px 20px color-mix(in srgb,var(--sg-text) 6%,transparent)}.sg-menu-row:hover .sg-menu-title,.sg-menu-row:hover .sg-chevron{color:var(--sg-accent)}.sg-menu-icon{width:32px;height:32px;display:grid;place-items:center;border:1px solid color-mix(in srgb,var(--sg-accent) 14%,var(--sg-border));border-radius:8px;background:var(--sg-soft);color:var(--sg-muted);font-weight:700}.sg-menu-title{font-weight:700}.sg-menu-subtitle{color:var(--sg-muted);font-size:12px}.sg-counts{display:flex;gap:22px;padding:5px 0 18px;border-bottom:1px solid var(--sg-border)}.sg-count-value{font-size:22px;font-weight:760;letter-spacing:-.03em}.sg-count-label{color:var(--sg-muted);font-size:12px}.sg-structured-group{padding-top:17px}.sg-raw-group{padding:12px 0;border-bottom:1px solid var(--sg-border)}.sg-raw-group summary{cursor:pointer;font-weight:680}.sg-raw-json{max-height:360px;padding:11px;margin:10px 0 0;overflow:auto;border-radius:7px;background:var(--sg-soft)}
@@ -242,7 +333,7 @@ window.__ModuleLoader__.load({
       @keyframes sg-shimmer{to{transform:translateX(110%)}}
       @media (min-width:720px){.sg-brand-kicker{display:block}}
       @media (max-width:900px){.sg-long-layout{grid-template-columns:1fr;height:auto;max-height:none}.sg-long-explorer.fullscreen{inset:4px;padding:10px}.sg-long-explorer.fullscreen .sg-long-layout{overflow:auto}.sg-graph-canvas{height:520px}.sg-long-detail{max-height:520px;border-top:1px solid var(--sg-border);border-left:0}.sg-timeline{max-height:520px}.sg-toolbar-count{display:none}.sg-node-bubble{width:min(300px,72%)}}
-      @media (max-width:620px){.sg-long-toolbar{flex-wrap:wrap}.sg-long-toolbar .sg-search{flex-basis:100%}.sg-toolbar-button{flex:1}.sg-timeline-card{grid-template-columns:78px minmax(0,1fr)}.sg-timeline-card>.sg-event-status{grid-column:2}.sg-node-bubble{left:50%!important;top:auto!important;bottom:45px;width:calc(100% - 24px);transform:translateX(-50%)!important}}
+      @media (max-width:620px){.sg-long-toolbar{flex-wrap:wrap}.sg-long-toolbar .sg-search{flex-basis:100%}.sg-toolbar-button{flex:1}.sg-timeline-card{grid-template-columns:78px minmax(0,1fr)}.sg-timeline-card>.sg-event-status{grid-column:2}.sg-node-bubble{left:50%!important;top:auto!important;bottom:45px;width:calc(100% - 24px);transform:translateX(-50%)!important}.sg-weight-metrics{grid-template-columns:1fr}.sg-weight-chart svg{min-height:132px}}
       @media (max-width:860px){.sg-layer-hover:after{display:none}.sg-layer-popover{position:relative;left:auto;top:auto;width:auto;max-height:280px;margin:5px 0 1px;display:none;transform:none}.sg-layer-hover:hover .sg-layer-popover,.sg-layer-item:focus-visible + .sg-layer-popover{display:block;transform:none}}
       @media (max-width:560px){.sg-memory{padding:12px 12px 26px}.sg-header-row{align-items:flex-start;gap:10px}.sg-header-row-secondary{flex-wrap:wrap}.sg-header-community{justify-content:flex-start;gap:7px}.sg-brand-name{font-size:14px}.sg-tabs{margin-left:-2px;margin-right:-2px}.sg-tab{padding-left:0;padding-right:0}.sg-alert,.sg-memory-alert{grid-template-columns:auto minmax(0,1fr)}.sg-alert>.sg-chevron,.sg-memory-alert>.sg-chevron{display:none}.sg-tech-row{grid-template-columns:1fr;gap:1px}.sg-counts{gap:16px}.sg-entry-title{font-size:14px}.sg-block-header{display:none}.sg-block-toggle{grid-template-columns:76px minmax(76px,1fr) 24px;gap:6px}.sg-block-turn{grid-column:1/3}.sg-block-distance{display:none}.sg-layer-heading{display:block}.sg-layer-heading span{display:block;margin-top:2px}}
       .sg-decay-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.sg-conversation{display:flex;align-items:center;justify-content:flex-end;gap:5px;min-width:0;color:var(--sg-muted);font-size:11px}.sg-conversation select{min-width:0;max-width:230px;padding:3px 21px 3px 6px;border:1px solid var(--sg-border);border-radius:5px;background:var(--sg-surface);font-size:11px;text-overflow:ellipsis}.sg-distribution{scrollbar-width:none}.sg-distribution::-webkit-scrollbar{display:none}.sg-distribution-rail{display:block;width:100%;height:14px;margin:4px 0 0;accent-color:var(--sg-accent);cursor:pointer}.sg-distribution-rail:disabled{cursor:default;opacity:.38}.sg-layer-hover:after{display:none}.sg-layer-more-placeholder{width:30px}.sg-layer-popover{position:fixed!important;left:0;top:0;z-index:2147483000;width:min(390px,calc(100vw - 24px));max-height:min(70vh,520px);display:block!important;margin:0;overflow:auto;visibility:visible!important;opacity:1!important;transform:none!important;transition:opacity .1s ease;border:1px solid color-mix(in srgb,var(--sg-accent) 38%,var(--sg-border));background:var(--sg-surface);color:var(--sg-text);box-shadow:0 18px 50px rgba(0,0,0,.38)}
@@ -251,6 +342,7 @@ window.__ModuleLoader__.load({
       .sg-support-ai-notice{position:sticky;top:8px;z-index:8;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:10px;margin:12px 0;padding:13px 14px;border:1px solid color-mix(in srgb,var(--sg-good) 45%,var(--sg-border));border-radius:8px;background:color-mix(in srgb,var(--sg-good-soft) 92%,var(--sg-surface));color:var(--sg-text);box-shadow:0 8px 24px rgba(0,0,0,.16);scroll-margin-top:8px}.sg-support-ai-notice-mark{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--sg-good);color:#fff;font-weight:800}.sg-support-ai-notice strong{display:block;color:var(--sg-good);font-size:13px}.sg-support-ai-notice p{margin:4px 0 0;color:var(--sg-text);font-size:12px;line-height:1.5}.sg-support-ai-notice .sg-quiet-button{margin-top:9px}.sg-support-ai-notice-close{display:grid;place-items:center;width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--sg-muted);font-size:20px;line-height:1;cursor:pointer}.sg-support-ai-notice-close:hover{background:var(--sg-soft);color:var(--sg-text)}
       @media (max-width:560px){.sg-decay-head{align-items:flex-start;flex-direction:column}.sg-conversation{width:100%;justify-content:flex-start}.sg-conversation select{max-width:100%;flex:1}}
       @media (prefers-reduced-motion:reduce){.sg-memory *,.sg-memory *:before,.sg-memory *:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.sg-processing-icon,.sg-memory-alert-mark{animation:none}.sg-skeleton:after{display:none}}
+      ${eventDetailCss}
     `
 
     const citationCss = `
@@ -263,12 +355,15 @@ window.__ModuleLoader__.load({
       @keyframes sg-stm-open{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}@keyframes sg-stm-pulse{50%{opacity:.32;transform:scale(.78)}}
       @media (max-width:620px){.sg-stm-line{gap:7px}.sg-stm-line-copy{white-space:normal}.sg-stm-detail{padding-left:10px}.sg-stm-detail-head{display:block}.sg-stm-detail-head span{display:block;margin-top:2px}.sg-stm-layers{grid-template-columns:repeat(6,76px)}}
       @media (prefers-reduced-motion:reduce){.sg-stm *{animation-duration:.01ms!important;transition-duration:.01ms!important}}
-      .sg-answer-citations{display:grid;grid-template-columns:max-content minmax(0,1fr);align-items:start;gap:7px 9px;margin-top:14px;font-size:13px;line-height:22px;color:var(--dsw-alias-label-secondary,#61666b)}
-      .sg-answer-citations-label{color:var(--dsw-alias-label-tertiary,#8a8f98);white-space:nowrap}
-      .sg-answer-citations-list{display:flex;flex-wrap:wrap;gap:7px;min-width:0}
+      .sg-answer-citations{max-width:640px;margin-top:14px;font-size:13px;line-height:22px;color:var(--dsw-alias-label-secondary,#61666b)}
+      .sg-answer-citations-head{display:flex;align-items:baseline;gap:4px;flex-wrap:wrap}
+      .sg-answer-citations-label{color:var(--dsw-alias-label-secondary,#61666b);font-weight:620;white-space:nowrap}
+      .sg-answer-process-link{display:inline-flex;align-items:center;gap:4px;padding:1px 3px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-tertiary,#8a8f98);font:inherit;cursor:pointer}
+      .sg-answer-process-link:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));color:var(--dsw-alias-label-secondary,#61666b)}
+      .sg-answer-citations-list{display:flex;flex-wrap:wrap;gap:7px;min-width:0;margin-top:7px}
       .sg-answer-citation{display:inline-flex;align-items:center;gap:6px;max-width:min(100%,420px);min-width:0;padding:2px 8px;border:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));border-radius:7px;background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));color:var(--dsw-alias-label-secondary,#61666b);font:inherit;cursor:pointer}
       .sg-answer-citation:hover{border-color:var(--dsw-alias-state-business-primary,#4176e6);color:var(--dsw-alias-label-primary,#0f1115)}
-      .sg-answer-citation:focus-visible,.sg-answer-retrieval-toggle:focus-visible,.sg-retrieved-memory:focus-visible,.sg-citation-close:focus-visible,.sg-citation-disclosure summary:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
+      .sg-answer-citation:focus-visible,.sg-answer-process-link:focus-visible,.sg-answer-retrieval-toggle:focus-visible,.sg-retrieved-memory:focus-visible,.sg-retrieved-group>summary:focus-visible,.sg-citation-close:focus-visible,.sg-citation-disclosure summary:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary,#4176e6);outline-offset:2px}
       .sg-answer-citation-kind{flex:0 0 auto;color:var(--dsw-alias-state-business-primary,#4176e6);font-weight:680}
       .sg-answer-citation-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .sg-answer-citation-action{flex:0 0 auto;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:12px}
@@ -278,15 +373,17 @@ window.__ModuleLoader__.load({
       .sg-answer-retrieval-chevron{display:inline-block;font-size:12px;transition:transform 180ms cubic-bezier(.22,1,.36,1)}
       .sg-answer-retrieval-chevron.open{transform:rotate(90deg)}
       .sg-retrieved-panel{max-height:380px;margin-top:6px;padding:7px 0 2px 12px;overflow:auto;border-left:2px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));animation:sg-retrieved-in 180ms cubic-bezier(.22,1,.36,1) both}
-      .sg-retrieved-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:0 8px 5px;color:var(--dsw-alias-label-secondary,#61666b)}
+      .sg-retrieved-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:0 8px 7px;color:var(--dsw-alias-label-secondary,#61666b)}
       .sg-retrieved-heading strong{font-size:12px;font-weight:650}.sg-retrieved-heading span{color:var(--dsw-alias-label-tertiary,#8a8f98)}
-      .sg-retrieved-group{padding-top:7px;border-top:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))}.sg-retrieved-group+.sg-retrieved-group{margin-top:8px}
-      .sg-retrieved-group-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:0 8px 4px;color:var(--dsw-alias-label-secondary,#61666b)}.sg-retrieved-group-head strong{font-size:12px;font-weight:680}.sg-retrieved-group-head span{color:var(--dsw-alias-label-tertiary,#8a8f98);font-variant-numeric:tabular-nums}
+      .sg-retrieved-group{padding-top:1px;border-top:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1))}.sg-retrieved-group+.sg-retrieved-group{margin-top:3px}
+      .sg-retrieved-group>summary{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:7px 8px;color:var(--dsw-alias-label-secondary,#61666b);cursor:pointer;list-style:none}.sg-retrieved-group>summary::-webkit-details-marker{display:none}.sg-retrieved-group>summary:before{content:'›';display:inline-block;flex:0 0 auto;color:var(--dsw-alias-label-tertiary,#8a8f98);transition:transform 180ms cubic-bezier(.22,1,.36,1)}.sg-retrieved-group[open]>summary:before{transform:rotate(90deg)}
+      .sg-retrieved-group-title{min-width:0;flex:1;font-size:12px;font-weight:680}.sg-retrieved-gate{flex:0 0 auto;color:var(--dsw-alias-label-tertiary,#8a8f98);font-size:11px}.sg-retrieved-gate.sufficient{color:var(--dsw-alias-state-success-primary,#34865d)}
       .sg-retrieved-list{margin:0;padding:0;list-style:none}
       .sg-retrieved-memory{display:grid;grid-template-columns:20px auto minmax(0,1fr) auto;align-items:center;gap:8px;width:100%;padding:7px 8px;border:0;border-bottom:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));background:transparent;color:var(--dsw-alias-label-secondary,#61666b);font:inherit;text-align:left;cursor:pointer}
       .sg-retrieved-memory:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));color:var(--dsw-alias-label-primary,#0f1115)}
       .sg-retrieved-index{color:var(--dsw-alias-label-tertiary,#8a8f98);font-variant-numeric:tabular-nums;text-align:right}.sg-retrieved-memory-kind{color:var(--dsw-alias-label-tertiary,#8a8f98);font-weight:650}.sg-retrieved-memory-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.sg-retrieved-memory-state{color:var(--dsw-alias-label-tertiary,#8a8f98);white-space:nowrap}
       .sg-retrieved-unavailable{padding:6px 8px;color:var(--dsw-alias-label-tertiary,#8a8f98)}
+      .sg-retrieved-final{display:flex;justify-content:space-between;gap:12px;margin-top:6px;padding:8px;border-top:1px solid var(--dsw-alias-border-l2,rgba(0,0,0,.1));color:var(--dsw-alias-label-secondary,#61666b);font-weight:650}.sg-retrieved-final span:last-child{color:var(--dsw-alias-label-tertiary,#8a8f98);font-weight:500}
       @keyframes sg-retrieved-in{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:translateY(0)}}
       .sg-citation-overlay{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;padding:18px;background:rgba(0,0,0,.46);backdrop-filter:blur(2px)}
       .sg-citation-dialog{--sg-page:var(--dsw-alias-bg-layer-2,#fff);--sg-surface:var(--dsw-specific-input-major,var(--sg-page));--sg-soft:var(--dsw-alias-interactive-bg-hover-solid,#f1f3f5);--sg-text:var(--dsw-alias-label-primary,#0f1115);--sg-muted:var(--dsw-alias-label-secondary,#61666b);--sg-border:var(--dsw-alias-border-l2,rgba(0,0,0,.1));--sg-accent:var(--dsw-alias-state-business-primary,#4176e6);width:min(760px,calc(100vw - 28px));max-height:calc(100vh - 36px);overflow:auto;border:1px solid var(--sg-border);border-radius:13px;background:var(--sg-page);color:var(--sg-text);box-shadow:0 24px 80px rgba(0,0,0,.34);font:13px/1.6 "Segoe UI Variable Text","Segoe UI",ui-sans-serif,system-ui,-apple-system,"Microsoft YaHei",sans-serif}
@@ -338,6 +435,7 @@ window.__ModuleLoader__.load({
       .sg-citation-loading,.sg-citation-error{padding:12px;border-radius:8px;background:var(--sg-soft)}
       .sg-citation-error{color:var(--dsw-alias-state-error-primary,#c42b1c)}
       @media(max-width:560px){.sg-answer-citations{grid-template-columns:1fr}.sg-answer-citations-list{display:grid}.sg-answer-citation{max-width:100%;width:100%}.sg-retrieved-memory{grid-template-columns:20px auto minmax(0,1fr)}.sg-retrieved-memory-state{grid-column:3}.sg-citation-overlay{padding:8px}.sg-citation-dialog{width:100%;max-height:calc(100vh - 16px)}.sg-citation-graph-frame{height:280px}}
+      ${eventDetailCss}
     `
 
     function api(path, params, options) {
@@ -377,8 +475,13 @@ window.__ModuleLoader__.load({
     }
 
     function retrievalGroupLabel(index) {
-      const chineseNumerals = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
-      return '第' + (chineseNumerals[index] || index + 1) + '次检索'
+      return '第 ' + (index + 1) + ' 轮检索'
+    }
+
+    function evidenceGateLabel(group) {
+      if (group.verdict === 'sufficient') return '证据充分'
+      if (group.verdict === 'partial' || group.verdict === 'wrong') return '证据不足，继续检索'
+      return ''
     }
 
     function selectMemoryCitations(owner) {
@@ -401,6 +504,9 @@ window.__ModuleLoader__.load({
             sequence: Number.isInteger(entry.retrievalSequence) ? entry.retrievalSequence : null,
             seq: entry.seq,
             count: groupCount,
+            verdict: entry.verdict,
+            missing: entry.missing,
+            nextStrategy: entry.nextStrategy,
             memories: (Array.isArray(entry.retrievedMemories) ? entry.retrievedMemories : []).map((memory) => ({ ...memory, namespace: entry.namespace })),
           })
         }
@@ -451,6 +557,9 @@ window.__ModuleLoader__.load({
           citations: value.citations,
           retrievedCount,
           retrievedMemories,
+          verdict: value.verdict === 'sufficient' || value.verdict === 'partial' || value.verdict === 'wrong' ? value.verdict : undefined,
+          missing: typeof value.missing === 'string' ? value.missing : undefined,
+          nextStrategy: typeof value.nextStrategy === 'string' ? value.nextStrategy : undefined,
         }
       } catch {
         return null
@@ -478,6 +587,9 @@ window.__ModuleLoader__.load({
             citations: match.event.data.citations,
             retrievedCount: match.event.data.retrievedCount,
             retrievedMemories: match.event.data.retrievedMemories,
+            verdict: match.event.data.verdict,
+            missing: match.event.data.missing,
+            nextStrategy: match.event.data.nextStrategy,
           }],
         }
         if (match.event.type === 'tool/call') {
@@ -507,6 +619,9 @@ window.__ModuleLoader__.load({
             citations: result.citations,
             retrievedCount: result.retrievedCount,
             retrievedMemories: result.retrievedMemories,
+            verdict: result.verdict,
+            missing: result.missing,
+            nextStrategy: result.nextStrategy,
           }],
         }
       },
@@ -628,7 +743,7 @@ window.__ModuleLoader__.load({
       }))
     }
 
-    function CitationDetail({ citation, detail, adopted = true }) {
+    function CitationDetail({ citation, detail, adopted = true, onNode }) {
       const messages = Array.isArray(detail?.messages) ? detail.messages : []
       const sourceMessages = Array.isArray(detail?.sourceMessages) ? detail.sourceMessages : messages
       let primary = null
@@ -653,16 +768,16 @@ window.__ModuleLoader__.load({
       const relatedEvents = (Array.isArray(detail?.events) ? detail.events : []).filter((event) => citation.kind !== 'event' || event.id !== primary?.id)
       const primaryTitle = adopted ? '已用于回答' : '检索候选 · 未采用'
       return h(React.Fragment, null,
-        h('p', { className: 'sg-citation-context-note' }, adopted ? '弹窗中的关联信息与来源内容用于查看依据；只有标记为“本次采用”的内容参与了回答。' : '这是本次检索到的候选记忆，但它没有参与回答。关联信息与来源内容仅供核对。'),
+        !adopted ? h('p', { className: 'sg-citation-context-note' }, '这是本次检索到的候选记忆，但它没有参与回答。关联信息与来源内容仅供核对。') : null,
         citation.kind === 'graph' ? h(CitationSection, { title: primaryTitle },
           summary ? h('p', { className: 'sg-citation-copy' }, summary) : null,
           adoptedFacts.length ? h('ul', { className: 'sg-citation-facts' }, adoptedFacts.map((fact, index) => h('li', { key: fact.id || index, className: 'sg-citation-fact' }, h('strong', null, String(fact.key || '事实') + '：'), Array.isArray(fact.value) ? fact.value.join('、') : String(fact.value || '')))) : null,
           h(CitationGraph, { citation, detail, primary, adopted })) : null,
-        citation.kind === 'event' ? h(CitationSection, { title: primaryTitle }, h('p', { className: 'sg-citation-copy' }, summary || '暂无可展示的摘要。')) : null,
+        citation.kind === 'event' && primary ? h(EventMemoryDetails, { event: primary, sourceMessages, citation, relatedEvents }) : null,
         citation.kind === 'block' ? h(CitationSection, { title: 'L0–L5 记忆层级' }, h(CitationLayers, { citation, layers: Array.isArray(detail?.layers) ? detail.layers : [], adopted })) : null,
-        relatedEvents.length ? h(CitationDisclosure, { title: '关联信息' }, h('div', { className: 'sg-citation-events' }, relatedEvents.map((event, index) => h('article', { key: event.id || index, className: 'sg-citation-event' }, h('strong', null, event.title || '关联事件'), h('p', null, event.summary || event.narrative || '暂无摘要'))))) : null,
-        sourceMessages.length ? h(CitationDisclosure, { title: adopted ? '来源对话 ·未作为加入本次上下文' : '来源对话 · 未用于本次回答' }, h('div', { className: 'sg-citation-messages' }, sourceMessages.map((message, index) => h('div', { key: message.id || index, className: 'sg-citation-message' }, h('span', { className: 'sg-citation-message-role' }, message.role || 'message'), String(message.content || ''))))) : null,
-        h(CitationDisclosure, { title: '详细情况' }, h('div', { className: 'sg-citation-tech' }, citation.evidenceRef + '\n' + citation.detailKind + ': ' + citation.id)))
+        citation.kind !== 'event' && relatedEvents.length ? h(CitationDisclosure, { title: '关联信息' }, h('div', { className: 'sg-citation-events' }, relatedEvents.map((event, index) => h('article', { key: event.id || index, className: 'sg-citation-event' }, h('strong', null, event.title || '关联事件'), h('p', null, event.summary || event.narrative || '暂无摘要'))))) : null,
+        citation.kind !== 'event' && sourceMessages.length ? h(CitationDisclosure, { title: '来源与证据' }, h('div', { className: 'sg-citation-messages' }, sourceMessages.map((message, index) => h('div', { key: message.id || index, className: 'sg-citation-message' }, h('span', { className: 'sg-citation-message-role' }, message.role || 'message'), String(message.content || ''))))) : null,
+        citation.kind !== 'event' ? h(CitationDisclosure, { title: '技术信息' }, h('div', { className: 'sg-citation-tech' }, citation.evidenceRef + '\n' + citation.detailKind + ': ' + citation.id)) : null)
     }
 
     const shortTermMemoryFeeds = new Map()
@@ -946,7 +1061,33 @@ window.__ModuleLoader__.load({
         expanded ? h(ShortTermMemoryBlockDetail, { namespace: feed.payload.namespace, block }) : null)
     }
 
-    function MemoryCitationTail({ matched, sessionId, useSession, useSessions, useWorkspaces, usePluginSettings }) {
+    function RetrievalProcessPanel({ retrievalGroups, retrievedCount, citations, open }) {
+      const adoptedRefs = new Set(citations.map((citation) => citation.evidenceRef))
+      return h('section', { className: 'sg-retrieved-panel', 'aria-label': '本次记忆检索过程' },
+        h('div', { className: 'sg-retrieved-heading' },
+          h('strong', null, '检索过程'),
+          h('span', null, retrievalGroups.length + ' 轮 · 共返回 ' + retrievedCount + ' 条')),
+        retrievalGroups.map((group, groupIndex) => {
+          const gateLabel = evidenceGateLabel(group)
+          return h('details', { key: group.batchId || group.seq, className: 'sg-retrieved-group' },
+            h('summary', null,
+              h('span', { className: 'sg-retrieved-group-title' }, retrievalGroupLabel(groupIndex) + ' · 返回 ' + group.count + ' 条'),
+              gateLabel ? h('span', { className: 'sg-retrieved-gate ' + (group.verdict === 'sufficient' ? 'sufficient' : '') }, gateLabel) : null),
+            group.memories.length ? h('ol', { className: 'sg-retrieved-list' }, group.memories.map((memory, memoryIndex) => {
+              const action = citationActionLabel(memory)
+              const adopted = adoptedRefs.has(memory.evidenceRef)
+              const state = adopted ? '最终采用' : '检索到 · 未采用'
+              return h('li', { key: memory.batchId + ':' + memory.evidenceRef }, h('button', { type: 'button', className: 'sg-retrieved-memory', title: memory.evidenceRef, onClick: () => open(memory, adopted) },
+                h('span', { className: 'sg-retrieved-index', 'aria-hidden': 'true' }, memoryIndex + 1 + '.'),
+                h('span', { className: 'sg-retrieved-memory-kind' }, citationKindLabel(memory)),
+                h('span', { className: 'sg-retrieved-memory-title' }, memory.title),
+                h('span', { className: 'sg-retrieved-memory-state' }, action ? action + ' · ' + state : state)))
+            })) : h('div', { className: 'sg-retrieved-unavailable' }, group.count === 0 ? '本轮检索没有返回匹配记忆。' : '这条历史回执未保存候选摘要。'))
+        }),
+        h('div', { className: 'sg-retrieved-final' }, h('span', null, '最终采用 ' + citations.length + ' 条'), h('span', null, '检索命中不会自动强化记忆')))
+    }
+
+    function MemoryCitationTail({ matched, sessionId, useSession, useSessions, useWorkspaces, usePluginSettings, onOpenGraphNode }) {
       const citations = matched.citations
       const retrievedCount = matched.retrievedCount
       const retrievalGroups = matched.retrievalGroups
@@ -957,6 +1098,22 @@ window.__ModuleLoader__.load({
       const [loading, setLoading] = React.useState(false)
       const [error, setError] = React.useState('')
       const close = () => { setSelected(null); setDetail(null); setError(''); setLoading(false) }
+      const openGraphNode = (nodeId, event) => {
+        event?.stopPropagation?.()
+        const namespace = selected?.namespace
+        if (!namespace || !nodeId || typeof onOpenGraphNode !== 'function') {
+          setError('暂时无法打开对应的知识图谱节点，请稍后重试。')
+          return
+        }
+        setError('')
+        Promise.resolve(onOpenGraphNode(namespace, nodeId)).then((opened) => {
+          if (opened === false) {
+            setError('暂时无法打开对应的知识图谱节点，请稍后重试。')
+            return
+          }
+          close()
+        }).catch((reason) => setError('暂时无法打开对应的知识图谱节点：' + String(reason?.message || reason)))
+      }
       const open = (citation, adopted = true) => {
         setSelected({ ...citation, adopted })
         setDetail(null)
@@ -969,7 +1126,11 @@ window.__ModuleLoader__.load({
       }
       React.useEffect(() => {
         if (!selected) return undefined
-        const onKeyDown = (event) => { if (event.key === 'Escape') close() }
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape') return
+          if (document.querySelector('.sg-citation-dialog .sg-info-trigger[aria-expanded="true"]')) return
+          close()
+        }
         document.addEventListener('keydown', onKeyDown)
         return () => document.removeEventListener('keydown', onKeyDown)
       }, [selected])
@@ -978,36 +1139,33 @@ window.__ModuleLoader__.load({
           ? h(ShortTermMemoryTurnStatus, { matched, sessionId, useSession, useSessions, useWorkspaces })
           : null,
         retrievalStatusVisible(pluginSettings) && citations.length ? h('div', { className: 'sg-answer-citations', 'data-testid': 'stratagate-answer-citations' },
-          h('span', { className: 'sg-answer-citations-label' }, '本回答参考了 ' + citations.length + ' 条记忆'),
+          h('div', { className: 'sg-answer-citations-head' },
+            h('span', { className: 'sg-answer-citations-label' }, '本回答采用了 ' + citations.length + ' 条记忆'),
+            retrievalGroups.length ? h('button', { type: 'button', className: 'sg-answer-process-link', 'aria-expanded': showRetrieved, onClick: () => setShowRetrieved((value) => !value) },
+              h('span', null, '· 查看检索过程'),
+              h('span', { className: 'sg-answer-retrieval-chevron ' + (showRetrieved ? 'open' : ''), 'aria-hidden': 'true' }, '›')) : null),
           h('div', { className: 'sg-answer-citations-list' }, citations.map((citation) => {
             const action = citationActionLabel(citation)
             return h('button', { key: citation.batchId + ':' + citation.evidenceRef, type: 'button', className: 'sg-answer-citation', title: citation.evidenceRef, onClick: () => open(citation, true) },
               h('span', { className: 'sg-answer-citation-kind' }, citationKindLabel(citation)),
               h('span', { className: 'sg-answer-citation-title' }, citation.title),
               action ? h('span', { className: 'sg-answer-citation-action' }, action) : null)
-          }))) : null,
+          })),
+          showRetrieved && retrievalGroups.length ? h(RetrievalProcessPanel, { retrievalGroups, retrievedCount, citations, open }) : null) : null,
         retrievalStatusVisible(pluginSettings) && citations.length === 0 && retrievalGroups.length > 0 ? h('div', { className: 'sg-answer-retrieval', 'data-testid': 'stratagate-answer-retrieval-note' },
           h('button', { type: 'button', className: 'sg-answer-retrieval-toggle', 'aria-expanded': showRetrieved, onClick: () => setShowRetrieved((value) => !value) },
-            h('span', null, '已进行 ' + retrievalGroups.length + ' 次检索，共返回 ' + retrievedCount + ' 条记忆，未采用'),
+            h('span', null, '检索 ' + retrievalGroups.length + ' 轮 · 返回 ' + retrievedCount + ' 条 · 未采用'),
             h('span', { className: 'sg-answer-retrieval-chevron ' + (showRetrieved ? 'open' : ''), 'aria-hidden': 'true' }, '›')),
-          showRetrieved ? h('section', { className: 'sg-retrieved-panel', 'aria-label': '本次检索到但未采用的记忆' },
-            h('div', { className: 'sg-retrieved-heading' }, h('strong', null, '检索过程'), h('span', null, retrievalGroups.length + ' 次 · ' + retrievedCount + ' 条 · 均未采用')),
-            retrievalGroups.map((group, groupIndex) => h('section', { key: group.batchId || group.seq, className: 'sg-retrieved-group', 'aria-label': retrievalGroupLabel(groupIndex) },
-              h('div', { className: 'sg-retrieved-group-head' }, h('strong', null, retrievalGroupLabel(groupIndex)), h('span', null, group.count + ' 条')),
-              group.memories.length ? h('ol', { className: 'sg-retrieved-list' }, group.memories.map((memory, memoryIndex) => {
-                const action = citationActionLabel(memory)
-                return h('li', { key: memory.batchId + ':' + memory.evidenceRef }, h('button', { type: 'button', className: 'sg-retrieved-memory', title: memory.evidenceRef, onClick: () => open(memory, false) },
-                  h('span', { className: 'sg-retrieved-index', 'aria-hidden': 'true' }, memoryIndex + 1 + '.'),
-                  h('span', { className: 'sg-retrieved-memory-kind' }, citationKindLabel(memory)),
-                  h('span', { className: 'sg-retrieved-memory-title' }, memory.title),
-                  h('span', { className: 'sg-retrieved-memory-state' }, action ? action + ' · 未采用' : '未采用')))
-              })) : h('div', { className: 'sg-retrieved-unavailable' }, group.count === 0 ? '本次检索没有返回匹配记忆。' : '这条历史回执未保存候选摘要。')))) : null) : null,
+          showRetrieved ? h(RetrievalProcessPanel, { retrievalGroups, retrievedCount, citations, open }) : null) : null,
         retrievalStatusVisible(pluginSettings) && selected ? h('div', { className: 'sg-citation-overlay', onMouseDown: (event) => { if (event.target === event.currentTarget) close() } },
-          h('section', { className: 'sg-citation-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': citationKindLabel(selected) + ' 详情' },
+          h(InfoPopoverGroup, null, h('section', { className: 'sg-citation-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': citationKindLabel(selected) + ' 详情' },
             h('header', { className: 'sg-citation-dialog-head' },
-              h('div', null, h('div', { className: 'sg-citation-dialog-kicker' }, (selected.adopted ? '' : '检索候选 · ') + citationKindLabel(selected) + (citationActionLabel(selected) ? ' · ' + citationActionLabel(selected) : '')), h('h3', { className: 'sg-citation-dialog-title' }, selected.title)),
-              h('button', { type: 'button', className: 'sg-citation-close', onClick: close, 'aria-label': '关闭记忆详情' }, '×')),
-            h('div', { className: 'sg-citation-dialog-body' }, loading ? h('div', { className: 'sg-citation-loading' }, '正在读取来源…') : error ? h('div', { className: 'sg-citation-error' }, error) : h(CitationDetail, { citation: selected, detail, adopted: selected.adopted })))) : null)
+              h('div', { className: 'sg-citation-dialog-heading' }, h('div', { className: 'sg-citation-dialog-kicker' }, citationKindLabel(selected)), h('h3', { className: 'sg-citation-dialog-title' }, (selected.kind === 'event' ? detail?.events?.find((item) => item.id === selected.id)?.title || detail?.events?.[0]?.title : '') || selected.title), selected.kind === 'event' ? h(EventMetadata, { event: detail?.events?.find((item) => item.id === selected.id) || detail?.events?.[0], nodes: detail?.relatedNodes || [], onNode: openGraphNode }) : null),
+              h('div', { className: 'sg-citation-dialog-actions' },
+                h('span', { className: 'sg-citation-status ' + (selected.adopted ? 'adopted' : 'retrieved') }, selected.adopted ? '已用于回答' : '检索候选 · 未采用'),
+                selected.adopted ? h(InfoPopover, { label: '本次采用说明', className: 'sg-status-info' }, h('p', null, '只有标记为本次采用的记忆内容参与了本次回答；关联信息和来源内容仅用于查看与追溯依据。')) : null,
+                h('button', { type: 'button', className: 'sg-citation-close', onClick: close, 'aria-label': '关闭记忆详情' }, '×'))),
+            h('div', { className: 'sg-citation-dialog-body' }, loading ? h('div', { className: 'sg-citation-loading' }, '正在读取来源…') : error ? h('div', { className: 'sg-citation-error' }, error) : h(CitationDetail, { citation: selected, detail, adopted: selected.adopted, onNode: openGraphNode }))))) : null)
     }
 
     function dashboardApi(params, options = {}) {
@@ -1227,7 +1385,17 @@ window.__ModuleLoader__.load({
 
     function NodePill({ node, onClick }) {
       const meta = NODE_META[node.type] || ['实体', '#64748b', '•']
-      return h('button', { className: 'sg-entity-pill', onClick }, h('span', { style: { color: meta[1] } }, meta[2]), node.name)
+      return h('button', {
+        type: 'button',
+        className: 'sg-entity-pill',
+        onPointerDown: (event) => event.stopPropagation(),
+        onClick: (event) => { event.stopPropagation(); onClick?.(event) },
+        title: '在知识图谱中查看 ' + node.name,
+      }, h('span', { style: { color: meta[1] }, 'aria-hidden': 'true' }, meta[2]), node.name)
+    }
+
+    function StaticEntityPill({ name }) {
+      return h('span', { className: 'sg-entity-pill sg-entity-pill-static' }, name)
     }
 
     function NodeSummaryBubble({ node, x, y, width, height = 560, onViewDetails }) {
@@ -1416,6 +1584,7 @@ window.__ModuleLoader__.load({
         if (!selected.length) { setSelectedPoint(null); return }
         selected.select()
         selected.connectedEdges().addClass('selected-relation')
+        graph.center(selected)
         const point = selected.renderedPosition()
         const container = containerRef.current
         setSelectedPoint({ x: point.x, y: point.y, width: container?.clientWidth || 760, height: container?.clientHeight || 522 })
@@ -1457,24 +1626,296 @@ window.__ModuleLoader__.load({
         h('section', null, h('h3', null, '支撑事件'), (node.sourceEventIds || []).flatMap((id) => eventMap.get(id) || []).slice(0, 8).map((event) => h('button', { key: event.id, className: 'sg-support-event', onClick: () => onEvent(event.id) }, h('span', null, exactTime(eventOccurrence(event).value) + ' · ' + event.title), h('b', null, '›')))))
     }
 
+    const CRITICALITY_INFO = {
+      routine: ['普通事件', 0],
+      preference: ['用户偏好', .3],
+      identity: ['身份信息', .9],
+      safety: ['安全相关', 1],
+    }
+
+    function eventDate(value) {
+      if (!value) return ''
+      const date = new Date(value)
+      return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date).replaceAll('/', '-')
+    }
+
+    function participantIdentity(value) {
+      return String(value || '').normalize('NFKC').trim().toLocaleLowerCase().replace(/[\s._\-·•/\\]+/g, '')
+    }
+
+    function EventMetadata({ event, nodes = [], onNode }) {
+      if (!event) return null
+      const temporal = event.temporal || {}
+      const start = eventDate(temporal.happenedStart)
+      const end = eventDate(temporal.happenedEnd)
+      const happened = start ? start + (end && end !== start ? ' — ' + end : '') : end
+      const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+      const linked = [...new Set(temporal.participantNodeIds || [])].map((id) => nodeMap.get(id)).filter(Boolean)
+      const linkedNames = new Set(linked.flatMap((node) => [node.name, ...(node.aliases || [])]).map(participantIdentity).filter(Boolean))
+      const seenText = new Set()
+      const unlinked = (temporal.participants || []).map((name) => String(name || '').trim()).filter((name) => {
+        const identity = participantIdentity(name)
+        if (!identity || linkedNames.has(identity) || seenText.has(identity)) return false
+        seenText.add(identity)
+        return true
+      })
+      const mentioned = eventDate(temporal.mentionedAt)
+      if (!happened && !Number.isSafeInteger(event.formedTurn) && !linked.length && !unlinked.length && !mentioned) return null
+      return h('div', { className: 'sg-event-metadata' },
+        happened ? h('span', { className: 'sg-event-metadata-item' }, h('b', null, '实际发生：'), happened) : null,
+        Number.isSafeInteger(event.formedTurn) ? h('span', { className: 'sg-event-metadata-item' }, h('b', null, '记忆形成：'), '第 ' + event.formedTurn + ' 轮') : null,
+        linked.length || unlinked.length ? h('span', { className: 'sg-event-metadata-item' }, h('b', null, '参与：'), h('span', { className: 'sg-event-participants' },
+          linked.map((node) => h(NodePill, { key: node.id, node, onClick: onNode ? (event) => onNode(node.id, event) : undefined })),
+          unlinked.map((name) => h(StaticEntityPill, { key: name, name })))) : null,
+        mentioned ? h('span', { className: 'sg-event-metadata-item' }, h('b', null, '提及：'), mentioned) : null)
+    }
+
+    const InfoPopoverContext = React.createContext(null)
+
+    function InfoPopoverGroup({ children }) {
+      const [openId, setOpenId] = React.useState(null)
+      return h(InfoPopoverContext.Provider, { value: { openId, setOpenId } }, children)
+    }
+
+    function InfoPopover({ label, children, className = '' }) {
+      const id = React.useId()
+      const rootRef = React.useRef(null)
+      const group = React.useContext(InfoPopoverContext)
+      const [localOpenId, setLocalOpenId] = React.useState(null)
+      const openId = group?.openId ?? localOpenId
+      const setOpenId = group?.setOpenId ?? setLocalOpenId
+      const open = openId === id
+      React.useEffect(() => {
+        if (!open) return undefined
+        const onPointerDown = (event) => {
+          if (!rootRef.current?.contains(event.target)) setOpenId(null)
+        }
+        const onKeyDown = (event) => {
+          if (event.key === 'Escape') setOpenId(null)
+        }
+        document.addEventListener('pointerdown', onPointerDown, true)
+        document.addEventListener('keydown', onKeyDown)
+        return () => {
+          document.removeEventListener('pointerdown', onPointerDown, true)
+          document.removeEventListener('keydown', onKeyDown)
+        }
+      }, [open, setOpenId])
+      return h('span', { ref: rootRef, className: 'sg-info-disclosure ' + className },
+        h('button', { type: 'button', className: 'sg-info-trigger', 'aria-label': label, title: label, 'aria-expanded': open, 'aria-controls': id, onClick: () => setOpenId((current) => current === id ? null : id) }, 'ⓘ'),
+        open ? h('div', { id, className: 'sg-info-popover', role: 'dialog', 'aria-label': label, onPointerDown: (event) => event.stopPropagation() }, h('strong', { className: 'sg-info-title' }, label), children) : null)
+    }
+
+    function AdoptionHistoryInfo({ trajectory }) {
+      const history = Array.isArray(trajectory?.adoptionHistory) ? trajectory.adoptionHistory : []
+      const total = Number.isSafeInteger(trajectory?.effectiveAdoptions) ? trajectory.effectiveAdoptions : 0
+      return h(InfoPopover, { label: '采纳历史' },
+        total === 0 ? h('p', null, '该 Event 尚未被 Agent 采纳。') : !history.length ? h('p', null, '当前没有可展示的采纳回执详情。') : null,
+        history.length ? h('ol', { className: 'sg-adoption-history' }, history.map((receipt, index) => h('li', { key: receipt.receiptId || index },
+          h('strong', null, '已确认采纳'),
+          h('time', { dateTime: receipt.createdAt }, exactTime(receipt.createdAt)),
+          h('span', null, '会话：' + receipt.sessionId + ' · 第 ' + receipt.turn + ' 轮'),
+          Number.isFinite(receipt.relativeTurn) ? h('span', null, '距记忆形成 +' + receipt.relativeTurn + ' 轮') : null))) : null)
+    }
+
+    function FloorWeightInfo({ event, floorWeight }) {
+      const type = CRITICALITY_INFO[event?.criticality]
+      return h(InfoPopover, { label: '最低权重' },
+        type ? h('p', null, '此 Event 被识别为「' + type[0] + '」，因此最低权重为 ' + Number(floorWeight).toFixed(2) + '。') : h('p', null, '此 Event 的最低权重为 ' + Number(floorWeight).toFixed(2) + '。'),
+        h('p', null, '记忆会随对话推进逐渐衰减，但不会低于对应类型的最低权重。'),
+        type ? h('dl', { className: 'sg-floor-table' }, Object.entries(CRITICALITY_INFO).map(([key, value]) => h(React.Fragment, { key }, h('dt', { className: key === event.criticality ? 'current' : '' }, value[0]), h('dd', { className: key === event.criticality ? 'current' : '' }, Number(value[1]).toFixed(2))))) : null)
+    }
+
+    function denseWeightPath(points, x, y) {
+      return points.reduce((path, point, index) => {
+        const px = x(point.turn)
+        const py = y(point.weight)
+        if (index === 0) return 'M' + px.toFixed(1) + ' ' + py.toFixed(1)
+        return path + ' L' + px.toFixed(1) + ' ' + py.toFixed(1)
+      }, '')
+    }
+
+    function relativeTurnTicks(maximum) {
+      if (maximum <= 0) return [0]
+      const target = Math.max(1, maximum / 5)
+      const magnitude = 10 ** Math.floor(Math.log10(target))
+      const candidates = [1, 2, 5, 10].map((value) => value * magnitude)
+      const step = candidates.reduce((best, value) => Math.abs(value - target) < Math.abs(best - target) ? value : best)
+      const ticks = []
+      for (let value = 0; value <= maximum; value += step) ticks.push(Math.round(value))
+      if (ticks.at(-1) !== maximum) ticks.push(maximum)
+      return [...new Set(ticks)]
+    }
+
+    function MemoryWeightTrajectory({ event }) {
+      const [hoveredSegment, setHoveredSegment] = React.useState(null)
+      const trajectory = event?.weightTrajectory
+      const points = Array.isArray(trajectory?.points) ? trajectory.points.filter((point) => Number.isFinite(point?.turn) && Number.isFinite(point?.weight)) : []
+      const formedTurn = Number.isSafeInteger(event?.formedTurn) ? event.formedTurn : Number.isSafeInteger(trajectory?.formedTurn) ? trajectory.formedTurn : null
+      const trajectoryStartTurn = Number.isSafeInteger(trajectory?.trajectoryStartTurn) ? trajectory.trajectoryStartTurn : points[0]?.turn
+      const currentWeight = Number.isFinite(trajectory?.currentWeight) ? trajectory.currentWeight : Number(event?.weight?.forcedCap ?? 1)
+      const effectiveAdoptions = Number.isSafeInteger(trajectory?.effectiveAdoptions) ? trajectory.effectiveAdoptions : Math.max(0, Number(event?.weight?.mentionCount || 1) - 1)
+      const floorWeight = Number.isFinite(event?.weight?.floorWeight) ? event.weight.floorWeight : Number.isFinite(trajectory?.floorWeight) ? trajectory.floorWeight : 0
+      const metrics = h('div', { className: 'sg-weight-metrics' },
+        h('div', { className: 'sg-weight-metric' }, h('span', null, '当前权重'), h('strong', null, Number(currentWeight).toFixed(2))),
+        h('div', { className: 'sg-weight-metric' }, h('span', null, 'Agent 已采纳'), h('span', { className: 'sg-weight-value' }, h('strong', null, effectiveAdoptions + ' 次'), h(AdoptionHistoryInfo, { trajectory }))),
+        h('div', { className: 'sg-weight-metric' }, h('span', null, '最低权重'), h('span', { className: 'sg-weight-value' }, h('strong', null, Number(floorWeight).toFixed(2)), h(FloorWeightInfo, { event, floorWeight }))))
+      if (!trajectory || points.length === 0) return h(React.Fragment, null, h('div', { className: 'sg-weight-header' }, h('h3', { className: 'sg-section-title' }, '记忆状态')), metrics)
+      const rawSegments = Array.isArray(trajectory.segments) ? trajectory.segments : [points]
+      const segments = rawSegments.map((segment) => {
+        const source = Array.isArray(segment) ? segment : segment?.points
+        const certainty = Array.isArray(segment) ? 'known' : segment?.certainty === 'incomplete' ? 'incomplete' : 'known'
+        return {
+          certainty,
+          points: (Array.isArray(source) ? source : []).filter((point) => Number.isFinite(point?.turn) && Number.isFinite(point?.weight)).map((point) => ({ ...point, weight: Math.max(certainty === 'incomplete' ? floorWeight : 0, Math.min(1, point.weight)) })),
+        }
+      }).filter((segment) => segment.points.length)
+      const maxTurn = Math.max(...points.map((point) => point.turn))
+      const minTurn = Math.min(Number.isSafeInteger(trajectoryStartTurn) ? trajectoryStartTurn : maxTurn, ...points.map((point) => point.turn))
+      const turnSpan = Math.max(0, maxTurn - minTurn)
+      const x = (turn) => turnSpan === 0 ? 307 : 48 + (turn - minTurn) / turnSpan * 518
+      const y = (weight) => 22 + (1 - Math.max(0, Math.min(1, weight))) * 154
+      const nodeByTurn = new Map()
+      for (const point of points.filter((candidate) => candidate.kind !== 'sample')) {
+        const existing = nodeByTurn.get(point.turn)
+        if (!existing || point.kind === 'adoption' || (point.kind === 'current' && existing.kind !== 'adoption')) nodeByTurn.set(point.turn, { ...point, isCurrent: point.kind === 'current' || existing?.isCurrent })
+        else if (point.kind === 'current') nodeByTurn.set(point.turn, { ...existing, isCurrent: true })
+      }
+      const nodes = [...nodeByTurn.values()].sort((left, right) => left.turn - right.turn)
+      const adoptionNodes = nodes.filter((point) => point.kind === 'adoption')
+      const ticks = relativeTurnTicks(turnSpan)
+      const relativeAxis = formedTurn !== null
+      const nodeLabel = (point) => {
+        if (point.kind === 'creation') return point.label || ''
+        if (point.kind === 'current') return '当前'
+        if (point.kind !== 'adoption') return ''
+        if (point.isCurrent) return '最近采纳 · 当前'
+        if (adoptionNodes.length <= 3 || point.turn === trajectory.latestAdoptionTurn) return point.adoptionCount > 1 ? '采纳 ×' + point.adoptionCount : '采纳'
+        return ''
+      }
+      const nodeTooltip = (point) => {
+        const count = point.kind === 'adoption' && point.adoptionCount > 1 ? '（同轮 ' + point.adoptionCount + ' 次）' : ''
+        const prefix = point.kind === 'creation' ? (trajectory.formationTurnSource === 'sourceBlock' ? '来源 Block 结束' : '记忆形成') : point.kind === 'adoption' ? 'Agent 采纳' + count : '当前权重'
+        return prefix + ' · 第 ' + point.turn + ' 轮 · 权重：' + Number(point.weight).toFixed(2)
+      }
+      const occupiedLabels = []
+      const labelPositions = new Map()
+      for (const [index, point] of nodes.entries()) {
+        const label = nodeLabel(point)
+        if (!label) continue
+        const px = x(point.turn)
+        const anchor = index === 0 ? 'start' : index === nodes.length - 1 ? 'end' : 'middle'
+        const width = Math.max(28, label.length * 6.6)
+        const left = anchor === 'start' ? px : anchor === 'end' ? px - width : px - width / 2
+        const candidates = [y(point.weight) - 11, y(point.weight) - 27, y(point.weight) + 24, y(point.weight) + 40]
+        const py = candidates.map((value) => Math.max(13, Math.min(169, value))).find((value) => !occupiedLabels.some((box) => left < box.right + 7 && left + width > box.left - 7 && Math.abs(value - box.y) < 15)) ?? Math.max(13, Math.min(169, candidates.at(-1)))
+        occupiedLabels.push({ left, right: left + width, y: py })
+        labelPositions.set(point, { x: px, y: py, anchor, label })
+      }
+      const showSegmentTooltip = (event, segment) => {
+        const bounds = event.currentTarget?.ownerSVGElement?.parentElement?.getBoundingClientRect?.()
+        if (!bounds) return
+        const first = segment.points[0]
+        const last = segment.points.at(-1)
+        setHoveredSegment({
+          x: Math.max(128, Math.min(bounds.width - 128, event.clientX - bounds.left)),
+          y: Math.max(18, event.clientY - bounds.top),
+          below: event.clientY - bounds.top < 72,
+          certainty: segment.certainty,
+          startTurn: first.turn,
+          endTurn: last.turn,
+          startWeight: first.weight,
+          endWeight: last.weight,
+        })
+      }
+      return h(React.Fragment, null,
+        h('div', { className: 'sg-weight-header' }, h('h3', { className: 'sg-section-title' }, '记忆状态')),
+        metrics,
+        h('div', { className: 'sg-weight-chart' },
+          h('svg', { viewBox: '0 0 620 238', preserveAspectRatio: 'xMidYMid meet', role: 'img', 'aria-label': '该 Event 的记忆权重轨迹，横轴为' + (relativeAxis ? '距记忆形成的对话轮次' : '对话轮次') + '，纵轴为记忆权重，最低权重为 ' + Number(floorWeight).toFixed(2) },
+            [0, .5, 1].map((weight) => h(React.Fragment, { key: weight },
+              h('line', { className: 'sg-weight-grid', x1: '48', y1: String(y(weight)), x2: '566', y2: String(y(weight)) }),
+              h('text', { className: 'sg-weight-axis-label', x: '39', y: String(y(weight) + 4), textAnchor: 'end' }, weight.toFixed(1)))),
+            h('line', { className: 'sg-weight-floor', x1: '48', y1: String(y(floorWeight)), x2: '566', y2: String(y(floorWeight)) }),
+            h('text', { className: 'sg-weight-floor-label', x: '562', y: String(y(floorWeight) + 16), textAnchor: 'end' }, '最低权重 ' + Number(floorWeight).toFixed(2)),
+            segments.filter((segment) => segment.points.length > 1).map((segment, index) => h(React.Fragment, { key: 'segment:' + index },
+              h('path', { className: 'sg-weight-line ' + (segment.certainty === 'incomplete' ? 'incomplete' : 'known'), d: denseWeightPath(segment.points, x, y) }),
+              h('path', {
+                className: 'sg-weight-line-hit',
+                d: denseWeightPath(segment.points, x, y),
+                onPointerEnter: (event) => showSegmentTooltip(event, segment),
+                onPointerMove: (event) => showSegmentTooltip(event, segment),
+                onPointerLeave: () => setHoveredSegment(null),
+                'aria-label': segment.certainty === 'incomplete' ? '旧数据推算的记忆权重轨迹' : '已确认的记忆权重轨迹',
+              }))),
+            nodes.map((point, index) => h(React.Fragment, { key: point.kind + ':' + point.turn + ':' + index },
+              h('circle', { className: 'sg-weight-node ' + point.kind, cx: String(x(point.turn)), cy: String(y(point.weight)), r: point.kind === 'adoption' ? '6' : '5' },
+                h('title', null, nodeTooltip(point))),
+              labelPositions.has(point) ? h('text', { className: 'sg-weight-node-label', x: String(labelPositions.get(point).x), y: String(labelPositions.get(point).y), textAnchor: labelPositions.get(point).anchor }, labelPositions.get(point).label) : null)),
+            ticks.map((offset) => {
+              const turn = minTurn + offset
+              return h(React.Fragment, { key: 'tick:' + turn },
+                h('line', { className: 'sg-weight-tick', x1: String(x(turn)), y1: '176', x2: String(x(turn)), y2: '181' }),
+                h('text', { className: 'sg-weight-axis-label', x: String(x(turn)), y: '215', textAnchor: offset === 0 ? 'start' : offset === turnSpan ? 'end' : 'middle' }, relativeAxis ? turn - formedTurn : turn))
+            }),
+            h('text', { className: 'sg-weight-axis-label', x: '307', y: '232', textAnchor: 'middle' }, relativeAxis ? '距记忆形成的对话轮次' : '对话轮次')),
+          hoveredSegment ? h('div', { className: 'sg-weight-tooltip ' + (hoveredSegment.below ? 'below' : 'above'), style: { left: hoveredSegment.x + 'px', top: hoveredSegment.y + 'px' }, role: 'tooltip' },
+            h('strong', null, hoveredSegment.certainty === 'incomplete' ? '旧数据推算轨迹' : '已确认轨迹'),
+            h('small', null, '第 ' + hoveredSegment.startTurn + '–' + hoveredSegment.endTurn + ' 轮 · ' + Number(hoveredSegment.startWeight).toFixed(2) + ' → ' + Number(hoveredSegment.endWeight).toFixed(2)),
+            hoveredSegment.certainty === 'incomplete' ? h('small', null, '旧版本未记录部分采纳的准确轮次') : null) : null))
+    }
+
+    function CopyEventId({ value }) {
+      const [copied, setCopied] = React.useState(false)
+      const copy = () => {
+        if (!globalThis.navigator?.clipboard?.writeText) return
+        void globalThis.navigator.clipboard.writeText(String(value)).then(() => {
+          setCopied(true)
+          window.setTimeout(() => setCopied(false), 1400)
+        })
+      }
+      return h('button', { type: 'button', className: 'sg-copy-id', onClick: copy, disabled: !globalThis.navigator?.clipboard?.writeText }, copied ? '已复制' : '复制')
+    }
+
+    function EventSourceDisclosure({ sourceMessages }) {
+      if (!sourceMessages?.length) return null
+      return h(CitationDisclosure, { title: '来源与证据' },
+        h('p', { className: 'sg-provenance-note' }, '以下原始内容用于查看与追溯依据，不代表全部内容都参与了某次回答。'),
+        h('div', { className: 'sg-citation-messages' }, sourceMessages.map((message, index) => h('div', { key: message.id || index, className: 'sg-citation-message' },
+          h('span', { className: 'sg-citation-message-role' }, (message.role || 'message') + (message.createdAt ? ' · ' + exactTime(message.createdAt) : '')),
+          String(message.content || '')))))
+    }
+
+    function EventTechnicalDisclosure({ event, citation }) {
+      const evidenceRef = String(citation?.evidenceRef || '')
+      const redundantEvidenceRef = !evidenceRef || evidenceRef === event.id || evidenceRef === 'event:' + event.id
+      return h(CitationDisclosure, { title: '技术信息' }, h('dl', { className: 'sg-event-technical' },
+        h('dt', null, 'Event ID'), h('dd', null, h('code', null, event.id), h(CopyEventId, { value: event.id })),
+        !redundantEvidenceRef ? h(React.Fragment, null, h('dt', null, 'evidenceRef'), h('dd', null, h('code', null, evidenceRef))) : null,
+        citation?.detailKind ? h(React.Fragment, null, h('dt', null, 'detailKind'), h('dd', null, h('code', null, citation.detailKind))) : null,
+        event.sourceBlockId ? h(React.Fragment, null, h('dt', null, '来源 Block'), h('dd', null, h('code', null, event.sourceBlockId))) : null))
+    }
+
+    function EventMemoryDetails({ event, sourceMessages = [], citation = null, relatedEvents = [] }) {
+      const memoryContent = event?.narrative || event?.summary
+      return h(React.Fragment, null,
+        h('section', { className: 'sg-event-section' }, h('h3', { className: 'sg-event-section-title' }, '记忆内容'), h('p', { className: 'sg-event-memory-copy' }, memoryContent || '暂无可展示的记忆内容。')),
+        h('section', { className: 'sg-event-section sg-event-weight-section' }, h(MemoryWeightTrajectory, { event })),
+        relatedEvents.length ? h(CitationDisclosure, { title: '关联信息' }, h('div', { className: 'sg-citation-events' }, relatedEvents.map((related, index) => h('article', { key: related.id || index, className: 'sg-citation-event' }, h('strong', null, related.title || '关联事件'), h('p', null, related.summary || related.narrative || '暂无摘要'))))) : null,
+        h(EventSourceDisclosure, { sourceMessages }),
+        h(EventTechnicalDisclosure, { event, citation }))
+    }
+
     function EventDetailPanel({ event, nodes, events, onNode, openSource, className = '', onMouseEnter, onMouseLeave }) {
       if (!event) return h('aside', { className: 'sg-long-detail sg-placeholder-detail' }, '选择事件查看完整时间、关系与证据')
-      const temporal = event.temporal || {}; const eventMap = new Map(events.map((item) => [item.id, item])); const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+      const temporal = event.temporal || {}; const eventMap = new Map(events.map((item) => [item.id, item]))
       const relations = EVENT_RELATIONS.flatMap(([key, label]) => { const value = temporal[key]; const ids = Array.isArray(value) ? value : value ? [value] : []; return ids.map((id) => ({ id, label })) })
-      return h('aside', { className: 'sg-long-detail ' + className, onMouseEnter, onMouseLeave },
-        h('div', { className: 'sg-event-detail-head' }, h('h2', null, event.title), h('span', { className: 'sg-event-status ' + (temporal.status || 'unknown') }, EVENT_STATUS_TEXT[temporal.status] || '未知')),
-        h('span', { className: 'sg-type-badge' }, EVENT_TYPE_TEXT[temporal.eventType] || temporal.eventType || '其他'),
-        h('section', null, h('h3', null, '摘要'), h('p', { className: 'sg-detail-copy' }, event.summary || '暂无摘要')),
-        event.narrative && event.narrative !== event.summary ? h('section', null, h('h3', null, '事件叙述'), h('p', { className: 'sg-detail-copy' }, event.narrative)) : null,
-        h('section', null, h('h3', null, '时间信息'), h('dl', { className: 'sg-time-grid' },
-          h('dt', null, '实际发生时间'), h('dd', null, temporal.happenedStart ? exactTime(temporal.happenedStart) + (temporal.happenedEnd && temporal.happenedEnd !== temporal.happenedStart ? ' — ' + exactTime(temporal.happenedEnd) : '') : '未知'),
-          h('dt', null, '提及时间'), h('dd', null, exactTime(temporal.mentionedAt || event.createdAt)),
-          h('dt', null, '时间精度'), h('dd', null, temporal.precision || 'unknown'),
-          h('dt', null, '原始表达'), h('dd', null, temporal.originalText || '未记录'))),
-        h('section', null, h('h3', null, '参与实体'), h('div', { className: 'sg-tags' }, (temporal.participantNodeIds || []).flatMap((id) => nodeMap.get(id) || []).map((node) => h(NodePill, { key: node.id, node, onClick: () => onNode(node.id) })), !(temporal.participantNodeIds || []).length ? (temporal.participants || []).map((name) => h('span', { key: name, className: 'sg-tag' }, name)) : null)),
+      return h(InfoPopoverGroup, { key: event.id }, h('aside', { className: 'sg-long-detail ' + className, onMouseEnter, onMouseLeave },
+        h('div', { className: 'sg-event-detail-head' }, h('div', null, h('span', { className: 'sg-event-detail-kicker' }, 'Event'), h('h2', null, event.title)), h('span', { className: 'sg-event-status ' + (temporal.status || 'unknown') }, EVENT_STATUS_TEXT[temporal.status] || '未知')),
+        h(EventMetadata, { event, nodes, onNode }),
+        h('section', null, h('h3', null, '记忆内容'), h('p', { className: 'sg-detail-copy' }, event.narrative || event.summary || '暂无可展示的记忆内容。')),
         relations.length ? h('section', null, h('h3', null, '事件关系'), relations.map((relation) => h('div', { key: relation.label + relation.id, className: 'sg-relation-row' }, h('span', null, relation.label), h('strong', null, eventMap.get(relation.id)?.title || relation.id)))) : null,
-        h('section', null, h('h3', null, '证据来源'), h('div', { className: 'sg-evidence-row' }, h('span', null, '来源 Block'), h('code', null, event.sourceBlockId)), h('div', { className: 'sg-evidence-row' }, h('span', null, '置信度'), h('strong', null, Math.round((event.confidence || 0) * 100) + '%'))),
-        h('button', { className: 'sg-source-button', onClick: () => openSource(event) }, '查看来源原始消息 →'))
+        event.weightTrajectory ? h('section', null, h(MemoryWeightTrajectory, { event })) : null,
+        h('button', { className: 'sg-source-button', onClick: () => openSource(event) }, '查看来源与证据 →')))
     }
 
     function TimelineList({ events, nodes, query, filters, onSelect, selectedId, floating = false, onNode, openSource }) {
@@ -1521,7 +1962,7 @@ window.__ModuleLoader__.load({
         h(EventDetailPanel, { event: preview.event, nodes, events, onNode, openSource })) : null)
     }
 
-    function LongTermPage({ events, eventPage, graph, project, query, setQuery, openEvent, namespace }) {
+    function LongTermPage({ events, eventPage, graph, project, query, setQuery, openEvent, namespace, focusNodeId }) {
       const [mode, setMode] = React.useState('graph')
       const [selectedNodeId, setSelectedNodeId] = React.useState('')
       const [selectedEventId, setSelectedEventId] = React.useState('')
@@ -1537,10 +1978,25 @@ window.__ModuleLoader__.load({
       const nodeImportance = React.useMemo(() => graphNodeImportance(nodes, edges, project), [nodes, edges, project])
       const nodeTags = [...new Set(nodes.flatMap((node) => node.tags || []))].sort((left, right) => left.localeCompare(right))
       React.useEffect(() => {
+        if (!focusNodeId || !nodes.some((node) => node.id === focusNodeId)) return
+        setMode('graph')
+        setNodeType('')
+        setNodeTag('')
+        const rank = [...nodes].sort((left, right) => (nodeImportance.get(right.id)?.score || 0) - (nodeImportance.get(left.id)?.score || 0)).findIndex((node) => node.id === focusNodeId)
+        if (rank >= 0) setGraphNodeLimit((current) => Math.max(current, rank + 1))
+        setSelectedNodeId(focusNodeId)
+        setFullScreen(true)
+      }, [focusNodeId, nodes, nodeImportance])
+      React.useEffect(() => {
         if (!fullScreen) return undefined
         const previous = document.body.style.overflow
         document.body.style.overflow = 'hidden'
-        const onKeyDown = (event) => { if (event.key === 'Escape') { setFullScreen(false); setFiltersOpen(false) } }
+        const onKeyDown = (event) => {
+          if (event.key !== 'Escape') return
+          if (document.querySelector('.sg-long-explorer .sg-info-trigger[aria-expanded="true"]')) return
+          setFullScreen(false)
+          setFiltersOpen(false)
+        }
         window.addEventListener('keydown', onKeyDown)
         return () => { document.body.style.overflow = previous; window.removeEventListener('keydown', onKeyDown) }
       }, [fullScreen])
@@ -1778,13 +2234,12 @@ window.__ModuleLoader__.load({
           messages.length ? messages.map((message) => h('div', { key: message.id, className: 'sg-raw-message' }, h('div', { className: 'sg-muted' }, String(message.role || '') + ' · ' + formatTime(message.createdAt)), h('div', { className: 'sg-code' }, String(message.content || '')))) : h('div', { className: 'sg-muted' }, '当前数据中没有可显示的来源消息。'))))
     }
 
-    function EventDetail({ event, project, source, onBack, backLabel }) {
-      return h(React.Fragment, null,
+    function EventDetail({ event, project, source, onBack, backLabel, onNode }) {
+      const detailedEvent = source?.events?.find((item) => item.id === event.id) || event
+      return h(InfoPopoverGroup, null,
         h(BackBar, { label: backLabel, onBack }),
-        h('header', { className: 'sg-detail-header' }, h('h2', { className: 'sg-detail-title' }, event.title || '记忆详情'), event.summary ? h('p', { className: 'sg-detail-subtitle' }, event.summary) : null, h('div', { className: 'sg-meta' }, h('span', null, formatTime(event.updatedAt || event.createdAt)), h('span', { className: 'sg-meta-sep' }, project))),
-        event.narrative ? h('div', { className: 'sg-detail-section' }, h('h3', { className: 'sg-section-title' }, 'AI 对这段经历的理解'), h('p', { className: 'sg-prose' }, event.narrative)) : null,
-        h('div', { className: 'sg-detail-section' }, h('h3', { className: 'sg-section-title' }, '参与实体'), (event.temporal?.participants || []).length ? h('div', { className: 'sg-tags' }, event.temporal.participants.map((name) => h('span', { key: name, className: 'sg-tag' }, name))) : h('span', { className: 'sg-muted' }, '未记录')),
-        h(SourceDetails, { item: event, source, kind: 'event' }))
+        h('header', { className: 'sg-detail-header sg-event-page-header' }, h('span', { className: 'sg-event-detail-kicker' }, 'Event'), h('h2', { className: 'sg-detail-title' }, detailedEvent.title || '记忆详情'), h(EventMetadata, { event: detailedEvent, nodes: source?.relatedNodes || [], onNode })),
+        h(EventMemoryDetails, { event: detailedEvent, sourceMessages: source?.messages || [] }))
     }
 
     function ElementDetail({ element, events, source, openEvent, onBack, backLabel }) {
@@ -1812,7 +2267,7 @@ window.__ModuleLoader__.load({
       })
     }
 
-    function ProcessingStatus({ overview, blocks, conversations, namespace, serverVersion, onBack, refresh }) {
+    function ProcessingStatus({ overview, blocks, conversations, namespace, serverVersion, onBack, backLabel = '返回', refresh }) {
       const failures = overview.failedJobDetails || []
       const failedKeys = new Set(failures.map(statusJobKey))
       const hasProcessingDetails = Array.isArray(overview.processingJobDetails)
@@ -1969,7 +2424,7 @@ window.__ModuleLoader__.load({
           ? '仍有 ' + rawProcessingCount + ' 个后台任务正在整理'
           : '本轮整理已经完成'
       return h(React.Fragment, null,
-        h(BackBar, { label: '返回', onBack }),
+        h(BackBar, { label: backLabel, onBack }),
         h('div', { className: 'sg-intro' }, h('h2', null, '短期记忆整理'), h('p', null, summary)),
         h('div', { className: 'sg-process-summary' }, h('strong', null, '原始对话已保存，不会丢失'), h('span', null, '整理在后台进行，你可以继续使用。')),
         detailsUnavailable ? h('div', { className: 'sg-process-notice', role: 'status' },
@@ -1994,6 +2449,7 @@ window.__ModuleLoader__.load({
                   h('div', { className: 'sg-process-job-head' }, h('strong', null, taskLabel(job.kind)), h('span', { className: 'sg-stage-value ' + (failed ? 'failed' : job.status === 'running' ? 'processing' : 'waiting') }, technicalStatusText(job.status))),
                   h('div', { className: 'sg-process-job-meta sg-code' }, '任务 ' + job.id + ' · 已尝试 ' + String(job.attempts ?? 0) + ' 次 · 更新于 ' + formatTime(job.updatedAt)),
                   job.nextRetryAt ? h('div', { className: 'sg-process-job-meta' }, '计划重试：' + formatTime(job.nextRetryAt)) : null,
+                  failed && !job.nextRetryAt ? h('div', { className: 'sg-process-job-meta' }, '自动重试已停止') : null,
                   failed ? h('pre', { className: 'sg-job-error sg-code' }, job.lastErrorFull || job.lastError || '没有记录技术错误。') : null,
                   failed ? h('div', { className: 'sg-process-job-actions' }, h('span', { className: 'sg-status-feedback failed', role: retryErrors[key] ? 'alert' : undefined }, retryErrors[key] || ''), h('button', { type: 'button', className: 'sg-save-button', disabled: busy, onClick: () => void retryJob(job) }, busy ? '正在处理…' : '重试此任务')) : null)
               })) : null
@@ -2200,6 +2656,7 @@ window.__ModuleLoader__.load({
       const weight = event?.weight
       return {
         id: event?.id,
+        formedTurn: event?.formedTurn,
         title: event?.title,
         summary: event?.summary,
         narrative: event?.narrative,
@@ -2624,9 +3081,11 @@ window.__ModuleLoader__.load({
       return h(React.Fragment, null, h(BackBar, { label: backLabel, onBack }), h('div', { className: 'sg-intro' }, h('h2', null, '原始数据'), h('p', null, '供排查问题使用的内部字段与 JSON')), groups.map(([label, value, total]) => h('details', { key: label, className: 'sg-raw-group' }, h('summary', null, label + ' (' + (Array.isArray(value) && Number(total) > value.length ? '已加载 ' + value.length + ' / 共 ' + total : Array.isArray(value) ? value.length : ((value.nodes?.length || 0) + (value.edges?.length || 0))) + ')'), h('pre', { className: 'sg-raw-json sg-code' }, JSON.stringify(value, null, 2)))))
     }
 
-    function SettingsPage({ selected, namespace, onBack, setView, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort }) {
+    function SettingsPage({ selected, namespace, dataDirectory, onBack, setView, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort }) {
       const [turnSize, setTurnSize] = React.useState(String(selected.blockTurnSize ?? 6))
       const [lambda, setLambda] = React.useState(String(selected.blockDecayLambda ?? 0.3))
+      const [directoryOpening, setDirectoryOpening] = React.useState(false)
+      const [directoryFeedback, setDirectoryFeedback] = React.useState({ kind: '', text: '' })
       React.useEffect(() => {
         setTurnSize(String(selected.blockTurnSize ?? 6))
         setLambda(String(selected.blockDecayLambda ?? 0.3))
@@ -2641,33 +3100,68 @@ window.__ModuleLoader__.load({
       const effortMode = pluginSettings?.value?.structuredReasoningEffort || 'auto'
       const effortOverridden = pluginSettings?.user?.structuredReasoningEffort !== undefined
       const settingsWritable = pluginSettings?.writable === true
-      const rows = [['Schema 版本', 'v' + selected.schemaVersion], ['模型', '由 DSH 当前模型配置提供'], ['内部空间 ID', namespace], ['已处理轮次', selected.currentTurn]]
-      const diagnostics = [
-        ['system', '✓', '系统状态', '处理任务和最近整理时间'],
+      const rows = [['Schema', 'v' + selected.schemaVersion], ['提取模型', '由 DSH 当前模型配置提供'], ['项目空间', selected.workspaceName || '当前工作区'], ['内部空间 ID', namespace], ['已处理轮次', selected.currentTurn]]
+      const runtimeDiagnostics = [
+        ['system', '✓', '系统状态', '处理概览与最近整理时间'],
         ['audit', '↗', '使用记录', '长期记忆何时被使用'],
-        ['raw', '{}', '原始数据', 'Block、Event、Graph 与模型响应'],
+        ['status', '↻', '后台任务', '处理进度、失败任务与重试'],
       ]
+      const openDirectory = () => {
+        if (!dataDirectory || directoryOpening) return
+        setDirectoryOpening(true)
+        setDirectoryFeedback({ kind: '', text: '' })
+        void api('storage/open-directory', {}, { method: 'POST' })
+          .then(() => setDirectoryFeedback({ kind: 'done', text: '已在文件管理器中打开' }))
+          .catch((reason) => setDirectoryFeedback({ kind: 'failed', text: '打开失败：' + String(reason?.message || reason) }))
+          .finally(() => setDirectoryOpening(false))
+      }
+      const copyDirectory = () => {
+        if (!dataDirectory) return
+        setDirectoryFeedback({ kind: '', text: '' })
+        if (!navigator?.clipboard?.writeText) {
+          setDirectoryFeedback({ kind: 'failed', text: '当前浏览器不支持自动复制' })
+          return
+        }
+        void navigator.clipboard.writeText(dataDirectory)
+          .then(() => setDirectoryFeedback({ kind: 'done', text: '路径已复制' }))
+          .catch((reason) => setDirectoryFeedback({ kind: 'failed', text: '复制失败：' + String(reason?.message || reason) }))
+      }
+      const menu = (items) => h('div', { className: 'sg-menu sg-settings-menu' }, items.map(([id, icon, title, subtitle]) => h('button', { key: id, type: 'button', className: 'sg-menu-row', onClick: () => setView({ name: id, back: { name: 'settings' } }) }, h('span', { className: 'sg-menu-icon', 'aria-hidden': 'true' }, icon), h('span', null, h('span', { className: 'sg-menu-title' }, title), h('br'), h('span', { className: 'sg-menu-subtitle' }, subtitle)), h('span', { className: 'sg-chevron' }, '›'))))
       return h(React.Fragment, null,
         h(BackBar, { label: '更多', onBack }),
-        h('div', { className: 'sg-intro' }, h('h2', null, '高级设置'), h('p', null, '修改后会立即应用到所有已有工作区，并作为新工作区的默认值。')),
-        h('div', { className: 'sg-pipeline' },
-          h('div', { className: 'sg-stage' }, h('span', null, '结构化推理档位'), h('span', { className: 'sg-lambda-control' },
-            h('select', { className: 'sg-effort-select', value: effortMode, disabled: !settingsWritable, onChange: (event) => { if (setEffort) void setEffort(event.target.value) }, 'aria-label': '结构化推理档位策略' },
-              h('option', { value: 'auto' }, 'auto（自动）'),
-              h('option', { value: 'force-off' }, 'force-off（强制关闭）')),
-            effortOverridden ? h('button', { type: 'button', className: 'sg-effort-button', onClick: () => { if (resetEffort) void resetEffort() } }, '恢复默认') : h('span', { className: 'sg-stage-value waiting' }, '默认'))),
-          h('p', { className: 'sg-setting-note' }, 'auto：仅在模型明确支持 off 时使用；force-off：优先使用 off，能力检查失败或模型不支持时安全降级，并对同一模型只告警一次。'),
-          h('div', { className: 'sg-stage' }, h('span', null, '每个 Block 的对话轮数'), h('span', { className: 'sg-lambda-control' }, h('input', { className: 'sg-number-input', type: 'number', min: '1', step: '1', value: turnSize, onChange: (event) => setTurnSize(event.target.value), 'aria-label': '每个 Block 的对话轮数' }), h('span', { className: 'sg-stage-value waiting' }, '轮'))),
-          h('p', { className: 'sg-setting-note' }, '1 轮是一次用户提问和 AI 完整回复。轮数越小，Block 生成越频繁，也会让相同长度的对话衰减得更快；已有 Block 不会重新切分，尚未封存的内容按新阈值继续处理。'),
-          h('div', { className: 'sg-stage' }, h('span', null, 'Block 衰减系数 λ'), h('span', { className: 'sg-lambda-control' }, h('input', { className: 'sg-number-input', type: 'number', min: '0', step: '0.05', value: lambda, onChange: (event) => setLambda(event.target.value), 'aria-label': 'Block 衰减系数 λ' }))),
-          h('p', { className: 'sg-setting-note' }, '默认 0.3；数字越小，记忆遗忘越慢，消耗 token 越多，不建议大于 0.4。'),
-          showSuggestion ? h('div', { className: 'sg-setting-suggestion' }, h('span', null, '为保持按对话轮数计算的遗忘速度，建议 λ 调整为 ' + suggestedLambda.toFixed(2) + '。'), h('button', { type: 'button', className: 'sg-quiet-button', onClick: () => setLambda(String(Number(suggestedLambda.toFixed(2)))) }, '采用建议值')) : null,
-          rows.map(([label, value]) => h('div', { key: label, className: 'sg-stage' }, h('span', null, label), h('span', { className: label === '内部空间 ID' ? 'sg-stage-value sg-code' : 'sg-stage-value' }, String(value)))),
-          h('button', { type: 'button', className: 'sg-save-button', disabled: !changed || savingSettings, onClick: () => void updateSettings({ blockTurnSize: turnSizeValue, blockDecayLambda: lambdaValue }) }, savingSettings ? '保存中…' : changed ? '保存设置' : '已保存')),
+        h('div', { className: 'sg-intro' }, h('h2', null, '高级设置'), h('p', null, '记忆配置、数据管理与运行诊断。')),
+        h('section', { className: 'sg-settings-group', 'aria-labelledby': 'sg-memory-settings-title' },
+          h('h3', { id: 'sg-memory-settings-title', className: 'sg-settings-group-title' }, '记忆配置'),
+          h('p', { className: 'sg-settings-group-copy' }, 'Schema、模型与项目配置'),
+          h('div', { className: 'sg-settings-panel sg-pipeline' },
+            h('div', { className: 'sg-stage' }, h('span', null, '结构化推理档位'), h('span', { className: 'sg-lambda-control' },
+              h('select', { className: 'sg-effort-select', value: effortMode, disabled: !settingsWritable, onChange: (event) => { if (setEffort) void setEffort(event.target.value) }, 'aria-label': '结构化推理档位策略' },
+                h('option', { value: 'auto' }, 'auto（自动）'),
+                h('option', { value: 'force-off' }, 'force-off（强制关闭）')),
+              effortOverridden ? h('button', { type: 'button', className: 'sg-effort-button', onClick: () => { if (resetEffort) void resetEffort() } }, '恢复默认') : h('span', { className: 'sg-stage-value waiting' }, '默认'))),
+            h('p', { className: 'sg-setting-note' }, 'auto：仅在模型明确支持 off 时使用；force-off：优先使用 off，能力检查失败或模型不支持时安全降级，并对同一模型只告警一次。'),
+            h('div', { className: 'sg-stage' }, h('span', null, '每个 Block 的对话轮数'), h('span', { className: 'sg-lambda-control' }, h('input', { className: 'sg-number-input', type: 'number', min: '1', step: '1', value: turnSize, onChange: (event) => setTurnSize(event.target.value), 'aria-label': '每个 Block 的对话轮数' }), h('span', { className: 'sg-stage-value waiting' }, '轮'))),
+            h('p', { className: 'sg-setting-note' }, '1 轮是一次用户提问和 AI 完整回复。轮数越小，Block 生成越频繁，也会让相同长度的对话衰减得更快；已有 Block 不会重新切分，尚未封存的内容按新阈值继续处理。'),
+            h('div', { className: 'sg-stage' }, h('span', null, 'Block 衰减系数 λ'), h('span', { className: 'sg-lambda-control' }, h('input', { className: 'sg-number-input', type: 'number', min: '0', step: '0.05', value: lambda, onChange: (event) => setLambda(event.target.value), 'aria-label': 'Block 衰减系数 λ' }))),
+            h('p', { className: 'sg-setting-note' }, '默认 0.3；数字越小，记忆遗忘越慢，消耗 token 越多，不建议大于 0.4。'),
+            showSuggestion ? h('div', { className: 'sg-setting-suggestion' }, h('span', null, '为保持按对话轮数计算的遗忘速度，建议 λ 调整为 ' + suggestedLambda.toFixed(2) + '。'), h('button', { type: 'button', className: 'sg-quiet-button', onClick: () => setLambda(String(Number(suggestedLambda.toFixed(2)))) }, '采用建议值')) : null,
+            rows.map(([label, value]) => h('div', { key: label, className: 'sg-stage' }, h('span', null, label), h('span', { className: label === '内部空间 ID' ? 'sg-stage-value sg-code' : 'sg-stage-value' }, String(value)))),
+            h('button', { type: 'button', className: 'sg-save-button', disabled: !changed || savingSettings, onClick: () => void updateSettings({ blockTurnSize: turnSizeValue, blockDecayLambda: lambdaValue }) }, savingSettings ? '保存中…' : changed ? '保存设置' : '已保存'))),
+        h('section', { className: 'sg-settings-group', 'aria-labelledby': 'sg-storage-title' },
+          h('h3', { id: 'sg-storage-title', className: 'sg-settings-group-title' }, '数据与存储'),
+          h('p', { className: 'sg-settings-group-copy' }, '数据目录与原始数据'),
+          h('div', { className: 'sg-storage-card' },
+            h('span', { className: 'sg-storage-label' }, '数据存储位置'),
+            h('span', { className: 'sg-storage-path', title: dataDirectory || undefined }, dataDirectory || '当前使用内存存储，没有本地数据目录'),
+            h('div', { className: 'sg-storage-actions' },
+              h('button', { type: 'button', className: 'sg-storage-button', disabled: !dataDirectory || directoryOpening, onClick: openDirectory }, directoryOpening ? '正在打开…' : '打开文件夹'),
+              h('button', { type: 'button', className: 'sg-storage-button', disabled: !dataDirectory, onClick: copyDirectory }, '复制路径')),
+            h('p', { className: 'sg-storage-feedback ' + directoryFeedback.kind, role: directoryFeedback.kind === 'failed' ? 'alert' : 'status', 'aria-live': 'polite' }, directoryFeedback.text)),
+          menu([['raw', '{}', '查看原始数据', 'Block、Event、Graph 与模型响应']])),
         h('section', { className: 'sg-settings-group', 'aria-labelledby': 'sg-diagnostics-title' },
-          h('h3', { id: 'sg-diagnostics-title', className: 'sg-settings-group-title' }, '数据与运行诊断'),
-          h('p', { className: 'sg-settings-group-copy' }, '查看处理状态、记忆使用记录和内部数据。'),
-          h('div', { className: 'sg-menu' }, diagnostics.map(([id, icon, title, subtitle]) => h('button', { key: id, type: 'button', className: 'sg-menu-row', onClick: () => setView({ name: id, back: { name: 'settings' } }) }, h('span', { className: 'sg-menu-icon', 'aria-hidden': 'true' }, icon), h('span', null, h('span', { className: 'sg-menu-title' }, title), h('br'), h('span', { className: 'sg-menu-subtitle' }, subtitle)), h('span', { className: 'sg-chevron' }, '›')))))
+          h('h3', { id: 'sg-diagnostics-title', className: 'sg-settings-group-title' }, '运行与诊断'),
+          h('p', { className: 'sg-settings-group-copy' }, '系统状态、使用记录与后台任务'),
+          menu(runtimeDiagnostics))
       )
     }
 
@@ -2681,6 +3175,7 @@ window.__ModuleLoader__.load({
       const [conversationId, setConversationId] = React.useState('')
       const [section, setSection] = React.useState('short')
       const [view, setView] = React.useState({ name: 'root' })
+      const [graphFocusNodeId, setGraphFocusNodeId] = React.useState('')
       const [data, setData] = React.useState({ events: [], graph: { nodes: [], edges: [], migration: null }, blocks: [], openBlock: null, conversations: [], activeThreadId: null, audit: [], pagination: { events: { total: 0, offset: 0, limit: 40 }, blocks: { total: 0, offset: 0, limit: 40 }, audit: { total: 0, offset: 0, limit: 100 } } })
       const [query, setQuery] = React.useState('')
       const [source, setSource] = React.useState(null)
@@ -2693,6 +3188,7 @@ window.__ModuleLoader__.load({
       const dashboardEtagsRef = React.useRef(new Map())
       const loadedNamespaceRef = React.useRef('')
       const feedbackDeepLinkRef = React.useRef(readFeedbackNavigationState(navigationState) || readFeedbackDeepLink())
+      const graphNodeNavigationRef = React.useRef(readGraphNodeNavigationState(navigationState) || readGraphNodeDeepLink())
       const feedbackNavigationStateRef = React.useRef(navigationState)
       const reportError = (reason) => {
         const message = String(reason?.message || reason)
@@ -2753,19 +3249,37 @@ window.__ModuleLoader__.load({
       }, [])
 
       React.useEffect(() => {
+        const graphLink = graphNodeNavigationRef.current
         const feedbackLink = feedbackDeepLinkRef.current
-        if (feedbackLink) {
+        if (graphLink) {
+          setSection('long')
+          setQuery('')
+          setView({ name: 'root' })
+          setSource(null)
+          setGraphFocusNodeId(graphLink.nodeId)
+          if (readGraphNodeDeepLink()) consumeGraphNodeDeepLink()
+        } else if (feedbackLink) {
           setSection('more')
           setView({ name: 'support' })
           setSource(null)
           if (readFeedbackDeepLink()) consumeFeedbackDeepLink()
         }
-        void loadDashboard(feedbackLink?.namespace || '')
+        void loadDashboard(graphLink?.namespace || feedbackLink?.namespace || '')
         return () => dashboardRequestRef.current?.abort()
       }, [loadDashboard])
       React.useEffect(() => {
+        const graphLink = navigationState !== feedbackNavigationStateRef.current ? readGraphNodeNavigationState(navigationState) : null
         const feedback = readNewFeedbackNavigationState(feedbackNavigationStateRef.current, navigationState)
         feedbackNavigationStateRef.current = navigationState
+        if (graphLink) {
+          setSection('long')
+          setView({ name: 'root' })
+          setSource(null)
+          setGraphFocusNodeId(graphLink.nodeId)
+          setNamespace(graphLink.namespace)
+          void loadDashboard(graphLink.namespace, { force: true })
+          return
+        }
         if (!feedback) return
         setSection('more')
         setView({ name: 'support' })
@@ -2842,6 +3356,13 @@ window.__ModuleLoader__.load({
         setView((current) => ({ name: kind, item, back: current })); loadSource(kind, item)
       }
       const openEvent = (event) => openWithSource('event', data.events.find((item) => item.id === event.id) || event)
+      const openGraphNode = (nodeId) => {
+        setSection('long')
+        setQuery('')
+        setView({ name: 'root' })
+        setSource(null)
+        setGraphFocusNodeId(nodeId)
+      }
       const goBack = () => {
         const previous = view.back || { name: 'root' }
         setView(previous)
@@ -2867,18 +3388,18 @@ window.__ModuleLoader__.load({
       let content = null
       if (loading && !selected) content = h(Loading)
       else if (!selected) content = h(Empty, { title: '还没有记忆', copy: '完成一些 DSH 对话后，短期记忆和长期记忆会出现在这里。' })
-      else if (view.name === 'event') content = h(EventDetail, { event: view.item, project, source, onBack: goBack, backLabel })
-      else if (view.name === 'status') content = h(ProcessingStatus, { overview: selected, blocks: data.blocks, conversations, namespace, serverVersion: overview.pluginVersion, onBack: () => setView({ name: 'root' }), refresh })
+      else if (view.name === 'event') content = h(EventDetail, { event: view.item, project, source, onBack: goBack, backLabel, onNode: openGraphNode })
+      else if (view.name === 'status') content = h(ProcessingStatus, { overview: selected, blocks: data.blocks, conversations, namespace, serverVersion: overview.pluginVersion, onBack: view.back ? goBack : () => setView({ name: 'root' }), backLabel: view.back?.name === 'settings' ? '高级设置' : '返回', refresh })
       else if (view.name === 'import') content = h(ImportPage, { namespace, onBack: moreBack, refresh })
       else if (view.name === 'structure') content = h(StructurePage, { events: data.events, eventPage: data.pagination?.events, graph: data.graph, openEvent, namespace, onBack: moreBack })
       else if (view.name === 'system') content = h(SystemPage, { selected, blocks: data.blocks, onBack: view.back ? goBack : moreBack, backLabel: view.back?.name === 'settings' ? '高级设置' : '更多', refresh })
       else if (view.name === 'audit') content = h(AuditPage, { audit: data.audit, auditPage: data.pagination?.audit, namespace, onBack: view.back ? goBack : moreBack, backLabel: view.back?.name === 'settings' ? '高级设置' : '更多' })
       else if (view.name === 'raw') content = h(RawPage, { data, selected, onBack: view.back ? goBack : moreBack, backLabel: view.back?.name === 'settings' ? '高级设置' : '更多' })
       else if (view.name === 'display') content = h(DisplayPage, { onBack: moreBack, usePluginSettings, setStrataGateStatus, setShortTermStatus, setRetrievalStatus })
-      else if (view.name === 'settings') content = h(SettingsPage, { selected, namespace, onBack: moreBack, setView, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort })
+      else if (view.name === 'settings') content = h(SettingsPage, { selected, namespace, dataDirectory: overview.dataDirectory, onBack: moreBack, setView, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort })
       else if (view.name === 'support') content = h(SupportPage, { namespace, overview, selected, data, recentError, onBack: moreBack })
       else content = h(React.Fragment, null,
-        loading ? h(Loading) : section === 'short' ? h(ShortTermPage, { key: namespace + ':' + conversationId, blocks: data.blocks, blockPage: data.pagination?.blocks, openBlock: data.openBlock, conversations, activeThreadId: conversationId || data.activeThreadId || '', namespace, onConversationChange: selectConversation, refresh }) : section === 'long' ? h(LongTermPage, { key: namespace, events: data.events, eventPage: data.pagination?.events, graph: data.graph, project, query, setQuery, openEvent, namespace }) : h(MoreHome, { setView }))
+        loading ? h(Loading) : section === 'short' ? h(ShortTermPage, { key: namespace + ':' + conversationId, blocks: data.blocks, blockPage: data.pagination?.blocks, openBlock: data.openBlock, conversations, activeThreadId: conversationId || data.activeThreadId || '', namespace, onConversationChange: selectConversation, refresh }) : section === 'long' ? h(LongTermPage, { key: namespace, events: data.events, eventPage: data.pagination?.events, graph: data.graph, project, query, setQuery, openEvent, namespace, focusNodeId: graphFocusNodeId }) : h(MoreHome, { setView }))
 
       return h('main', { className: 'sg-memory', 'data-testid': 'stratagate-memory-ui' },
         h('style', null, css),
@@ -2914,7 +3435,10 @@ window.__ModuleLoader__.load({
         slots.inject('conversation.chat.turnTail', () => slots.register({
           name: 'conversation.chat.turnTail',
           select: selectMemoryCitations,
-          inject: () => pluginSettingsScope ? { hooks: { pluginSettings: pluginSettingsScope } } : {},
+          inject: () => ({
+            ...(pluginSettingsScope ? { hooks: { pluginSettings: pluginSettingsScope } } : {}),
+            onOpenGraphNode: (namespace, nodeId) => navigateToGraphNode(ctx, namespace, nodeId),
+          }),
         }, MemoryCitationTail))
       }
       slots.inject('settings.section', () => slots.register({
@@ -2935,9 +3459,11 @@ window.__ModuleLoader__.load({
         disposeFeedbackLinkNavigation?.()
         const disposeLinkNavigation = installFeedbackLinkNavigation(ctx)
         const disposeDeepLink = openFeedbackDeepLink(ctx)
+        const disposeGraphDeepLink = openGraphNodeDeepLink(ctx)
         disposeFeedbackLinkNavigation = () => {
           disposeLinkNavigation()
           disposeDeepLink()
+          disposeGraphDeepLink()
         }
       }
     }

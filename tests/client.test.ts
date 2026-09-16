@@ -6,7 +6,7 @@ function loadSupportHelpers(stateValues: unknown[] = [], globals: Record<string,
   const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
   const instrumented = source.replace(
     "    exports.name = 'stratagate-dsh'",
-    "    exports.__test = { feedbackDraftMarkdown, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, consumeFeedbackDeepLink, feedbackLinkTarget, navigateToFeedback, installFeedbackLinkNavigation, ProcessingStatus, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
+    "    exports.__test = { feedbackDraftMarkdown, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
   )
   let definition: any
   runInNewContext(instrumented, {
@@ -21,6 +21,7 @@ function loadSupportHelpers(stateValues: unknown[] = [], globals: Record<string,
   })
   let stateIndex = 0
   const React = {
+    createContext: (value: unknown) => ({ Provider: 'provider', value }),
     createElement: (...args: unknown[]) => args,
     Fragment: 'fragment',
     useState: (initial: unknown) => [stateIndex < stateValues.length ? stateValues[stateIndex++] : initial, () => {}],
@@ -40,6 +41,17 @@ function elementProps(tree: unknown): any[] {
   return props.concat(tree.slice(2).flatMap(elementProps))
 }
 
+function deepElementProps(tree: unknown): any[] {
+  const props: any[] = []
+  const visit = (value: unknown) => {
+    if (!Array.isArray(value)) return
+    if ((typeof value[0] === 'string' || typeof value[0] === 'function') && value[1] && typeof value[1] === 'object' && !Array.isArray(value[1])) props.push(value[1])
+    value.forEach(visit)
+  }
+  visit(tree)
+  return props
+}
+
 describe('StrataGate Web client contract', () => {
   it('registers its settings section through the DSH module loader', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
@@ -51,7 +63,7 @@ describe('StrataGate Web client contract', () => {
     expect(definition.id).toBe('stratagate-dsh')
     const plugin = definition.factory((name: string) => {
       if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
-      return { createElement: (...args: unknown[]) => args, Fragment: 'fragment', useState: () => [], useEffect: () => {}, useCallback: (fn: unknown) => fn }
+      return { createContext: (value: unknown) => ({ Provider: 'provider', value }), createElement: (...args: unknown[]) => args, Fragment: 'fragment', useState: () => [], useEffect: () => {}, useCallback: (fn: unknown) => fn }
     })
     expect(plugin.inject).toEqual(['slots', 'uiConversation'])
 
@@ -165,6 +177,107 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain('disposeDeepLink()')
   })
 
+  it('opens a requested graph node through Settings navigation and reports failures', async () => {
+    const { navigateToGraphNode, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeGraphNodeDeepLink } = loadSupportHelpers()
+    expect(readGraphNodeNavigationState({ view: 'graph-node', namespace: 'dsh:project:test', nodeId: 'node_1' }))
+      .toEqual({ namespace: 'dsh:project:test', nodeId: 'node_1' })
+    expect(readGraphNodeNavigationState({ view: 'graph-node', namespace: '', nodeId: 'node_1' })).toBeNull()
+    expect(readGraphNodeDeepLink({ search: '?settings=stratagate-memory&stratagateView=graph-node&namespace=dsh%3Aproject%3Atest&nodeId=node_1' }))
+      .toEqual({ namespace: 'dsh:project:test', nodeId: 'node_1' })
+    let replaced = ''
+    expect(consumeGraphNodeDeepLink({ pathname: '/', search: '?settings=stratagate-memory&stratagateView=graph-node&namespace=dsh%3Aproject%3Atest&nodeId=node_1&keep=1', hash: '#chat' }, { state: null, replaceState: (_state: unknown, _title: string, next: string) => { replaced = next } })).toBe('/?keep=1#chat')
+    expect(replaced).toBe('/?keep=1#chat')
+
+    const calls: unknown[][] = []
+    expect(await navigateToGraphNode({
+      get: (name: string) => name === 'settingsNavigation' ? { openSection: (...args: unknown[]) => { calls.push(args) } } : undefined,
+    }, 'dsh:project:test', 'node_1')).toBe(true)
+    expect(calls).toEqual([['stratagate-memory', { view: 'graph-node', namespace: 'dsh:project:test', nodeId: 'node_1' }]])
+    const fallbackLocation = {
+      href: 'http://127.0.0.1:10259/?keep=1',
+      assigned: '',
+      assign(next: string) { this.assigned = next },
+    }
+    expect(await navigateToGraphNode({ get: () => undefined }, 'dsh:project:test', 'node_1', fallbackLocation)).toBe(true)
+    expect(new URL(fallbackLocation.assigned).searchParams.get('stratagateView')).toBe('graph-node')
+    expect(new URL(fallbackLocation.assigned).searchParams.get('nodeId')).toBe('node_1')
+    expect(await navigateToGraphNode({ get: () => undefined }, 'dsh:project:test', 'node_1', fallbackLocation, false)).toBe(false)
+    expect(await navigateToGraphNode({ get: () => ({ openSection: () => Promise.reject(new Error('closed')) }) }, 'dsh:project:test', 'node_1')).toBe(false)
+  })
+
+  it('maps participants from node ids, deduplicates aliases, and keeps text-only pills inert', () => {
+    const { EventMetadata, NodePill, StaticEntityPill } = loadSupportHelpers()
+    const node = { id: 'node_1', name: 'StrataGate DSH', aliases: ['stratagate-dsh'], type: 'project' }
+    const tree = EventMetadata({
+      event: { temporal: { participantNodeIds: ['node_1', 'node_1'], participants: ['stratagate-dsh', 'StrataGate DSH', 'Alice', 'alice'] } },
+      nodes: [node, { id: 'related_only', name: 'Unrelated', aliases: [], type: 'tool' }],
+      onNode: () => {},
+    })
+    const participantComponents: Array<{ name: string; props: any }> = []
+    const visit = (value: unknown) => {
+      if (!Array.isArray(value)) return
+      if (typeof value[0] === 'function' && ['NodePill', 'StaticEntityPill'].includes(value[0].name)) participantComponents.push({ name: value[0].name, props: value[1] })
+      value.forEach(visit)
+    }
+    visit(tree)
+    expect(participantComponents).toEqual([
+      { name: 'NodePill', props: expect.objectContaining({ node }) },
+      { name: 'StaticEntityPill', props: expect.objectContaining({ name: 'Alice' }) },
+    ])
+
+    let opened = false
+    let stopped = 0
+    const linkedPill = NodePill({ node, onClick: () => { opened = true } })
+    linkedPill[1].onPointerDown({ stopPropagation: () => { stopped += 1 } })
+    linkedPill[1].onClick({ stopPropagation: () => { stopped += 1 } })
+    expect(opened).toBe(true)
+    expect(stopped).toBe(2)
+    expect(linkedPill).toContain('StrataGate DSH')
+    expect(StaticEntityPill({ name: 'Alice' })).toEqual(['span', { className: 'sg-entity-pill sg-entity-pill-static' }, 'Alice'])
+  })
+
+  it('renders solid weight trajectories with a wider invisible hover target and collision-aware labels', () => {
+    const { MemoryWeightTrajectory } = loadSupportHelpers()
+    const points = [
+      { kind: 'creation', turn: 0, weight: 1, label: '形成' },
+      { kind: 'adoption', turn: 1, weight: 1, adoptionCount: 1 },
+      { kind: 'adoption', turn: 2, weight: 1, adoptionCount: 1 },
+      { kind: 'adoption', turn: 3, weight: 1, adoptionCount: 1 },
+      { kind: 'current', turn: 100, weight: .9 },
+    ]
+    const tree = MemoryWeightTrajectory({
+      event: {
+        criticality: 'identity',
+        formedTurn: 0,
+        weight: { floorWeight: .9, mentionCount: 4 },
+        weightTrajectory: {
+          formedTurn: 0,
+          trajectoryStartTurn: 0,
+          currentWeight: .9,
+          effectiveAdoptions: 3,
+          points,
+          segments: [{ certainty: 'incomplete', points }],
+        },
+      },
+    })
+    const props = deepElementProps(tree)
+    const visibleLine = props.find((value) => value.className === 'sg-weight-line incomplete')
+    const hitLine = props.find((value) => value.className === 'sg-weight-line-hit')
+    expect(visibleLine).toBeTruthy()
+    expect(hitLine).toMatchObject({ 'aria-label': '旧数据推算的记忆权重轨迹' })
+    expect(typeof hitLine.onPointerEnter).toBe('function')
+    expect(typeof hitLine.onPointerMove).toBe('function')
+    expect(typeof hitLine.onPointerLeave).toBe('function')
+    expect(() => hitLine.onPointerMove({ clientX: 120, clientY: 80, currentTarget: { ownerSVGElement: { parentElement: { getBoundingClientRect: () => ({ width: 620, left: 0, top: 0 }) } } } })).not.toThrow()
+
+    const floorLine = props.find((value) => value.className === 'sg-weight-floor')
+    const floorLabel = props.find((value) => value.className === 'sg-weight-floor-label')
+    expect(Number(floorLabel.y)).toBeGreaterThan(Number(floorLine.y1))
+    const crowdedLabels = props.filter((value) => value.className === 'sg-weight-node-label' && Number(value.x) < 100)
+    expect(crowdedLabels.length).toBeGreaterThan(2)
+    expect(new Set(crowdedLabels.map((value) => value.y)).size).toBeGreaterThan(1)
+  })
+
   it('keeps short-term status in the chat content flow and does not register a composer dock', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
     let definition: any
@@ -174,7 +287,7 @@ describe('StrataGate Web client contract', () => {
     })
     const plugin = definition.factory((name: string) => {
       if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
-      return { createElement: (...args: unknown[]) => args, Fragment: 'fragment', useState: () => [], useEffect: () => {}, useCallback: (fn: unknown) => fn, useRef: () => ({ current: null }) }
+      return { createContext: (value: unknown) => ({ Provider: 'provider', value }), createElement: (...args: unknown[]) => args, Fragment: 'fragment', useState: () => [], useEffect: () => {}, useCallback: (fn: unknown) => fn, useRef: () => ({ current: null }) }
     })
     const registrations: any[] = []
     const slots = {
@@ -198,7 +311,7 @@ describe('StrataGate Web client contract', () => {
     const tail = registrations.find(({ metadata }) => metadata.name === 'conversation.chat.turnTail')
     const settings = registrations.find(({ metadata }) => metadata.name === 'settings.section')
     expect(typeof tail.render).toBe('function')
-    expect(tail.metadata.inject()).toEqual({ hooks: { pluginSettings } })
+    expect(tail.metadata.inject()).toEqual({ hooks: { pluginSettings }, onOpenGraphNode: expect.any(Function) })
     settings.metadata.inject().setStrataGateStatus(false)
     settings.metadata.inject().setShortTermStatus(false)
     settings.metadata.inject().setRetrievalStatus(false)
@@ -238,7 +351,7 @@ describe('StrataGate Web client contract', () => {
     })
     const plugin = definition.factory((name: string) => {
       if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
-      return { createElement: (...args: unknown[]) => args }
+      return { createContext: (value: unknown) => ({ Provider: 'provider', value }), createElement: (...args: unknown[]) => args }
     })
     const { strataGateStatusVisible, shortTermStatusVisible, retrievalStatusVisible } = plugin.__test
     expect(strataGateStatusVisible(null)).toBe(true)
@@ -266,7 +379,7 @@ describe('StrataGate Web client contract', () => {
     })
     const plugin = definition.factory((name: string) => {
       if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
-      return { createElement: (...args: unknown[]) => args }
+      return { createContext: (value: unknown) => ({ Provider: 'provider', value }), createElement: (...args: unknown[]) => args }
     })
     const display = plugin.__test.shortTermTurnDisplay
     for (let turn = 1; turn < 6; turn += 1) {
@@ -301,7 +414,7 @@ describe('StrataGate Web client contract', () => {
     })
     const plugin = definition.factory((name: string) => {
       if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
-      return { createElement: (...args: unknown[]) => args }
+      return { createContext: (value: unknown) => ({ Provider: 'provider', value }), createElement: (...args: unknown[]) => args }
     })
     const { sessionWorkspacePath, shortTermTurnDisplay } = plugin.__test
     const sessions = {
@@ -347,6 +460,7 @@ describe('StrataGate Web client contract', () => {
     const plugin = definition.factory((name: string) => {
       if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
       return {
+        createContext: (value: unknown) => ({ Provider: 'provider', value }),
         createElement: (...args: unknown[]) => args,
         Fragment: 'fragment',
         useState: () => [],
@@ -400,6 +514,9 @@ describe('StrataGate Web client contract', () => {
                   { kind: 'block', id: 'block-1', title: 'Package manager', evidenceRef: 'block:block-1:level:4', batchId: 'batch_1', detailKind: 'blockId', level: 4, expanded: true },
                   { kind: 'block', id: 'block-2', title: 'Tooling notes', evidenceRef: 'block:block-2:level:2', batchId: 'batch_1', detailKind: 'blockId', level: 2 },
                 ],
+                verdict: 'sufficient',
+                missing: '',
+                nextStrategy: 'answer',
                 citations: [
                   { kind: 'event', id: 'event-1', title: 'Use pnpm', evidenceRef: 'event:event-1', batchId: 'batch_1', detailKind: 'eventId' },
                   { kind: 'graph', id: 'node-1', title: 'pnpm', evidenceRef: 'graph-node:node-1:expanded', batchId: 'batch_1', detailKind: 'nodeId', expanded: true },
@@ -424,6 +541,12 @@ describe('StrataGate Web client contract', () => {
     expect(matched.retrievedCount).toBe(5)
     expect(matched.retrievalGroups).toHaveLength(1)
     expect(matched.retrievalGroups[0].memories).toHaveLength(5)
+    expect(matched.retrievalGroups[0]).toMatchObject({ verdict: 'sufficient', nextStrategy: 'answer' })
+    const rendered = tail.render({ matched })
+    const renderedTail = JSON.stringify(rendered)
+    expect(renderedTail).toContain('本回答采用了 3 条记忆')
+    expect(renderedTail).toContain('· 查看检索过程')
+    expect(JSON.stringify(rendered[3])).not.toContain('pnpm compatibility')
     expect(tail.metadata.select({ turn: { turn: 7, data: { get: (key: string) => locationData.get(key) } }, seq: 2 })).toMatchObject({ turn: 7, citations: [], retrievalGroups: [] })
     const legacyUpdated = conversationDefinition.update({ state: started }, {
       event: {
@@ -440,19 +563,24 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain("event.data.name === 'memory_record_use'")
     expect(source).toContain("api('sources', { namespace: citation.namespace, [citation.detailKind]: citation.id })")
     expect(source).toContain('展开到 L')
-    expect(source).toContain("'本回答参考了 ' + citations.length + ' 条记忆'")
-    expect(source).toContain("'已进行 ' + retrievalGroups.length + ' 次检索，共返回 ' + retrievedCount + ' 条记忆，未采用'")
+    expect(source).toContain("'本回答采用了 ' + citations.length + ' 条记忆'")
+    expect(source).not.toContain('本回答参考了')
+    expect(source).toContain("'· 查看检索过程'")
+    expect(source).toContain("'检索 ' + retrievalGroups.length + ' 轮 · 返回 ' + retrievedCount + ' 条 · 未采用'")
     expect(source).toContain('sg-answer-retrieval-toggle')
     expect(source).toContain("'aria-expanded': showRetrieved")
     expect(source).toContain("'检索过程'")
     expect(source).toContain('retrievalGroupLabel(groupIndex)')
     expect(source).toContain("memoryIndex + 1 + '.'")
-    expect(source).toContain("open(memory, false)")
+    expect(source).toContain("open(memory, adopted)")
     expect(source).toContain("'检索候选 · 未采用'")
     expect(source).toContain("function CitationGraph({ citation, detail, primary, adopted = true })")
     expect(source).toContain("title: '关联信息'")
-    expect(source).toContain("adopted ? '来源对话 ·未作为加入本次上下文' : '来源对话 · 未用于本次回答'")
-    expect(source).toContain("title: '详细情况'")
+    expect(source).toContain("title: '来源与证据'")
+    expect(source).toContain("title: '技术信息'")
+    expect(source).toContain("selected.adopted ? '已用于回答' : '检索候选 · 未采用'")
+    expect(source).toContain('只有标记为本次采用的记忆内容参与了本次回答')
+    expect(source).not.toContain('弹窗中的关联信息与来源内容用于查看依据')
     expect(source).toContain("title: 'L0–L5 记忆层级'")
     expect(source).toContain("'本次采用'")
     expect(source).toContain("citationPreview(content)")
@@ -471,6 +599,7 @@ describe('StrataGate Web client contract', () => {
     const plugin = definition.factory((name: string) => {
       if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
       return {
+        createContext: (value: unknown) => ({ Provider: 'provider', value }),
         createElement: (...args: unknown[]) => args,
         Fragment: 'fragment',
         useState: (initial: unknown) => [initial, () => {}],
@@ -595,7 +724,7 @@ describe('StrataGate Web client contract', () => {
     expect(matched.retrievalGroups[0].memories.map((memory: any) => memory.title)).toEqual(['更早的检索结果'])
     expect(matched.retrievalGroups[1].memories.map((memory: any) => memory.title)).toEqual(['编辑器选择', '开发环境讨论'])
     const rendered = tail.render({ matched })
-    expect(JSON.stringify(rendered)).toContain('已进行 2 次检索，共返回 3 条记忆，未采用')
+    expect(JSON.stringify(rendered)).toContain('检索 2 轮 · 返回 3 条 · 未采用')
     expect(JSON.stringify(rendered)).not.toContain('stratagate-answer-citations')
     const retrievalHidden = tail.render({
       matched,
@@ -613,6 +742,7 @@ describe('StrataGate Web client contract', () => {
     const expandedPlugin = definition.factory((name: string) => {
       if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
       return {
+        createContext: (value: unknown) => ({ Provider: 'provider', value }),
         createElement: (...args: unknown[]) => args,
         Fragment: 'fragment',
         useState: (initial: unknown) => [stateCall++ === 0 ? true : initial, () => {}],
@@ -630,13 +760,12 @@ describe('StrataGate Web client contract', () => {
     })
     const expandedTail = expandedRegistrations.find(({ metadata }) => metadata.name === 'conversation.chat.turnTail')
     const expanded = expandedTail.render({ matched })
-    expect(JSON.stringify(expanded)).toContain('检索过程')
-    expect(JSON.stringify(expanded)).toContain('第一次检索')
-    expect(JSON.stringify(expanded)).toContain('第二次检索')
-    expect(JSON.stringify(expanded)).toContain('更早的检索结果')
-    expect(JSON.stringify(expanded)).toContain('编辑器选择')
-    expect(JSON.stringify(expanded)).toContain('开发环境讨论')
-    expect(JSON.stringify(expanded)).toContain('未采用')
+    expect(JSON.stringify(expanded)).toContain('retrievalGroups')
+    expect(source).toContain("retrievalGroupLabel(groupIndex) + ' · 返回 ' + group.count + ' 条'")
+    expect(source).toContain("adopted ? '最终采用' : '检索到 · 未采用'")
+    expect(source).toContain("'最终采用 ' + citations.length + ' 条'")
+    expect(source).toContain("if (group.verdict === 'sufficient') return '证据充分'")
+    expect(source).toContain("return '证据不足，继续检索'")
   })
 
   it('shows the unified project brand, mascot, usage count, and GitHub Star link', () => {
@@ -700,6 +829,25 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain('事件时间线')
     expect(source).toContain("{ '今天': [], '本周': [], '更早': [] }")
     expect(source).toContain('发生时间未知')
+    expect(source).toContain('记忆状态')
+    expect(source).toContain('当前权重')
+    expect(source).toContain('Agent 已采纳')
+    expect(source).toContain('最低权重')
+    expect(source).toContain('sg-weight-line.incomplete')
+    expect(source).toContain('sg-weight-line-hit')
+    expect(source).toContain('stroke-width:16;pointer-events:stroke')
+    expect(source).toContain('sg-weight-tooltip')
+    expect(source).not.toContain('stroke-dasharray:8 7')
+    expect(source).toContain("y: String(y(floorWeight) + 16)")
+    expect(source).toContain('const occupiedLabels = []')
+    expect(source).not.toContain('图中可定位')
+    expect(source).toContain('sg-weight-floor')
+    expect(source).toContain('event?.criticality')
+    expect(source).toContain("h(EventMemoryDetails, { event: primary")
+    expect(source).toContain("event.weightTrajectory ? h('section'")
+    expect(source).toContain("h(EventMemoryDetails, { event: detailedEvent")
+    expect(source).toContain("onPointerDown: (event) => event.stopPropagation()")
+    expect(source).toContain("onOpenGraphNode: (namespace, nodeId) => navigateToGraphNode(ctx, namespace, nodeId)")
     expect(source).toContain('正在升级长期记忆')
     expect(source).toContain('搜索记忆、人物、项目、概念')
     expect(source).not.toContain("['overview', '概览']")
@@ -728,7 +876,16 @@ describe('StrataGate Web client contract', () => {
     const settingsSource = source.slice(source.indexOf('function SettingsPage'), source.indexOf('function MemoryPage'))
     expect(settingsSource).toContain("['system', '✓', '系统状态'")
     expect(settingsSource).toContain("['audit', '↗', '使用记录'")
-    expect(settingsSource).toContain("['raw', '{}', '原始数据'")
+    expect(settingsSource).toContain("['raw', '{}', '查看原始数据'")
+    expect(settingsSource).toContain("'记忆配置'")
+    expect(settingsSource).toContain("'数据与存储'")
+    expect(settingsSource).toContain("'运行与诊断'")
+    expect(settingsSource).toContain("'Schema、模型与项目配置'")
+    expect(settingsSource).toContain("'数据目录与原始数据'")
+    expect(settingsSource).toContain("'系统状态、使用记录与后台任务'")
+    expect(settingsSource).toContain("['status', '↻', '后台任务'")
+    expect(settingsSource).toContain("api('storage/open-directory', {}, { method: 'POST' })")
+    expect(settingsSource).toContain('navigator.clipboard.writeText(dataDirectory)')
     expect(settingsSource).toContain("back: { name: 'settings' }")
     expect(source).toContain("function ImportPage({ namespace, onBack, refresh })")
     expect(source).toContain("api('import', { namespace }")
@@ -742,6 +899,33 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain("operation: 'status', namespace, jobId: job.jobId")
     expect(source).toContain('连接暂时中断，正在自动重试')
     expect(source).toContain('撤销本次导入')
+  })
+
+  it('copies the real data directory and sends the native open request from Advanced settings', async () => {
+    let copied = ''
+    const requests: Array<{ url: string; method?: string }> = []
+    const { SettingsPage } = loadSupportHelpers([], {
+      navigator: { clipboard: { writeText: async (value: string) => { copied = value } } },
+      fetch: async (url: string, options: { method?: string } = {}) => {
+        requests.push({ url, ...(options.method ? { method: options.method } : {}) })
+        return { ok: true, json: async () => ({ opened: true }) }
+      },
+    })
+    const dataDirectory = 'C:\\Users\\tester\\.dsh\\stratagate'
+    const tree = SettingsPage({
+      selected: { schemaVersion: 11, blockTurnSize: 6, blockDecayLambda: 0.3, currentTurn: 8, workspaceName: 'StrataGate' },
+      namespace: 'dsh:project:test', dataDirectory, onBack: () => {}, setView: () => {},
+      updateSettings: () => Promise.resolve(), savingSettings: false, usePluginSettings: null,
+      setEffort: null, resetEffort: null,
+    })
+    const storageButtons = elementProps(tree).filter((props) => props.className === 'sg-storage-button')
+    expect(storageButtons).toHaveLength(2)
+    storageButtons[0]!.onClick()
+    storageButtons[1]!.onClick()
+    await Promise.resolve()
+    expect(requests).toEqual([{ url: '/api/stratagate/storage/open-directory', method: 'POST' }])
+    expect(copied).toBe(dataDirectory)
+    expect(elementProps(tree).find((props) => props.className === 'sg-storage-path')?.title).toBe(dataDirectory)
   })
 
   it('inherits the resolved light, dark, or system appearance from DSH theme tokens', () => {
@@ -1073,7 +1257,7 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain('原始内容已经保存，不会丢失。')
     expect(source).toContain('原始对话已保存，不会丢失')
     expect(source).toContain('没有记录技术错误。')
-    expect(source).toContain("['raw', '{}', '原始数据'")
+    expect(source).toContain("['raw', '{}', '查看原始数据'")
     expect(source).toContain("['audit', '↗', '使用记录'")
     expect(source).toContain("['settings', '⚙', '高级设置'")
     expect(source).not.toContain("['responses', '模型响应']")
@@ -1136,6 +1320,7 @@ describe('StrataGate Web client contract', () => {
     expect(statusSource).toContain('等待更多对话')
     expect(statusSource).toContain('查看技术详情')
     expect(statusSource).toContain('计划重试：')
+    expect(statusSource).toContain('自动重试已停止')
     expect(statusSource).toContain('只读取最新状态，不会触发模型调用。')
     expect(statusSource).toContain('正在读取…')
     expect(statusSource).toContain('状态已更新')

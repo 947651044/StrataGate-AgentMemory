@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { StrataGate } from '@diqier/stratagate'
@@ -51,6 +52,23 @@ function turnEvents(turn = 1): SessionEvent[] {
 }
 
 describe('DSH runtime ingestion', () => {
+  it('derives the displayed data directory from the resolved database path and opens that exact directory', async () => {
+    const database = join('relative-stratagate-data', 'memory.db')
+    const opened: string[] = []
+    const runtime = new StrataGateRuntime({
+      database, namespaceMode: 'project', namespacePrefix: 'dsh', globalNamespace: 'global',
+      blockTurnSize: 6, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048,
+    }, fakeModels, undefined, undefined, undefined, async (path) => { opened.push(path) })
+    try {
+      const expected = resolve('relative-stratagate-data')
+      expect(runtime.adminDataDirectory()).toBe(expected)
+      await expect(runtime.adminOpenDataDirectory(new AbortController().signal)).resolves.toEqual({ opened: true, path: expected })
+      expect(opened).toEqual([expected])
+    } finally {
+      await runtime.close()
+    }
+  })
+
   it('consumes persisted graph jobs without a new host session event', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-background-worker-'))
     const database = join(directory, 'memory.db')
@@ -92,6 +110,53 @@ describe('DSH runtime ingestion', () => {
             expect.objectContaining({ blockId: block.id, status: 'succeeded', attempts: 1 }),
           ])
         }, { timeout: 5_000, interval: 100 })
+      } finally {
+        await runtime.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('does not wake the detached model runner for a terminal Graph failure', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-terminal-graph-'))
+    const database = join(directory, 'memory.db')
+    const namespace = 'dsh:project:terminal-graph'
+    try {
+      const seed = await StrataGate.open({
+        database, namespace, blockTurnSize: 1,
+        summarizer: async () => ({ l0Title: 'ready', l0Tags: [], l1Summary: 'ready', l2Keypoints: [], shouldExtract: false }),
+        graphProjector: async () => ({ reason: 'unused', nodes: [], edges: [] }),
+      })
+      await seed.appendTurn({ user: 'source', assistant: 'stored' })
+      const block = seed.listBlocks()[0]!
+      await seed.addEvent({
+        title: 'Terminal Graph failure', summary: 'Must never wake the worker again.',
+        sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id],
+      })
+      const claim = await seed.claimNextGraphProjection()
+      await seed.failGraphProjection(claim!.jobId, new Error('permanent failure'))
+      await seed.close()
+
+      const sqlite = new DatabaseSync(database)
+      const row = sqlite.prepare('SELECT jobs_json FROM graph_state WHERE namespace = ?')
+        .get(namespace) as { jobs_json: string }
+      const jobs = JSON.parse(row.jobs_json) as Array<{ attempts: number; nextRetryAt: string | null }>
+      jobs[0]!.attempts = 125
+      jobs[0]!.nextRetryAt = '2020-01-01T00:00:00.000Z'
+      sqlite.prepare('UPDATE graph_state SET jobs_json = ? WHERE namespace = ?')
+        .run(JSON.stringify(jobs), namespace)
+      sqlite.close()
+
+      const runDetached = vi.fn(async <T>(_sessionId: string, operation: () => Promise<T>): Promise<T> => operation())
+      const runtime = new StrataGateRuntime({
+        database, namespaceMode: 'project', namespacePrefix: 'dsh', globalNamespace: 'global',
+        blockTurnSize: 1, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048,
+      }, { ...fakeModels, runDetached } as unknown as DshModelBridge)
+      try {
+        await (runtime as unknown as { runBackgroundNamespace: (value: string) => Promise<void> })
+          .runBackgroundNamespace(namespace)
+        expect(runDetached).not.toHaveBeenCalled()
       } finally {
         await runtime.close()
       }
@@ -1180,7 +1245,8 @@ describe('DSH runtime ingestion', () => {
       })
       expect(runtime.needsRecordUse(activeSession)).toBe(true)
       const selectedRefs = [batch.evidenceRefs[0]!]
-      await runtime.recordUse(activeSession, 'call-audit-1', selectedRefs)
+      const recorded = await runtime.recordUse(activeSession, 'call-audit-1', selectedRefs) as Record<string, unknown>
+      expect(recorded).toMatchObject({ verdict: 'sufficient', missing: '', nextStrategy: 'answer' })
       expect(runtime.needsRecordUse(activeSession)).toBe(false)
 
       const audit = (await runtime.adminSnapshot(namespace))?.usageReceipts[0]

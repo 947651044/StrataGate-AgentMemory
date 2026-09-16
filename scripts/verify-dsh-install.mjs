@@ -8,10 +8,11 @@ import { once } from 'node:events'
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-const tarball = process.argv[2] ? resolve(packageRoot, process.argv[2]) : join(packageRoot, 'stratagate-dsh-0.2.67.tgz')
+const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
+const tarball = process.argv[2] ? resolve(packageRoot, process.argv[2]) : join(packageRoot, `${manifest.name}-${manifest.version}.tgz`)
 const versions = process.env.DSH_VERSION
   ? [process.env.DSH_VERSION]
-  : ['0.1.2-rc.1', '0.1.5-rc.1']
+  : manifest.dshWorkshop.compatibility.dshVersions
 const fixtureRoot = join(packageRoot, 'tests', 'fixtures')
 
 function run(command, args, cwd, env = {}) {

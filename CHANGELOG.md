@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.71 - 2026-09-15
+
+- Persist each Event's formation turn in the version 11 storage schema and migrate reliable legacy values from source Blocks, keeping decay and adoption trajectories anchored to the Event's actual lifecycle.
+- Rework Event details and citations with formation metadata, participant links and aliases, complete adoption history, and responsive memory-weight trajectory charts with explicit provenance and fallback states.
+- Harden release-candidate verification by staging temporary packages outside the repository and deriving the tarball name and supported DSH compatibility matrix from the package manifest.
+
+## 0.2.70 - 2026-09-14
+
+- Bound Graph and Element projection work to three attempts with persisted retry timing, terminal failure handling, pending-job priority, and upgrade-safe normalization for existing Graph jobs.
+- Reduce Graph projection context and output size, avoid duplicate Graph calls after max-token truncation, and make scheduled versus terminal retries explicit in the status UI.
+
+## 0.2.69 - 2026-09-14
+
+- Clearly separate retrieved memory candidates from the memories actually adopted by an answer, with compact answer-tail citations and an expandable, Evidence Gate-aware multi-round retrieval trace.
+- Add per-Event memory weight trajectories derived from persisted adoption receipts and the existing decay function, including current weight and adoption metrics without treating retrievals as reinforcement.
+
+## 0.2.68 - 2026-09-14
+
+- Reorganize Advanced Settings into Memory Configuration, Data & Storage, and Runtime & Diagnostics while keeping existing memory and diagnostic behavior intact.
+- Show the resolved StrataGate data directory with copy and native folder-open actions, and move raw data, system status, usage records, and background jobs into their corresponding advanced sections.
+
 ## 0.2.67 - 2026-09-13
 
 - Repackage the current StrataGate settings and display-preference release as npm package `0.2.67`.
