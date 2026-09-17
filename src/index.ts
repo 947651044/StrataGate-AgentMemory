@@ -71,7 +71,7 @@ export async function apply(ctx: Context, config: StrataGateConfig): Promise<() 
     throw new Error(`StrataGate could not safely migrate legacy citation events: ${detail}`)
   }
   if (legacyMigration.migrated > 0) {
-    ctx.logger.info(`stratagate-memory prepared ${legacyMigration.migrated} legacy Session generation(s) for DSH 0.1.5`)
+    ctx.logger.info(`stratagate-memory prepared ${legacyMigration.migrated} legacy Session generation(s) for DSH ${compatibility.cliVersion}`)
   }
   await mkdir(dirname(resolved.database), { recursive: true })
   const models = new DshModelBridge(ctx, resolved)
