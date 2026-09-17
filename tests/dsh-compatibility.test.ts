@@ -36,6 +36,12 @@ describe('DSH runtime compatibility', () => {
     expect(classifyDshRuntime(versions('0.1.6-alpha.1')).cliVersion).toBe('0.1.6-alpha.1')
   })
 
+  it('rejects a 0.1.5-rc.2 dependency family mixed with dsh-session 0.1.2-rc.1', () => {
+    const mixed = { ...versions('0.1.5-rc.2'), '@deepseek-ai/dsh-session': '0.1.2-rc.1' }
+    expect(() => classifyDshRuntime(mixed)).toThrow(/unsupported or mixed core runtime/)
+    expect(() => classifyDshRuntime(mixed)).toThrow(/dsh-session@0\.1\.2-rc\.1/)
+  })
+
   it('rejects a mixed 0.1.5/0.1.6 profile-local DSH runtime with a clear diagnostic', () => {
     const mixed = { ...versions('0.1.6-alpha.1'), '@deepseek-ai/dsh-session': '0.1.5-rc.2' }
     expect(() => classifyDshRuntime(mixed)).toThrow(/unsupported or mixed core runtime/)
