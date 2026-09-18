@@ -1017,6 +1017,7 @@ describe('StrataGate Web client contract', () => {
       },
     }
     const requests: string[] = []
+    let serverItems: unknown[] = []
     let definition: any
     runInNewContext(instrumented, {
       URLSearchParams,
@@ -1025,7 +1026,7 @@ describe('StrataGate Web client contract', () => {
         const parsed = new URL(String(url), 'http://localhost')
         return {
           ok: true,
-          json: async () => ({ items: [], total: 100, offset: Number(parsed.searchParams.get('offset')), limit: 40 }),
+          json: async () => ({ items: serverItems, total: 100, offset: Number(parsed.searchParams.get('offset')), limit: 40 }),
         }
       },
       window: { setTimeout, clearTimeout, __ModuleLoader__: { load: (value: unknown) => { definition = value } } },
@@ -1059,10 +1060,15 @@ describe('StrataGate Web client contract', () => {
     expect(latest.searchParams.get('offset')).toBe('0')
     expect(latest.searchParams.get('q')).toBe('Needle Event')
 
-    initialItems = [{ id: 'dashboard-refresh' }]
+    serverItems = [{ id: 'filtered-dashboard-refresh' }]
+    initialItems = [{ id: 'unfiltered-dashboard-refresh' }]
     render({ timeline: 'true', q: 'Needle Event' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
     const afterRefresh = render({ timeline: 'true', q: 'Needle Event' })
-    expect(afterRefresh.items).toEqual([])
+    expect(afterRefresh.items).toEqual([{ id: 'filtered-dashboard-refresh' }])
+    latest = new URL(requests.at(-1)!, 'http://localhost')
+    expect(latest.searchParams.get('offset')).toBe('0')
+    expect(latest.searchParams.get('q')).toBe('Needle Event')
 
     render({ timeline: 'true' })
     await new Promise((resolve) => setTimeout(resolve, 0))

@@ -1211,17 +1211,12 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState('')
       const requestVersion = React.useRef(0)
       const previousParamsKey = React.useRef(paramsKey)
+      const previousInitialData = React.useRef({ items: initialItems, total: initialPage?.total, limit: initialPage?.limit })
       React.useEffect(() => {
         requestVersion.current += 1
         setState({ items: initialItems, page: pageMeta(initialPage, fallbackLimit) })
         setError('')
       }, [key])
-      React.useEffect(() => {
-        if (reloadOnParamsChange) return
-        setState((current) => current.page.offset === 0
-          ? { items: initialItems, page: pageMeta(initialPage, fallbackLimit) }
-          : current)
-      }, [initialItems, initialPage?.total, initialPage?.limit, reloadOnParamsChange])
       const loadOffset = (offset) => {
         const version = ++requestVersion.current
         setLoading(true)
@@ -1237,6 +1232,21 @@ window.__ModuleLoader__.load({
           setError(String(reason?.message || reason))
         }).finally(() => { if (version === requestVersion.current) setLoading(false) })
       }
+      React.useEffect(() => {
+        const previous = previousInitialData.current
+        const changed = previous.items !== initialItems || previous.total !== initialPage?.total || previous.limit !== initialPage?.limit
+        previousInitialData.current = { items: initialItems, total: initialPage?.total, limit: initialPage?.limit }
+        if (reloadOnParamsChange) {
+          if (changed && previousParamsKey.current === paramsKey) {
+            setState((current) => ({ ...current, page: { ...current.page, offset: 0 } }))
+            void loadOffset(0)
+          }
+          return
+        }
+        setState((current) => current.page.offset === 0
+          ? { items: initialItems, page: pageMeta(initialPage, fallbackLimit) }
+          : current)
+      }, [initialItems, initialPage?.total, initialPage?.limit, reloadOnParamsChange, paramsKey])
       React.useEffect(() => {
         if (!reloadOnParamsChange) {
           previousParamsKey.current = paramsKey
