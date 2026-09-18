@@ -1455,8 +1455,11 @@ describe('StrataGate Web client contract', () => {
     expect(statusSource).toContain('保存原始对话')
     expect(statusSource).toContain('压缩短期记忆块')
     expect(statusSource).toContain('提取长期记忆')
+    expect(statusSource).toContain('更新知识图谱')
+    expect(statusSource).toContain('const extractionJobs = item.jobs.filter')
+    expect(statusSource).toContain('const graphJobs = item.jobs.filter')
     expect(statusSource).toContain('等待短期摘要')
-    expect(statusSource).toContain('等待更多对话')
+    expect(statusSource).toContain('等待提取')
     expect(statusSource).toContain('查看技术详情')
     expect(statusSource).toContain('计划重试：')
     expect(statusSource).toContain('自动重试已停止')
@@ -1468,6 +1471,35 @@ describe('StrataGate Web client contract', () => {
     expect(statusSource).toContain('groups.map((group) =>')
     expect(statusSource).toContain('group.items.map((item) =>')
     expect(statusSource).not.toContain("h('dt', null, 'Block')")
+  })
+
+  it('keeps Event Extraction and Graph Projection separate in the status details', () => {
+    const { ProcessingStatus } = loadSupportHelpers()
+    const blockDetails = [{ id: 'blk-1', sourceId: 'blk-1', sequence: 1, title: '测试块', threadId: 'thread-1', turnRange: [1, 4], shouldExtract: true }]
+    const failedJob = (kind: string, id: string) => ({
+      id, kind, status: 'failed', state: 'terminal-failed', attempts: 3, nextRetryAt: null,
+      updatedAt: '2026-09-18T00:00:00.000Z', lastError: kind + ' failed', blockIds: ['blk-1'], blockDetails,
+    })
+    const rendered = JSON.stringify(ProcessingStatus({
+      overview: {
+        processingJobs: 0,
+        failedJobs: 2,
+        processingJobDetails: [],
+        failedJobDetails: [failedJob('event-extraction', 'extract-1'), failedJob('graph-projection', 'graph-1')],
+      },
+      blocks: [],
+      conversations: [{ id: 'thread-1', label: '测试对话' }],
+      namespace: 'dsh:project:test',
+      serverVersion: '0.2.73',
+      onBack: () => {},
+      refresh: async () => null,
+    }))
+    expect(rendered).toContain('提取长期记忆')
+    expect(rendered).toContain('更新知识图谱')
+    expect(rendered).toContain('"sg-process-stage-name"},"提取长期记忆"')
+    expect(rendered).toContain('"sg-process-stage-name"},"更新知识图谱"')
+    expect(rendered).toContain('长期记忆提取')
+    expect(rendered).toContain('知识图谱更新')
   })
 
   it('does not claim legacy background work is empty when the old server omits job details', () => {

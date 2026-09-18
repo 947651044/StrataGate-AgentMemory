@@ -2441,9 +2441,11 @@ window.__ModuleLoader__.load({
       }
       const itemStages = (item) => {
         const summaryJob = item.jobs.find((job) => job.kind === 'block-summary')
-        const longJobs = item.jobs.filter((job) => job.kind !== 'block-summary')
+        const extractionJobs = item.jobs.filter((job) => job.kind === 'event-extraction')
+        const graphJobs = item.jobs.filter((job) => job.kind === 'graph-projection')
         const summaryFailed = summaryJob && terminalFailedKeys.has(statusJobKey(summaryJob))
-        const longFailed = longJobs.some((job) => terminalFailedKeys.has(statusJobKey(job)))
+        const extractionFailed = extractionJobs.some((job) => terminalFailedKeys.has(statusJobKey(job)))
+        const graphFailed = graphJobs.some((job) => terminalFailedKeys.has(statusJobKey(job)))
         const shortStage = summaryFailed
           ? { kind: 'failed', mark: '!', label: '终态失败，可重试' }
             : summaryJob?.status === 'running'
@@ -2453,18 +2455,34 @@ window.__ModuleLoader__.load({
             : summaryJob
               ? { kind: 'waiting', mark: '○', label: '排队中' }
               : { kind: 'done', mark: '✓', label: '已完成' }
-        let longStage
-        if (longFailed) longStage = { kind: 'failed', mark: '!', label: '终态失败，可重试' }
-        else if (longJobs.some((job) => job.status === 'running')) longStage = { kind: 'processing', mark: '●', label: '处理中' }
-        else if (longJobs.some((job) => job.state === 'retryable')) longStage = { kind: 'processing', mark: '↻', label: '计划自动重试' }
-        else if (longJobs.length) longStage = { kind: 'waiting', mark: '○', label: '排队中' }
-        else if (shortStage.kind !== 'done') longStage = { kind: 'waiting', mark: '○', label: '等待短期摘要' }
-        else if (item.shouldExtract === false) longStage = { kind: 'skipped', mark: '–', label: '无需提炼' }
-        else longStage = { kind: 'waiting', mark: '○', label: '等待更多对话' }
+        const stageForJobs = (jobs, failed, emptyLabel) => {
+          if (failed) return { kind: 'failed', mark: '!', label: '终态失败，可重试' }
+          if (jobs.some((job) => job.status === 'running')) return { kind: 'processing', mark: '●', label: '处理中' }
+          if (jobs.some((job) => job.state === 'retryable')) return { kind: 'processing', mark: '↻', label: '计划自动重试' }
+          if (jobs.length) return { kind: 'waiting', mark: '○', label: '排队中' }
+          return { kind: 'waiting', mark: '○', label: emptyLabel }
+        }
+        const extractionStage = extractionFailed
+          ? stageForJobs(extractionJobs, true, '等待提取')
+          : extractionJobs.length
+            ? stageForJobs(extractionJobs, false, '等待提取')
+            : shortStage.kind !== 'done'
+              ? { kind: 'waiting', mark: '○', label: '等待短期摘要' }
+              : item.shouldExtract === false
+                ? { kind: 'skipped', mark: '–', label: '无需提取' }
+                : { kind: 'waiting', mark: '○', label: '等待提取' }
+        const graphStage = graphFailed
+          ? stageForJobs(graphJobs, true, '等待图谱更新')
+          : graphJobs.length
+            ? stageForJobs(graphJobs, false, '等待图谱更新')
+            : extractionStage.kind === 'failed' || extractionStage.kind === 'waiting' || extractionStage.kind === 'processing'
+              ? { kind: 'waiting', mark: '○', label: '等待长期记忆提取' }
+              : { kind: 'waiting', mark: '○', label: '等待图谱更新' }
         return [
           ['保存原始对话', { kind: 'done', mark: '✓', label: '已完成' }],
           ['压缩短期记忆块', shortStage],
-          ['提取长期记忆', longStage],
+          ['提取长期记忆', extractionStage],
+          ['更新知识图谱', graphStage],
         ]
       }
       const conversationLabel = (threadId) => {
