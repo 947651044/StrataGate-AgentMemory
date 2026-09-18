@@ -154,7 +154,7 @@ describe('SQLite persistence', () => {
     downgrade.prepare(`
       INSERT INTO messages (namespace, id, block_id, thread_id, position, role, content, created_at, tool_calls_json)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(options.namespace, 'msg_downgrade', block.id, block.thread_id, 99, 'user', '降级期间新增的星河消息', fixedNow().toISOString(), null);
+    `).run(options.namespace, 'msg_downgrade', block.id, block.thread_id, 99, 'user', '降级期间新增的星河消息 rawfts_deleted_unique', fixedNow().toISOString(), null);
     downgrade.prepare(
       'UPDATE raw_message_fts_state SET backfill_complete = 1 WHERE namespace = ?',
     ).run(options.namespace);
@@ -166,13 +166,30 @@ describe('SQLite persistence', () => {
     const targetBlock = loaded.blocks.find((candidate) => candidate.id === block.id)!;
     const removed = targetBlock.l5Raw.at(-1)!;
     targetBlock.l5Raw = targetBlock.l5Raw.filter(({ id }) => id !== removed.id);
+    const indexedBeforeDelete = new Database(filename, { readonly: true });
+    const removedRowId = indexedBeforeDelete.prepare(
+      'SELECT fts_rowid FROM raw_message_fts_meta WHERE namespace = ? AND message_id = ?',
+    ).pluck().get(options.namespace, removed.id) as number;
+    expect(removedRowId).toBeTypeOf('number');
+    expect(indexedBeforeDelete.prepare('SELECT rowid FROM raw_message_fts WHERE rowid = ?')
+      .pluck().get(removedRowId)).toBe(removedRowId);
+    indexedBeforeDelete.close();
     const storage = new SqliteStorage({ filename });
     await storage.save(options.namespace, loaded, healed.storageRevision, { upsert: [], deleteIds: [removed.id] });
     await storage.close();
     await healed.close();
 
     const cleaned = await StrataGate.open(options);
-    expect(cleaned.searchRawMemory(removed.content)).toEqual([]);
+    expect(cleaned.searchRawMemory('星河').some(({ message }) => message.id === removed.id)).toBe(false);
+    expect(cleaned.searchRawMemory('rawfts_deleted_unique')).toEqual([]);
+    const cleanedDatabase = new Database(filename, { readonly: true });
+    expect(cleanedDatabase.prepare(
+      'SELECT message_id FROM raw_message_fts_meta WHERE namespace = ? AND message_id = ?',
+    ).pluck().get(options.namespace, removed.id)).toBeUndefined();
+    expect(cleanedDatabase.prepare(
+      'SELECT rowid FROM raw_message_fts WHERE message_id = ?',
+    ).pluck().get(removed.id)).toBeUndefined();
+    cleanedDatabase.close();
     await cleaned.close();
   });
 
