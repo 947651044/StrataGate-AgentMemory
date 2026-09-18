@@ -299,6 +299,11 @@ describe('StrataGate admin routes', () => {
     expect(overview.body.namespaces[0]).toMatchObject({
       failedJobs: 1,
       processingJobs: 0,
+      taskStatus: {
+        blockSummary: { processing: 0, terminalFailed: 1 },
+        eventExtraction: { processing: 0, terminalFailed: 0 },
+        graphProjection: { processing: 0, terminalFailed: 0 },
+      },
       failedJobDetails: [{
         id: 'blk_1', kind: 'block-summary', attempts: 3,
         lastError: summaryFailure, lastErrorFull: summaryFailure,
@@ -355,6 +360,83 @@ describe('StrataGate admin routes', () => {
     } as unknown as StrataGateRuntime
     const extractionFailure = await request('/api/stratagate/memories?namespace=dsh%3Aproject%3Asummary&kind=blocks', 'GET', extractionFailureRuntime)
     expect(extractionFailure.body.items[0]).toMatchObject({ status: 'failed', processingStatus: 'pending', summaryJob: { status: 'succeeded' } })
+  })
+
+  it('ignores legacy Element projection jobs and separates terminal extraction and graph failures', async () => {
+    const legacyPending = Array.from({ length: 7 }, (_, index) => ({
+      id: 'element-legacy-' + index,
+      sourceEventIds: ['evt_1'],
+      status: 'pending' as const,
+      attempts: 0,
+      elementIds: [],
+      reason: 'legacy',
+      lastError: null,
+      createdAt: '2026-08-18T00:00:00.000Z',
+      updatedAt: '2026-08-18T00:00:00.000Z',
+    }))
+    const quiet = await request('/api/stratagate/overview', 'GET', {
+      adminNamespaces: async () => ['dsh:project:legacy'],
+      adminSnapshot: async () => ({
+        ...snapshot,
+        events: [],
+        graphNodes: [],
+        graphProjectionJobs: [],
+        summaryJobs: [],
+        extractionJobs: [],
+        elementProjectionJobs: legacyPending,
+      }),
+      adminWorkspaceName: () => 'Legacy workspace',
+    } as unknown as StrataGateRuntime)
+    expect(quiet.body.namespaces[0]).toMatchObject({
+      failedJobs: 0,
+      processingJobs: 0,
+      failedJobDetails: [],
+      processingJobDetails: [],
+      taskStatus: {
+        blockSummary: { processing: 0, terminalFailed: 0 },
+        eventExtraction: { processing: 0, terminalFailed: 0 },
+        graphProjection: { processing: 0, terminalFailed: 0 },
+      },
+      graphMigration: { projected: 0, total: 0, state: 'complete' },
+    })
+
+    const graphFailures = Array.from({ length: 8 }, (_, index) => ({
+      ...snapshot.graphProjectionJobs[0]!,
+      id: 'graph-terminal-' + index,
+      status: 'failed' as const,
+      attempts: 3,
+      nextRetryAt: null,
+      lastError: 'graph failure ' + index,
+      nodeIds: [],
+      edgeIds: [],
+    }))
+    const issue = await request('/api/stratagate/overview', 'GET', {
+      adminNamespaces: async () => ['dsh:project:issue-55'],
+      adminSnapshot: async () => ({
+        ...snapshot,
+        summaryJobs: [],
+        extractionJobs: [{
+          blockId: 'blk_1', status: 'failed' as const, attempts: 3,
+          lastError: 'event extraction failure', nextRetryAt: null,
+          updatedAt: '2026-08-18T00:02:00.000Z',
+        }],
+        graphProjectionJobs: graphFailures,
+        elementProjectionJobs: legacyPending,
+      }),
+      adminWorkspaceName: () => 'Issue 55 workspace',
+    } as unknown as StrataGateRuntime)
+    expect(issue.body.namespaces[0]).toMatchObject({
+      failedJobs: 9,
+      processingJobs: 0,
+      taskStatus: {
+        blockSummary: { terminalFailed: 0 },
+        eventExtraction: { terminalFailed: 1 },
+        graphProjection: { terminalFailed: 8 },
+      },
+      graphMigration: { state: 'failed', failed: 8, projected: 0, total: 1 },
+    })
+    expect(issue.body.namespaces[0].failedJobDetails).toHaveLength(9)
+    expect(issue.body.namespaces[0].failedJobDetails.every((job: any) => job.kind !== 'element-projection')).toBe(true)
   })
 
   it('rejects Block Summary retries while the job is not failed', async () => {
