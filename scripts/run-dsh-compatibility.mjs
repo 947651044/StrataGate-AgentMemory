@@ -31,7 +31,7 @@ try {
   run(npm, ['install', '--no-save', '--package-lock=false', `@deepseek-ai/dsh@${version}`], hostRoot)
   const dshRoot = join(hostRoot, 'node_modules')
   if (!existsSync(join(dshRoot, '@deepseek-ai', 'dsh'))) throw new Error(`DSH CLI ${version} was not installed`)
-  const env = { DSH_VERSION: version, NODE_PATH: dshRoot }
+  const env = { DSH_VERSION: version, DSH_ROOT: hostRoot, NODE_PATH: dshRoot }
   for (const script of ['check:dsh', 'test:dsh', 'build:dsh', 'verify:dsh']) {
     run(npm, ['run', script], packageRoot, env)
   }

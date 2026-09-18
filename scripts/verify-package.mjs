@@ -74,7 +74,7 @@ try {
     // resolve the package's optional peer dependencies against that CLI's
     // internal tree rather than the newest unrelated prerelease packages.
     run(['install', `@deepseek-ai/dsh@${dshVersion}`, '--ignore-scripts', '--package-lock=false'], installRoot)
-    const hostModules = join(packageRoot, 'node_modules')
+    const hostModules = join(process.env.DSH_ROOT || packageRoot, 'node_modules')
     const verifyModules = join(installRoot, 'node_modules')
     const hostManifest = JSON.parse(readFileSync(join(hostModules, '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))
     const dshPackages = Object.keys(hostManifest.dependencies ?? {}).filter((name) => name.startsWith('@deepseek-ai/'))
