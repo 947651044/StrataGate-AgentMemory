@@ -75,6 +75,7 @@ import type {
   GraphProjector,
   MemoryBlock,
   RawMessage,
+  RawSearchOptions,
   RawSearchHit,
   SearchOptions,
   ToolTrace,
@@ -239,6 +240,9 @@ export class StrataGate {
   private readonly successfulModelResponses: SuccessfulModelResponse[] = [];
   private readonly ingestionReceipts = new Map<string, IngestionReceipt>();
   private readonly externalMemoryImportJobs = new Map<string, ExternalMemoryImportJob>();
+  private readonly rawMessageLookup = new Map<string, { block: MemoryBlock; index: number; message: RawMessage }>();
+  private readonly pendingRawUpserts = new Map<string, RawMessage>();
+  private readonly pendingRawDeletes = new Set<string>();
   private currentTurn = 0;
   private storage: StorageAdapter | undefined;
   private namespace: string | undefined;
@@ -1201,6 +1205,7 @@ export class StrataGate {
         if (receipt.eventIds.length === 0 && receipt.elementIds.length === 0) this.usageReceipts.delete(receiptId);
       }
       this.blocks.splice(sourceIndex, 1);
+      this.markRawMessagesDeleted(sourceMessageIds);
       return {
         sourceBlockId: id,
         removedEventIds: [...importedEventIds],
@@ -1491,24 +1496,51 @@ export class StrataGate {
     return elementViewAt(element, at);
   }
 
-  searchRawMemory(query: string, limit = 6): RawSearchHit[] {
+  searchRawMemory(query: string, limit = 6, options: RawSearchOptions = {}): RawSearchHit[] {
     const tokens = searchTokens(query);
     if (tokens.length === 0) return [];
-    const hits: RawSearchHit[] = [];
-    for (const block of this.blocks) {
-      for (const [index, message] of block.l5Raw.entries()) {
-        const messageTokens = new Set(searchTokens(message.content));
-        if (!tokens.some((token) => messageTokens.has(token))) continue;
-        hits.push({
-          blockId: block.id,
-          turnRange: [block.startTurn, block.endTurn],
-          message,
-          nearby: block.l5Raw.slice(Math.max(0, index - 1), index + 2),
-        });
-        if (hits.length >= limit) return hits;
-      }
+    const boundedLimit = Math.max(1, Math.floor(limit));
+    let candidateIds: string[] | null | undefined;
+    try {
+      candidateIds = this.storage?.searchRawMessageIds?.(
+        this.namespace ?? '',
+        tokens,
+        Math.min(5_000, Math.max(100, boundedLimit * 20)),
+        options.threadId,
+        options.includeUnthreaded,
+      );
+    } catch {
+      candidateIds = null;
     }
-    return hits;
+    const candidates = candidateIds === null || candidateIds === undefined
+      ? this.blocks.flatMap((block) => block.l5Raw.map((message, index) => ({
+        id: message.id,
+        block,
+        index,
+        message,
+      }))).filter(({ message }) => options.threadId === undefined
+        || message.threadId === options.threadId
+        || (options.includeUnthreaded === true && message.threadId === undefined))
+      : [...new Set(candidateIds)].flatMap((id) => {
+        const item = this.rawMessageLookup.get(id);
+        if (!item) return [];
+        if (options.threadId !== undefined
+          && item.message.threadId !== options.threadId
+          && !(options.includeUnthreaded === true && item.message.threadId === undefined)) return [];
+        return [{ id, ...item }];
+      });
+    const ranked = bm25Rank(candidates, query, ({ message }) => searchTokens(message.content)).sort((left, right) =>
+      right.score - left.score
+      || right.item.message.createdAt.localeCompare(left.item.message.createdAt)
+      || right.item.block.sequence - left.item.block.sequence
+      || right.item.index - left.item.index
+      || left.item.id.localeCompare(right.item.id));
+    return ranked.slice(0, boundedLimit).map(({ item }) => ({
+      blockId: item.block.id,
+      turnRange: [item.block.startTurn, item.block.endTurn],
+      message: item.message,
+      nearby: item.block.l5Raw.slice(Math.max(0, item.index - 1), item.index + 2),
+    }));
   }
 
   /**
@@ -1699,6 +1731,8 @@ export class StrataGate {
       lastLiftedBy: null,
     };
     this.blocks.push(block);
+    this.indexRawBlock(block);
+    this.markRawMessagesForUpsert(block.l5Raw);
     return block;
   }
 
@@ -1875,6 +1909,32 @@ export class StrataGate {
     return job;
   }
 
+  private indexRawBlock(block: MemoryBlock): void {
+    for (const [index, message] of block.l5Raw.entries()) {
+      this.rawMessageLookup.set(message.id, { block, index, message });
+    }
+  }
+
+  private markRawMessagesForUpsert(messages: readonly RawMessage[]): void {
+    for (const message of messages) {
+      this.pendingRawDeletes.delete(message.id);
+      this.pendingRawUpserts.set(message.id, structuredClone(message));
+    }
+  }
+
+  private markRawMessagesDeleted(ids: ReadonlySet<string>): void {
+    for (const id of ids) {
+      this.pendingRawUpserts.delete(id);
+      this.pendingRawDeletes.add(id);
+      this.rawMessageLookup.delete(id);
+    }
+  }
+
+  private rebuildRawMessageLookup(): void {
+    this.rawMessageLookup.clear();
+    for (const block of this.blocks) this.indexRawBlock(block);
+  }
+
   private threadOpenTail(threadId: string | undefined): RawMessage[] {
     return this.openTail.filter((message) => message.threadId === threadId);
   }
@@ -1960,6 +2020,8 @@ export class StrataGate {
       const remaining = this.openTail.filter((message) => !sealedIds.has(message.id));
       this.openTail.splice(0, this.openTail.length, ...remaining);
       this.blocks.push(block);
+      this.indexRawBlock(block);
+      this.markRawMessagesForUpsert(block.l5Raw);
       const updatedAt = toUtc8Iso(this.now());
       this.summaryJobs.set(block.id, {
         blockId: block.id,
@@ -2212,6 +2274,8 @@ export class StrataGate {
 
     const before = this.exportSnapshot();
     const beforeRevision = this.revision;
+    const beforeRawUpserts = new Map(this.pendingRawUpserts);
+    const beforeRawDeletes = new Set(this.pendingRawDeletes);
     try {
       const result = await mutation();
       await this.persist();
@@ -2219,6 +2283,10 @@ export class StrataGate {
     } catch (error) {
       this.restoreSnapshot(before);
       this.revision = beforeRevision;
+      this.pendingRawUpserts.clear();
+      for (const [id, message] of beforeRawUpserts) this.pendingRawUpserts.set(id, message);
+      this.pendingRawDeletes.clear();
+      for (const id of beforeRawDeletes) this.pendingRawDeletes.add(id);
       throw error;
     } finally {
       release();
@@ -2227,7 +2295,13 @@ export class StrataGate {
 
   private async persist(): Promise<void> {
     if (!this.storage || !this.namespace) return;
-    this.revision = await this.storage.save(this.namespace, this.exportSnapshot(), this.revision);
+    const delta = {
+      upsert: [...this.pendingRawUpserts.values()],
+      deleteIds: [...this.pendingRawDeletes],
+    };
+    this.revision = await this.storage.save(this.namespace, this.exportSnapshot(), this.revision, delta);
+    this.pendingRawUpserts.clear();
+    this.pendingRawDeletes.clear();
   }
 
   private restoreSnapshot(snapshot: StrataGateSnapshot): void {
@@ -2240,6 +2314,9 @@ export class StrataGate {
     this.currentTurn = copy.currentTurn;
     this.openTail.splice(0, this.openTail.length, ...copy.openTail);
     this.blocks.splice(0, this.blocks.length, ...copy.blocks);
+    this.rebuildRawMessageLookup();
+    this.pendingRawUpserts.clear();
+    this.pendingRawDeletes.clear();
     this.summaryJobs.clear();
     for (const job of copy.summaryJobs) this.summaryJobs.set(job.blockId, job);
     this.events.splice(0, this.events.length, ...copy.events);

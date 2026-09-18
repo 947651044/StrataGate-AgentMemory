@@ -117,6 +117,89 @@ describe('SQLite persistence', () => {
     expect(() => new SqliteStorage({ filename: newerFilename })).toThrow('newer than supported');
   });
 
+  it('backfills, incrementally updates, self-heals, and cleans the raw FTS index', async () => {
+    const filename = await databasePath();
+    const options = {
+      database: filename,
+      namespace: 'raw:fts-lifecycle',
+      blockTurnSize: 1,
+      summarizer: nonExtractingSummarizer,
+      now: fixedNow,
+      idFactory: ids(),
+    };
+    const first = await StrataGate.open(options);
+    const initial = await first.appendTurn({ user: '星河项目由李明负责', assistant: '初始原文' });
+    expect(first.searchRawMemory('星河项目')).toHaveLength(1);
+    await first.close();
+
+    const beforeBackfill = new Database(filename);
+    beforeBackfill.exec('DROP TABLE raw_message_fts; DROP TABLE raw_message_fts_meta; DROP TABLE raw_message_fts_state;');
+    beforeBackfill.close();
+
+    const restored = await StrataGate.open(options);
+    expect(restored.searchRawMemory('李明')[0]?.message.id).toBe(initial.sealedBlock!.l5Raw[0]!.id);
+    await restored.appendTurn({ user: '新增消息：StrataGate raw index', assistant: '增量写入' });
+    await restored.close();
+
+    const afterIncrement = new Database(filename, { readonly: true });
+    expect(afterIncrement.prepare(
+      'SELECT COUNT(*) FROM raw_message_fts_meta WHERE namespace = ?',
+    ).pluck().get(options.namespace)).toBe(4);
+    afterIncrement.close();
+
+    const downgrade = new Database(filename);
+    const block = downgrade.prepare(
+      'SELECT id, thread_id FROM blocks WHERE namespace = ? ORDER BY sequence DESC LIMIT 1',
+    ).get(options.namespace) as { id: string; thread_id: string | null };
+    downgrade.prepare(`
+      INSERT INTO messages (namespace, id, block_id, thread_id, position, role, content, created_at, tool_calls_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(options.namespace, 'msg_downgrade', block.id, block.thread_id, 99, 'user', '降级期间新增的星河消息', fixedNow().toISOString(), null);
+    downgrade.prepare(
+      'UPDATE raw_message_fts_state SET backfill_complete = 1 WHERE namespace = ?',
+    ).run(options.namespace);
+    downgrade.close();
+
+    const healed = await StrataGate.open(options);
+    expect(healed.searchRawMemory('降级期间新增')[0]?.message.id).toBe('msg_downgrade');
+    const loaded = healed.exportSnapshot();
+    const targetBlock = loaded.blocks.find((candidate) => candidate.id === block.id)!;
+    const removed = targetBlock.l5Raw.at(-1)!;
+    targetBlock.l5Raw = targetBlock.l5Raw.filter(({ id }) => id !== removed.id);
+    const storage = new SqliteStorage({ filename });
+    await storage.save(options.namespace, loaded, healed.storageRevision, { upsert: [], deleteIds: [removed.id] });
+    await storage.close();
+    await healed.close();
+
+    const cleaned = await StrataGate.open(options);
+    expect(cleaned.searchRawMemory(removed.content)).toEqual([]);
+    await cleaned.close();
+  });
+
+  it('filters session scope before the SQLite candidate limit and falls back when FTS is unavailable', async () => {
+    const filename = await databasePath();
+    const memory = await StrataGate.open({
+      database: filename,
+      namespace: 'raw:scope',
+      blockTurnSize: 1,
+      summarizer: nonExtractingSummarizer,
+      now: fixedNow,
+      idFactory: ids(),
+    });
+    for (let index = 0; index < 120; index += 1) {
+      await memory.appendTurn({ user: `共同关键词 other ${index}`, assistant: 'other', threadId: 'other' });
+    }
+    await memory.appendTurn({ user: '共同关键词 current session target', assistant: 'current', threadId: 'current' });
+    const scoped = memory.searchRawMemory('共同关键词 current', 1, { threadId: 'current' });
+    expect(scoped[0]?.message.threadId).toBe('current');
+
+    const storage = (memory as unknown as { storage: { rawSearchFtsAvailable: boolean } }).storage;
+    storage.rawSearchFtsAvailable = false;
+    const fallback = memory.searchRawMemory('共同关键词 current', 1, { threadId: 'current' });
+    expect(fallback[0]?.message.threadId).toBe('current');
+    await memory.close();
+  }, 30_000);
+
   it('persists the source Block endTurn rather than a delayed creation turn', async () => {
     const filename = await databasePath();
     const options = { database: filename, namespace: 'formed-turn', blockTurnSize: 1,

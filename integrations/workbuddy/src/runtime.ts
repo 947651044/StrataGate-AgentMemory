@@ -228,8 +228,9 @@ export class WorkBuddyRuntime {
 
   async searchRaw(query: string, sessionId = sessionIdFallback(), limit?: number, scope: BlockQueryScope = 'namespace'): Promise<BatchResult> {
     const items = await this.withMemory(async (memory) => {
-      const archived: EvidenceItem[] = memory.searchRawMemory(query, scope === 'namespace' ? limit : Number.MAX_SAFE_INTEGER)
-        .filter((result) => scope === 'namespace' || result.message.threadId === sessionId)
+      const archived: EvidenceItem[] = memory.searchRawMemory(query, limit, scope === 'namespace'
+        ? {}
+        : { threadId: sessionId })
         .map((result) => ({
         ref: `raw:${result.blockId}:${result.message.id}`,
         kind: 'raw',

@@ -439,8 +439,9 @@ export class StrataGateRuntime {
     await this.flush()
     const memory = await this.space(session)
     const threadId = String(session.id)
-    const results = memory.searchRawMemory(query, scope === 'namespace' ? limit : Number.MAX_SAFE_INTEGER)
-      .filter((result) => scope === 'namespace' || result.message.threadId === threadId || result.message.threadId === undefined)
+    const results = memory.searchRawMemory(query, limit, scope === 'namespace'
+      ? {}
+      : { threadId, includeUnthreaded: true })
       .slice(0, limit)
     const blockTitles = new Map(memory.listBlocks().map((block) => [block.id, blockCitationTitle(block)]))
     return this.batch(session, results.map((result, index) => ({

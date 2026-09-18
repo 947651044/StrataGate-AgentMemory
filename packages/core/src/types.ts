@@ -496,6 +496,13 @@ export interface RawSearchHit {
   nearby: RawMessage[];
 }
 
+export interface RawSearchOptions {
+  /** Limit raw-message candidates to one conversation thread. */
+  threadId?: string;
+  /** Preserve the legacy session behavior that includes namespace-level messages. */
+  includeUnthreaded?: boolean;
+}
+
 export interface AppendTurnResult {
   sealedBlock: MemoryBlock | null;
   readyBlocks: MemoryBlock[];
