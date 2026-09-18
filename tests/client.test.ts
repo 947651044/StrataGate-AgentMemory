@@ -984,6 +984,93 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain("kind: 'blocks', initialItems: blocks, initialPage: blockPage, fallbackLimit: 40")
   })
 
+  it('resets Event pagination when timeline search parameters change or clear', async () => {
+    const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
+    const instrumented = source.replace(
+      "    exports.name = 'stratagate-dsh'",
+      "    exports.__test = { usePagedMemory }; exports.name = 'stratagate-dsh'",
+    )
+    const slots: any[] = []
+    const effectDependencies: any[][] = []
+    let cursor = 0
+    let pendingEffects: Array<() => unknown> = []
+    const React = {
+      createContext: (value: unknown) => ({ Provider: 'provider', value }),
+      createElement: (...args: unknown[]) => args,
+      Fragment: 'fragment',
+      useState: (initial: unknown) => {
+        const index = cursor++
+        if (!(index in slots)) slots[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+        return [slots[index], (next: unknown) => { slots[index] = typeof next === 'function' ? (next as (value: unknown) => unknown)(slots[index]) : next }]
+      },
+      useRef: (initial: unknown) => {
+        const index = cursor++
+        if (!(index in slots)) slots[index] = { current: initial }
+        return slots[index]
+      },
+      useEffect: (effect: () => unknown, dependencies: any[]) => {
+        const index = cursor++
+        const previous = effectDependencies[index]
+        const changed = !previous || dependencies.some((value, dependencyIndex) => value !== previous[dependencyIndex])
+        effectDependencies[index] = dependencies
+        if (changed) pendingEffects.push(effect)
+      },
+    }
+    const requests: string[] = []
+    let definition: any
+    runInNewContext(instrumented, {
+      URLSearchParams,
+      fetch: async (url: string) => {
+        requests.push(String(url))
+        const parsed = new URL(String(url), 'http://localhost')
+        return {
+          ok: true,
+          json: async () => ({ items: [], total: 100, offset: Number(parsed.searchParams.get('offset')), limit: 40 }),
+        }
+      },
+      window: { setTimeout, clearTimeout, __ModuleLoader__: { load: (value: unknown) => { definition = value } } },
+    })
+    const plugin = definition.factory((name: string) => {
+      if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
+      return React
+    })
+    let initialItems: unknown[] = []
+    const initialPage = { total: 100, offset: 0, limit: 40 }
+    const render = (extraParams: Record<string, string>) => {
+      cursor = 0
+      pendingEffects = []
+      const result = plugin.__test.usePagedMemory({
+        namespace: 'timeline', kind: 'events', initialItems, initialPage, fallbackLimit: 40,
+        extraParams, reloadOnParamsChange: true,
+      })
+      const effects = pendingEffects
+      pendingEffects = []
+      effects.forEach((effect) => effect())
+      return result
+    }
+
+    const first = render({ timeline: 'true' })
+    await first.loadOffset(40)
+    expect(new URL(requests.at(-1)!, 'http://localhost').searchParams.get('offset')).toBe('40')
+
+    render({ timeline: 'true', q: 'Needle Event' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    let latest = new URL(requests.at(-1)!, 'http://localhost')
+    expect(latest.searchParams.get('offset')).toBe('0')
+    expect(latest.searchParams.get('q')).toBe('Needle Event')
+
+    initialItems = [{ id: 'dashboard-refresh' }]
+    render({ timeline: 'true', q: 'Needle Event' })
+    const afterRefresh = render({ timeline: 'true', q: 'Needle Event' })
+    expect(afterRefresh.items).toEqual([])
+
+    render({ timeline: 'true' })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    latest = new URL(requests.at(-1)!, 'http://localhost')
+    expect(latest.searchParams.get('offset')).toBe('0')
+    expect(latest.searchParams.has('q')).toBe(false)
+  })
+
   it('sizes graph nodes by stable long-term importance without conflating selection', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
     expect(source).toContain('function graphNodeImportance(nodes, edges, project)')

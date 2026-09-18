@@ -1203,32 +1203,50 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function usePagedMemory({ namespace, kind, initialItems, initialPage, fallbackLimit, extraParams = {} }) {
-      const key = namespace + '\u0000' + kind + '\u0000' + JSON.stringify(extraParams)
+    function usePagedMemory({ namespace, kind, initialItems, initialPage, fallbackLimit, extraParams = {}, reloadOnParamsChange = false }) {
+      const key = namespace + '\u0000' + kind
+      const paramsKey = JSON.stringify(extraParams)
       const [state, setState] = React.useState(() => ({ items: initialItems, page: pageMeta(initialPage, fallbackLimit) }))
       const [loading, setLoading] = React.useState(false)
       const [error, setError] = React.useState('')
+      const requestVersion = React.useRef(0)
+      const previousParamsKey = React.useRef(paramsKey)
       React.useEffect(() => {
+        requestVersion.current += 1
         setState({ items: initialItems, page: pageMeta(initialPage, fallbackLimit) })
         setError('')
       }, [key])
       React.useEffect(() => {
+        if (reloadOnParamsChange) return
         setState((current) => current.page.offset === 0
           ? { items: initialItems, page: pageMeta(initialPage, fallbackLimit) }
           : current)
-      }, [initialItems, initialPage?.total, initialPage?.limit])
+      }, [initialItems, initialPage?.total, initialPage?.limit, reloadOnParamsChange])
       const loadOffset = (offset) => {
+        const version = ++requestVersion.current
         setLoading(true)
         setError('')
         const path = kind === 'audit' ? 'audit' : 'memories'
         const params = { namespace, offset, limit: state.page.limit, ...extraParams }
         if (kind !== 'audit') params.kind = kind
         return api(path, params).then((result) => {
+          if (version !== requestVersion.current) return
           setState({ items: result.items || [], page: pageMeta(result, state.page.limit) })
         }).catch((reason) => {
+          if (version !== requestVersion.current) return
           setError(String(reason?.message || reason))
-        }).finally(() => setLoading(false))
+        }).finally(() => { if (version === requestVersion.current) setLoading(false) })
       }
+      React.useEffect(() => {
+        if (!reloadOnParamsChange) {
+          previousParamsKey.current = paramsKey
+          return
+        }
+        if (previousParamsKey.current === paramsKey) return
+        previousParamsKey.current = paramsKey
+        setState((current) => ({ items: [], page: { ...current.page, total: 0, offset: 0 } }))
+        void loadOffset(0)
+      }, [paramsKey, reloadOnParamsChange])
       return { ...state, loading, error, loadOffset }
     }
 
@@ -1362,6 +1380,15 @@ window.__ModuleLoader__.load({
 
     function SearchBox({ value, onChange }) {
       return h('div', { className: 'sg-search' }, h('span', { className: 'sg-search-mark', 'aria-hidden': 'true' }, '⌕'), h('input', { value, onChange: (event) => onChange(event.target.value), placeholder: '搜索记忆、人物、项目、概念…', 'aria-label': '搜索长期记忆' }))
+    }
+
+    function useDebouncedValue(value, delay = 250) {
+      const [debounced, setDebounced] = React.useState(value)
+      React.useEffect(() => {
+        const timer = window.setTimeout(() => setDebounced(value), delay)
+        return () => window.clearTimeout(timer)
+      }, [value, delay])
+      return debounced
     }
 
     const NODE_META = {
@@ -1918,7 +1945,7 @@ window.__ModuleLoader__.load({
         h('button', { className: 'sg-source-button', onClick: () => openSource(event) }, '查看来源与证据 →')))
     }
 
-    function TimelineList({ events, nodes, query, filters, onSelect, selectedId, floating = false, onNode, openSource }) {
+    function TimelineList({ events, nodes, onSelect, selectedId, floating = false, onNode, openSource }) {
       const [preview, setPreview] = React.useState(null)
       const pinnedId = React.useRef('')
       const hideTimer = React.useRef(null)
@@ -1940,14 +1967,9 @@ window.__ModuleLoader__.load({
         hideTimer.current = window.setTimeout(() => setPreview(null), 140)
       }
       React.useEffect(() => () => cancelHide(), [])
-      const normalized = query.trim().toLocaleLowerCase(); const now = new Date(); const weekAgo = now.getTime() - 7 * 86400000
+      const now = new Date(); const weekAgo = now.getTime() - 7 * 86400000
       const groups = { '今天': [], '本周': [], '更早': [] }
-      events.filter((event) => event.status !== 'forgotten' && event.status !== 'archived')
-        .filter((event) => !normalized || JSON.stringify(event).toLocaleLowerCase().includes(normalized))
-        .filter((event) => !filters.type || event.temporal?.eventType === filters.type)
-        .filter((event) => !filters.status || event.temporal?.status === filters.status)
-        .filter((event) => !filters.node || (event.temporal?.participantNodeIds || []).includes(filters.node))
-        .filter((event) => { const info = eventOccurrence(event); const time = Date.parse(info.value); return !filters.time || (filters.time === 'unknown' ? !info.known : filters.time === 'today' ? Number.isFinite(time) && new Date(time).toDateString() === now.toDateString() : filters.time === 'week' ? time >= weekAgo : true) })
+      events.slice()
         .sort((a, b) => String(eventOccurrence(b).value).localeCompare(String(eventOccurrence(a).value)))
         .forEach((event) => { const info = eventOccurrence(event); const time = Date.parse(info.value); const sameDay = Number.isFinite(time) && new Date(time).toDateString() === now.toDateString(); groups[sameDay ? '今天' : time >= weekAgo ? '本周' : '更早'].push(event) })
       const nodeMap = new Map(nodes.map((node) => [node.id, node]))
@@ -1972,7 +1994,16 @@ window.__ModuleLoader__.load({
       const [nodeTag, setNodeTag] = React.useState('')
       const [filtersOpen, setFiltersOpen] = React.useState(false)
       const [fullScreen, setFullScreen] = React.useState(false)
-      const pagedEvents = usePagedMemory({ namespace, kind: 'events', initialItems: events, initialPage: eventPage, fallbackLimit: 40 })
+      const debouncedQuery = useDebouncedValue(query)
+      const timelineParams = mode === 'timeline' ? {
+        timeline: 'true',
+        ...(debouncedQuery.trim() ? { q: debouncedQuery.trim() } : {}),
+        ...(eventFilters.time ? { time: eventFilters.time } : {}),
+        ...(eventFilters.node ? { participant: eventFilters.node } : {}),
+        ...(eventFilters.type ? { eventType: eventFilters.type } : {}),
+        ...(eventFilters.status ? { eventStatus: eventFilters.status } : {}),
+      } : {}
+      const pagedEvents = usePagedMemory({ namespace, kind: 'events', initialItems: events, initialPage: eventPage, fallbackLimit: 40, extraParams: timelineParams, reloadOnParamsChange: mode === 'timeline' })
       const timelineEvents = pagedEvents.items
       const nodes = graph.nodes || []; const edges = graph.edges || []; const clusters = graph.clusters || []; const normalized = query.trim().toLocaleLowerCase()
       const nodeImportance = React.useMemo(() => graphNodeImportance(nodes, edges, project), [nodes, edges, project])
@@ -2037,7 +2068,7 @@ window.__ModuleLoader__.load({
             fullScreen ? h(NodeDetailPanel, { node: nodes.find((node) => node.id === selectedNodeId), nodes, edges, events, onEvent: selectEvent }) : null)
           : h(React.Fragment, null,
             h('div', { className: 'sg-long-layout ' + (fullScreen ? 'sg-timeline-layout' : 'sg-summary-layout') },
-              h(TimelineList, { events: timelineEvents, nodes, query, filters: eventFilters, onSelect: setSelectedEventId, selectedId: selectedEventId, floating: !fullScreen, onNode: selectNode, openSource: openEvent }),
+              h(TimelineList, { events: timelineEvents, nodes, onSelect: setSelectedEventId, selectedId: selectedEventId, floating: !fullScreen, onNode: selectNode, openSource: openEvent }),
               fullScreen ? h(EventDetailPanel, { event: timelineEvents.find((event) => event.id === selectedEventId), nodes, events: timelineEvents, onNode: selectNode, openSource: openEvent }) : null),
             h(Pagination, { page: pagedEvents.page, loading: pagedEvents.loading, error: pagedEvents.error, onOffset: pagedEvents.loadOffset })))
     }
