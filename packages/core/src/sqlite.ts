@@ -11,6 +11,7 @@ import {
   type GraphProjectionJob,
   type IngestionReceipt,
   type LoadedStrataGateState,
+  type RawMessageIndexDelta,
   type SuccessfulModelResponse,
   type StorageAdapter,
   type StrataGateSnapshot,
@@ -38,6 +39,7 @@ import type {
 } from './types.js';
 import { nowUtc8 } from './time.js';
 import { normalizeStandardEventType } from './events.js';
+import { searchTokens } from './search.js';
 
 export interface SqliteStorageOptions {
   filename: string;
@@ -226,6 +228,12 @@ interface GraphStateRow {
   nodes_json: string;
   edges_json: string;
   jobs_json: string;
+}
+
+interface RawSearchIndexRow {
+  message_id: string;
+  tokens: string;
+  fts_rowid: number;
 }
 
 const SCHEMA = `
@@ -466,6 +474,30 @@ CREATE TABLE IF NOT EXISTS external_memory_import_jobs (
   PRIMARY KEY (namespace, id),
   FOREIGN KEY (namespace) REFERENCES memory_spaces(namespace) ON DELETE CASCADE
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS raw_message_fts_meta (
+  namespace TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  tokens TEXT NOT NULL,
+  fts_rowid INTEGER NOT NULL,
+  PRIMARY KEY (namespace, message_id),
+  FOREIGN KEY (namespace, message_id) REFERENCES messages(namespace, id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS raw_message_fts_state (
+  namespace TEXT PRIMARY KEY,
+  backfill_complete INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (namespace) REFERENCES memory_spaces(namespace) ON DELETE CASCADE
+) STRICT;
+`;
+
+const RAW_MESSAGE_FTS_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS raw_message_fts USING fts5(
+  namespace UNINDEXED,
+  message_id UNINDEXED,
+  tokens,
+  tokenize = 'unicode61'
+);
 `;
 
 const THREAD_INDEXES = `
@@ -487,8 +519,17 @@ function nonEmptyNamespace(namespace: string): string {
   return normalized;
 }
 
+function encodeRawSearchToken(token: string): string {
+  return `t${Buffer.from(token, 'utf8').toString('hex')}`;
+}
+
+function encodedRawSearchTokens(content: string): string {
+  return searchTokens(content).map(encodeRawSearchToken).join(' ');
+}
+
 export class SqliteStorage implements StorageAdapter {
   private readonly database: DatabaseSync;
+  private rawSearchFtsAvailable = false;
   private closed = false;
 
   constructor(options: SqliteStorageOptions) {
@@ -800,14 +841,19 @@ export class SqliteStorage implements StorageAdapter {
     return { snapshot: cloneSnapshot(normalizeSnapshot(snapshot)), revision: space.revision };
   }
 
-  async save(namespace: string, snapshot: StrataGateSnapshot, expectedRevision: number): Promise<number> {
+  async save(
+    namespace: string,
+    snapshot: StrataGateSnapshot,
+    expectedRevision: number,
+    rawMessageIndexDelta?: RawMessageIndexDelta,
+  ): Promise<number> {
     this.assertOpen();
     assertValidSnapshot(snapshot);
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
       throw new TypeError('expectedRevision must be a non-negative integer');
     }
     const key = nonEmptyNamespace(namespace);
-    return this.immediateTransaction(() => this.persistSnapshot(key, snapshot, expectedRevision));
+    return this.immediateTransaction(() => this.persistSnapshot(key, snapshot, expectedRevision, rawMessageIndexDelta));
   }
 
   async close(): Promise<void> {
@@ -816,7 +862,47 @@ export class SqliteStorage implements StorageAdapter {
     this.closed = true;
   }
 
-  private persistSnapshot(namespace: string, snapshot: StrataGateSnapshot, expectedRevision: number): number {
+  searchRawMessageIds(
+    namespace: string,
+    tokens: readonly string[],
+    limit: number,
+    threadId?: string,
+    includeUnthreaded = false,
+  ): string[] | null {
+    this.assertOpen();
+    if (!this.rawSearchFtsAvailable || tokens.length === 0) return null;
+    const key = nonEmptyNamespace(namespace);
+    const boundedLimit = Math.max(1, Math.min(5_000, Math.floor(limit)));
+    const match = tokens.map(encodeRawSearchToken).filter(Boolean).map((token) => `"${token}"`).join(' OR ');
+    if (!match) return [];
+    try {
+      const rows = this.database.prepare(`
+        SELECT f.message_id
+        FROM raw_message_fts AS f
+        INNER JOIN messages AS m
+          ON m.namespace = f.namespace AND m.id = f.message_id
+        WHERE raw_message_fts MATCH ?
+          AND f.namespace = ?
+          ${threadId === undefined ? '' : includeUnthreaded ? 'AND (m.thread_id = ? OR m.thread_id IS NULL)' : 'AND m.thread_id = ?'}
+        ORDER BY rank
+        LIMIT ?
+      `).all(...(threadId === undefined
+        ? [match, key, boundedLimit]
+        : [match, key, threadId, boundedLimit])) as unknown as Array<{ message_id: string }>;
+      return rows.map(({ message_id }) => message_id);
+    } catch {
+      // A damaged or unavailable FTS module must never make raw search fail.
+      this.rawSearchFtsAvailable = false;
+      return null;
+    }
+  }
+
+  private persistSnapshot(
+    namespace: string,
+    snapshot: StrataGateSnapshot,
+    expectedRevision: number,
+    rawMessageIndexDelta?: RawMessageIndexDelta,
+  ): number {
     const current = this.database.prepare('SELECT revision FROM memory_spaces WHERE namespace = ?')
       .get(namespace) as { revision: number } | undefined;
     const actualRevision = current?.revision ?? null;
@@ -939,6 +1025,14 @@ export class SqliteStorage implements StorageAdapter {
     };
     insertMessages(snapshot.openTail, null);
     for (const block of snapshot.blocks) insertMessages(block.l5Raw, block.id);
+    this.syncRawSearchIndex(namespace, rawMessageIndexDelta ?? {
+      upsert: snapshot.blocks.flatMap(({ l5Raw }) => l5Raw),
+      deleteIds: [],
+    });
+    if (rawMessageIndexDelta) {
+      const deleteMessage = this.database.prepare('DELETE FROM messages WHERE namespace = ? AND id = ?');
+      for (const messageId of rawMessageIndexDelta.deleteIds) deleteMessage.run(namespace, messageId);
+    }
 
     const insertEvent = this.database.prepare(`
       INSERT INTO events (
@@ -1225,6 +1319,7 @@ export class SqliteStorage implements StorageAdapter {
       this.immediateTransaction(() => {
         this.database.exec(SCHEMA);
         this.database.exec(THREAD_INDEXES);
+        this.enableRawSearchFts();
         this.database.exec(`PRAGMA user_version = ${STRATAGATE_STORAGE_SCHEMA_VERSION}`);
       });
     } else if (version >= 1 && version < STRATAGATE_STORAGE_SCHEMA_VERSION) {
@@ -1292,6 +1387,7 @@ export class SqliteStorage implements StorageAdapter {
           this.database.exec('ALTER TABLE messages ADD COLUMN thread_id TEXT');
         }
         this.database.exec(THREAD_INDEXES);
+        this.enableRawSearchFts();
         this.database.prepare('UPDATE memory_spaces SET schema_version = ? WHERE schema_version < ?')
           .run(STRATAGATE_STORAGE_SCHEMA_VERSION, STRATAGATE_STORAGE_SCHEMA_VERSION);
         this.database.exec(`PRAGMA user_version = ${STRATAGATE_STORAGE_SCHEMA_VERSION}`);
@@ -1299,8 +1395,93 @@ export class SqliteStorage implements StorageAdapter {
     } else if (version === STRATAGATE_STORAGE_SCHEMA_VERSION) {
       this.database.exec(SCHEMA);
       this.database.exec(THREAD_INDEXES);
+      this.enableRawSearchFts();
     }
     this.assertSchemaVersion();
+  }
+
+  private enableRawSearchFts(): void {
+    try {
+      this.database.exec(RAW_MESSAGE_FTS_SCHEMA);
+      this.rawSearchFtsAvailable = true;
+      const namespaces = this.database.prepare('SELECT namespace FROM memory_spaces').all() as Array<{ namespace: string }>;
+      for (const { namespace } of namespaces) {
+        const state = this.database.prepare(
+          'SELECT backfill_complete FROM raw_message_fts_state WHERE namespace = ?',
+        ).get(namespace) as { backfill_complete?: number } | undefined;
+        const messageCount = this.database.prepare(
+          'SELECT COUNT(*) AS count FROM messages WHERE namespace = ? AND block_id IS NOT NULL',
+        ).get(namespace) as { count: number };
+        const indexedCount = this.database.prepare(
+          'SELECT COUNT(*) AS count FROM raw_message_fts_meta WHERE namespace = ?',
+        ).get(namespace) as { count: number };
+        if (state?.backfill_complete === 1 && messageCount.count === indexedCount.count) continue;
+        const messages = state?.backfill_complete === 1
+          ? this.database.prepare(`
+            SELECT m.id, m.content
+            FROM messages AS m
+            LEFT JOIN raw_message_fts_meta AS i
+              ON i.namespace = m.namespace AND i.message_id = m.id
+            WHERE m.namespace = ? AND m.block_id IS NOT NULL AND i.message_id IS NULL
+          `).all(namespace) as Array<{ id: string; content: string }>
+          : this.database.prepare(
+            'SELECT id, content FROM messages WHERE namespace = ? AND block_id IS NOT NULL',
+          ).all(namespace) as Array<{ id: string; content: string }>;
+        this.syncRawSearchIndex(namespace, { upsert: messages, deleteIds: [] });
+        this.database.prepare(`
+          INSERT INTO raw_message_fts_state (namespace, backfill_complete)
+          VALUES (?, 1)
+          ON CONFLICT (namespace) DO UPDATE SET backfill_complete = 1
+        `).run(namespace);
+      }
+    } catch {
+      // FTS5 is optional across the supported SQLite runtimes. The caller
+      // will continue with exhaustive BM25 when it is unavailable.
+      this.rawSearchFtsAvailable = false;
+    }
+  }
+
+  private syncRawSearchIndex(namespace: string, delta: RawMessageIndexDelta): void {
+    if (!this.rawSearchFtsAvailable) return;
+    const findMeta = this.database.prepare(`
+      SELECT message_id, tokens, fts_rowid
+      FROM raw_message_fts_meta WHERE namespace = ? AND message_id = ?
+    `);
+    const deleteFts = this.database.prepare('DELETE FROM raw_message_fts WHERE rowid = ?');
+    const deleteMeta = this.database.prepare('DELETE FROM raw_message_fts_meta WHERE namespace = ? AND message_id = ?');
+    for (const messageId of delta.deleteIds) {
+      const row = findMeta.get(namespace, messageId) as RawSearchIndexRow | undefined;
+      if (!row) continue;
+      deleteFts.run(row.fts_rowid);
+      deleteMeta.run(namespace, messageId);
+    }
+    const insertFts = this.database.prepare(
+      'INSERT INTO raw_message_fts (namespace, message_id, tokens) VALUES (?, ?, ?)',
+    );
+    const insertMeta = this.database.prepare(`
+      INSERT INTO raw_message_fts_meta (namespace, message_id, tokens, fts_rowid)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (namespace, message_id) DO UPDATE SET tokens = excluded.tokens, fts_rowid = excluded.fts_rowid
+    `);
+    for (const message of delta.upsert) {
+      const messageId = message.id;
+      const tokens = encodedRawSearchTokens(message.content);
+      const previous = findMeta.get(namespace, messageId) as RawSearchIndexRow | undefined;
+      if (previous?.tokens === tokens) continue;
+      if (previous) deleteFts.run(previous.fts_rowid);
+      if (!tokens) {
+        if (previous) deleteMeta.run(namespace, messageId);
+        continue;
+      }
+      insertFts.run(namespace, messageId, tokens);
+      const row = this.database.prepare('SELECT last_insert_rowid() AS rowid').get() as { rowid: number };
+      insertMeta.run(namespace, messageId, tokens, row.rowid);
+    }
+    this.database.prepare(`
+      INSERT INTO raw_message_fts_state (namespace, backfill_complete)
+      VALUES (?, 1)
+      ON CONFLICT (namespace) DO UPDATE SET backfill_complete = 1
+    `).run(namespace);
   }
 
   private assertSchemaVersion(): void {
