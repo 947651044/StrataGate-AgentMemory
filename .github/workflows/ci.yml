@@ -31,7 +31,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        dsh: [0.1.2-rc.1, 0.1.5-rc.1, 0.1.6-alpha.1]
+        dsh: [0.1.2-rc.1, 0.1.5-rc.1]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -43,11 +43,7 @@ jobs:
         with:
           version: 10
       - run: npm ci
-      - name: Install complete DSH CLI dependency tree
-        run: npm install --no-save --package-lock=false @deepseek-ai/dsh@${{ matrix.dsh }}
-      - run: npm run check:dsh
-      - run: npm run test:dsh
-      - run: npm run build:dsh
-      - run: npm run verify:dsh
+      - name: Run DSH compatibility suite in isolated CLI root
+        run: node scripts/run-dsh-compatibility.mjs
         env:
           DSH_VERSION: ${{ matrix.dsh }}

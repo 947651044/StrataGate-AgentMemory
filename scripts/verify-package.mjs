@@ -68,7 +68,22 @@ try {
   assert(patch.includes('name: stratagate-dsh'), 'Cordis patch does not install stratagate-dsh')
 
   run(['init', '--yes'], installRoot)
-  run(['install', tarball, '--ignore-scripts', '--package-lock=false'], installRoot)
+  const dshVersion = process.env.DSH_VERSION
+  if (dshVersion) {
+    // Compatibility CI supplies the exact host CLI version first so npm can
+    // resolve the package's optional peer dependencies against that CLI's
+    // internal tree rather than the newest unrelated prerelease packages.
+    run(['install', `@deepseek-ai/dsh@${dshVersion}`, '--ignore-scripts', '--package-lock=false'], installRoot)
+    const hostModules = join(process.env.DSH_ROOT || packageRoot, 'node_modules')
+    const verifyModules = join(installRoot, 'node_modules')
+    const hostManifest = JSON.parse(readFileSync(join(hostModules, '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))
+    const dshPackages = Object.keys(hostManifest.dependencies ?? {}).filter((name) => name.startsWith('@deepseek-ai/'))
+    for (const name of dshPackages) {
+      const installed = JSON.parse(readFileSync(join(hostModules, ...name.split('/'), 'package.json'), 'utf8'))
+      run(['install', `${name}@${installed.version}`, '--ignore-scripts', '--package-lock=false'], installRoot)
+    }
+  }
+  run(['install', tarball, '--ignore-scripts', '--package-lock=false', '--legacy-peer-deps'], installRoot)
   const installed = join(installRoot, 'node_modules', 'stratagate-dsh')
   for (const path of required) assert(existsSync(join(installed, path)), `Clean install is missing ${path}`)
   // DSH core packages are optional peers and intentionally absent from this

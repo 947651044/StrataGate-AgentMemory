@@ -884,19 +884,43 @@ async function memories(runtime: StrataGateRuntime, url: URL): Promise<unknown> 
   const offset = numeric(url.searchParams.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER)
   const limit = numeric(url.searchParams.get('limit'), 100, 1, 200)
   let values: unknown[]
-  if (kind === 'events') values = [...snapshot.events].sort((left, right) => {
-    const time = (event: EventCard): string => event.temporal.happenedStart ?? event.temporal.happenedEnd
-      ?? event.temporal.mentionedAt ?? event.createdAt
-    return time(right).localeCompare(time(left))
-  }).map((event) => ({
-    ...(eventSummary(event, snapshot) as object),
-    relatedNodes: snapshot.graphNodes
-      .filter(({ id }) => (event.temporal.participantNodeIds ?? []).includes(id))
-      .map(({ id, name, type, aliases }) => ({ id, name, type, aliases })),
-    relatedElements: snapshot.elements
-      .filter(({ sourceEventIds }) => sourceEventIds.includes(event.id))
-      .map(({ id, name }) => ({ id, name })),
-  }))
+  if (kind === 'events') {
+    const timeline = url.searchParams.get('timeline') === 'true'
+    const timeFilter = url.searchParams.get('time')?.trim() ?? ''
+    const participant = url.searchParams.get('participant')?.trim() ?? ''
+    const eventType = url.searchParams.get('eventType')?.trim() ?? ''
+    const eventStatus = url.searchParams.get('eventStatus')?.trim() ?? ''
+    const now = new Date()
+    const weekAgo = now.getTime() - 7 * 86_400_000
+    const occurrence = (event: EventCard): { value: string; known: boolean } => {
+      const happened = event.temporal.happenedStart ?? event.temporal.happenedEnd
+      return { value: happened ?? event.temporal.mentionedAt ?? event.createdAt, known: Boolean(happened) }
+    }
+    values = [...snapshot.events]
+      .sort((left, right) => occurrence(right).value.localeCompare(occurrence(left).value))
+      .filter((event) => !timeline || (event.status !== 'forgotten' && event.status !== 'archived'))
+      .filter((event) => !eventType || event.temporal.eventType === eventType)
+      .filter((event) => !eventStatus || event.temporal.status === eventStatus)
+      .filter((event) => !participant || (event.temporal.participantNodeIds ?? []).includes(participant))
+      .filter((event) => {
+        if (!timeFilter) return true
+        const info = occurrence(event)
+        if (timeFilter === 'unknown') return !info.known
+        const time = Date.parse(info.value)
+        if (timeFilter === 'today') return Number.isFinite(time) && new Date(time).toDateString() === now.toDateString()
+        if (timeFilter === 'week') return Number.isFinite(time) && time >= weekAgo
+        return true
+      })
+      .map((event) => ({
+        ...(eventSummary(event, snapshot) as object),
+        relatedNodes: snapshot.graphNodes
+          .filter(({ id }) => (event.temporal.participantNodeIds ?? []).includes(id))
+          .map(({ id, name, type, aliases }) => ({ id, name, type, aliases })),
+        relatedElements: snapshot.elements
+          .filter(({ sourceEventIds }) => sourceEventIds.includes(event.id))
+          .map(({ id, name }) => ({ id, name })),
+      }))
+  }
   else if (kind === 'graph') {
     const eventMap = new Map(snapshot.events.map((event) => [event.id, event]))
     return {

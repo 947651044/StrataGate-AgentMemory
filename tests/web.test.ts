@@ -552,6 +552,53 @@ describe('StrataGate admin routes', () => {
     expect(blocks.body.items[0].layerTokens.find(({ level }: { level: number }) => level === 5)).toMatchObject({ percentOfL5: 100 })
   })
 
+  it('filters the complete Event timeline before pagination', async () => {
+    const events = Array.from({ length: 100 }, (_, index) => {
+      const position = index + 1
+      const timestamp = new Date(Date.UTC(2026, 0, 2) - index * 60_000).toISOString()
+      const target = position === 80
+      return {
+        ...snapshot.events[0]!,
+        id: `evt_${String(position).padStart(3, '0')}`,
+        title: target ? 'Needle Event' : `Ordinary Event ${position}`,
+        summary: target ? 'Only this later-page Event matches.' : 'Ordinary timeline entry.',
+        temporal: target
+          ? { mentionedAt: timestamp, participantNodeIds: ['node_target'], eventType: 'incident', status: 'ongoing' as const }
+          : { happenedStart: timestamp, participantNodeIds: ['node_other'], eventType: 'decision', status: 'occurred' as const },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
+    })
+    const pagedRuntime = {
+      adminSnapshot: async () => ({ ...snapshot, events }),
+    } as unknown as StrataGateRuntime
+    const base = '/api/stratagate/memories?namespace=timeline&kind=events&timeline=true&limit=40'
+
+    const firstPage = await request(`${base}&offset=0`, 'GET', pagedRuntime)
+    expect(firstPage.body).toMatchObject({ total: 100, offset: 0, limit: 40 })
+    expect(firstPage.body.items).toHaveLength(40)
+    expect(firstPage.body.items.map(({ id }: { id: string }) => id)).not.toContain('evt_080')
+
+    const search = await request(`${base}&offset=0&q=Needle%20Event`, 'GET', pagedRuntime)
+    expect(search.body).toMatchObject({ total: 1, offset: 0, items: [{ id: 'evt_080' }] })
+
+    const filters = [
+      'eventType=incident',
+      'participant=node_target',
+      'eventStatus=ongoing',
+      'time=unknown',
+    ]
+    for (const filter of filters) {
+      const result = await request(`${base}&offset=0&${filter}`, 'GET', pagedRuntime)
+      expect(result.body).toMatchObject({ total: 1, offset: 0, items: [{ id: 'evt_080' }] })
+    }
+
+    const cleared = await request(`${base}&offset=0`, 'GET', pagedRuntime)
+    expect(cleared.body).toMatchObject({ total: 100, offset: 0, limit: 40 })
+    expect(cleared.body.items).toHaveLength(40)
+    expect(cleared.body.items[0].id).toBe('evt_001')
+  })
+
   it('serves one revision-aware dashboard snapshot and returns 304 when unchanged', async () => {
     const first = await request('/api/stratagate/dashboard?namespace=dsh%3Aproject%3Atest')
     expect(first).toMatchObject({
