@@ -5,7 +5,7 @@
 - Filter the Event timeline by query, time, entity, type, and status before calculating totals and applying pagination, and refresh the view when filters change.
 - Isolate DSH compatibility dependency trees and verify package peers against the matrix-specific host root.
 
-## Unreleased
+## 0.2.73 - 2026-09-18
 
 - Add exact runtime-family support for `@deepseek-ai/dsh@0.1.6-alpha.1`, including its `0.1.6-alpha.1` internal DSH and Session Format packages while retaining the existing 0.1.2 and 0.1.5 families.
 - Strengthen the clean-install smoke gate with a live StrataGate Admin API probe, 0.1.6 legacy Session migration coverage, and a negative case proving that an optional plugin load failure cannot pass merely because the DSH Web Host remains available.
