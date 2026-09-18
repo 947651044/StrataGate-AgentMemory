@@ -83,7 +83,7 @@ try {
       run(['install', `${name}@${installed.version}`, '--ignore-scripts', '--package-lock=false'], installRoot)
     }
   }
-  run(['install', tarball, '--ignore-scripts', '--package-lock=false'], installRoot)
+  run(['install', tarball, '--ignore-scripts', '--package-lock=false', '--legacy-peer-deps'], installRoot)
   const installed = join(installRoot, 'node_modules', 'stratagate-dsh')
   for (const path of required) assert(existsSync(join(installed, path)), `Clean install is missing ${path}`)
   // DSH core packages are optional peers and intentionally absent from this
