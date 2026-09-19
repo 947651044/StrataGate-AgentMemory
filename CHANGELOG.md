@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.74 - 2026-09-19
+
+- Separate short-term memory compression, long-term memory extraction, and knowledge graph update status in the UI.
+- Distinguish active, retryable, terminal-failed, completed, and blocked work while preserving manual retry behavior.
+- Add stage-specific status details and regression coverage for memory derivation and graph migration states.
+
 ## 0.2.72 - 2026-09-18
 
 - Filter the Event timeline by query, time, entity, type, and status before calculating totals and applying pagination, and refresh the view when filters change.
