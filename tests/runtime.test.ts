@@ -209,7 +209,7 @@ describe('DSH runtime ingestion', () => {
         draft: { title: 'Draft title', description: 'Observed failure.', errorContext: 'EACCES' },
       })
       expect(second.adminSaveFeedbackDraft(second.namespaceFor(session), { bodyMarkdown: '' })).toMatchObject({
-        draft: { title: 'Draft title', description: '', reproduction: [], expected: '', actual: '', errorContext: '' },
+        draft: { title: 'Draft title', description: 'Observed failure.', reproduction: ['First step', 'Second step'], expected: '', actual: '', errorContext: 'EACCES' },
       })
       const afterCooldown = Date.parse('2026-09-10T00:00:00.000Z')
       second.notePluginError(session, new Error('later failure'))
@@ -217,6 +217,52 @@ describe('DSH runtime ingestion', () => {
     } finally {
       await second.close()
       await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('patches feedback drafts without dropping omitted fields or leaving stale bodyMarkdown', async () => {
+    const runtime = new StrataGateRuntime({
+      database: ':memory:', namespaceMode: 'project', namespacePrefix: 'dsh', globalNamespace: 'global',
+      blockTurnSize: 6, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048,
+    }, fakeModels)
+    try {
+      const namespace = runtime.namespaceFor(session)
+      await runtime.prepareFeedback(session, {
+        title: 'Original title', description: 'Original description', reproduction: ['step one', 'step two'],
+        expected: 'Original expected', actual: 'Original actual', errorContext: 'Original error',
+      })
+      await runtime.prepareFeedback(session, { title: 'New title' })
+      expect(runtime.adminFeedbackDraft(namespace).draft).toMatchObject({
+        title: 'New title', description: 'Original description', reproduction: ['step one', 'step two'],
+        expected: 'Original expected', actual: 'Original actual', errorContext: 'Original error',
+      })
+      await runtime.prepareFeedback(session, { expected: 'New expected' })
+      expect(runtime.adminFeedbackDraft(namespace).draft).toMatchObject({
+        title: 'New title', description: 'Original description', reproduction: ['step one', 'step two'],
+        expected: 'New expected', actual: 'Original actual', errorContext: 'Original error',
+      })
+      await runtime.prepareFeedback(session, { reproduction: ['new step'] })
+      expect(runtime.adminFeedbackDraft(namespace).draft).toMatchObject({
+        title: 'New title', description: 'Original description', reproduction: ['new step'],
+        expected: 'New expected', actual: 'Original actual', errorContext: 'Original error',
+      })
+      const withBody = runtime.adminSaveFeedbackDraft(namespace, { bodyMarkdown: '## old body' }).draft
+      expect(withBody.bodyMarkdown).toBe('## old body')
+      await runtime.prepareFeedback(session, { expected: 'Latest expected' })
+      const afterStructuredUpdate = runtime.adminFeedbackDraft(namespace).draft!
+      expect(afterStructuredUpdate).toMatchObject({
+        title: 'New title', description: 'Original description', reproduction: ['new step'],
+        expected: 'Latest expected', actual: 'Original actual', errorContext: 'Original error',
+      })
+      expect(afterStructuredUpdate.bodyMarkdown).toBeUndefined()
+      const afterBodyClear = runtime.adminSaveFeedbackDraft(namespace, { bodyMarkdown: '' }).draft
+      expect(afterBodyClear).toMatchObject({
+        title: 'New title', description: 'Original description', reproduction: ['new step'],
+        expected: 'Latest expected', actual: 'Original actual', errorContext: 'Original error',
+      })
+      expect(afterBodyClear.bodyMarkdown).toBeUndefined()
+    } finally {
+      await runtime.close()
     }
   })
 

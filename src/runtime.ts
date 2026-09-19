@@ -142,20 +142,23 @@ function feedbackText(value: unknown, maximum: number): string {
 
 function normalizeFeedbackDraft(input: FeedbackDraftInput, previous?: FeedbackDraft | null): FeedbackDraft {
   const has = (key: keyof FeedbackDraftInput): boolean => Object.prototype.hasOwnProperty.call(input, key)
-  const replacesStructuredBody = has('bodyMarkdown')
-  const reproduction = replacesStructuredBody
-    ? []
-    : has('reproduction')
+  const updatesStructuredBody = ['description', 'reproduction', 'expected', 'actual', 'errorContext']
+    .some((key) => has(key as keyof FeedbackDraftInput))
+  const reproduction = has('reproduction')
     ? (Array.isArray(input.reproduction) ? input.reproduction : []).map((value) => feedbackText(value, 2_000)).filter(Boolean).slice(0, 20)
     : previous?.reproduction ?? []
-  const bodyMarkdown = has('bodyMarkdown') ? feedbackText(input.bodyMarkdown, 50_000) : previous?.bodyMarkdown
+  const bodyMarkdown = has('bodyMarkdown')
+    ? feedbackText(input.bodyMarkdown, 50_000)
+    : updatesStructuredBody
+    ? undefined
+    : previous?.bodyMarkdown
   return {
     title: has('title') ? feedbackText(input.title, 240) : previous?.title ?? '',
-    description: replacesStructuredBody ? '' : has('description') ? feedbackText(input.description, 20_000) : previous?.description ?? '',
+    description: has('description') ? feedbackText(input.description, 20_000) : previous?.description ?? '',
     reproduction,
-    expected: replacesStructuredBody ? '' : has('expected') ? feedbackText(input.expected, 10_000) : previous?.expected ?? '',
-    actual: replacesStructuredBody ? '' : has('actual') ? feedbackText(input.actual, 10_000) : previous?.actual ?? '',
-    errorContext: replacesStructuredBody ? '' : has('errorContext') ? feedbackText(input.errorContext, 20_000) : previous?.errorContext ?? '',
+    expected: has('expected') ? feedbackText(input.expected, 10_000) : previous?.expected ?? '',
+    actual: has('actual') ? feedbackText(input.actual, 10_000) : previous?.actual ?? '',
+    errorContext: has('errorContext') ? feedbackText(input.errorContext, 20_000) : previous?.errorContext ?? '',
     ...(bodyMarkdown ? { bodyMarkdown } : {}),
     updatedAt: new Date().toISOString(),
   }
@@ -869,7 +872,9 @@ export class StrataGateRuntime {
 
   async prepareFeedback(session: Session, input: FeedbackDraftInput): Promise<unknown> {
     const namespace = this.namespaceFor(session)
-    const draft = normalizeFeedbackDraft(input)
+    // feedback_prepare is patch-oriented: omitted fields retain the existing draft.
+    const previous = this.loadFeedbackDraft(namespace)
+    const draft = normalizeFeedbackDraft(input, previous)
     this.saveFeedbackDraft(namespace, draft)
     const feedbackUrl = feedbackDraftUrl(namespace, this.feedbackOrigin())
     return {
