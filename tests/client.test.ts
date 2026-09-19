@@ -6,7 +6,7 @@ function loadSupportHelpers(stateValues: unknown[] = [], globals: Record<string,
   const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
   const instrumented = source.replace(
     "    exports.name = 'stratagate-dsh'",
-    "    exports.__test = { feedbackDraftMarkdown, restoreFeedbackDraftValues, shouldExpandFeedbackPreview, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, MemoryStatusAlert, taskStatus, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
+    "    exports.__test = { feedbackDraftMarkdown, restoreFeedbackDraftValues, shouldExpandFeedbackPreview, handleFeedbackIssueResult, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, MemoryStatusAlert, taskStatus, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
   )
   let definition: any
   runInNewContext(instrumented, {
@@ -1260,12 +1260,14 @@ describe('StrataGate Web client contract', () => {
       data: {
         blocks: [{
           id: 'block-1',
-          sourceMessages: [{ content: `Bearer ${secret}` }],
-          nested: {
-            password: 'nested-password', passwd: 'nested-passwd', token: 'nested-token',
-            accessToken: 'nested-access', refresh_token: 'nested-refresh', apiKey: 'nested-api',
-            authorization: 'nested-auth', secret: 'nested-secret', safe: 'keep this',
-          },
+          l5Raw: [{ toolCalls: [{
+            arguments: {
+              password: 'nested-password', passwd: 'nested-passwd', token: 'nested-token',
+              accessToken: 'nested-access', refresh_token: 'nested-refresh', apiKey: 'nested-api',
+              authorization: 'nested-auth', secret: 'nested-secret', safe: 'keep this',
+            },
+            result: { message: `Bearer ${secret}` },
+          }] }],
         }],
         events: [{ id: 'event-1', title: 'Keep event title', summary: 'api_key=event-secret' }],
         graph: { nodes: [{ id: 'node-1', name: 'Keep node', currentState: 'secret=graph-secret' }], edges: [] },
@@ -1286,6 +1288,23 @@ describe('StrataGate Web client contract', () => {
     expect(report).toContain('Keep event title')
     const jsonBlock = report.match(/## 用户主动附加的记忆数据[\s\S]*?```json\n([\s\S]*?)\n```/)?.[1]
     expect(jsonBlock).toBeTruthy()
+    expect(() => JSON.parse(jsonBlock!)).not.toThrow()
+  })
+
+  it('redacts complete free-text credentials without damaging JSON', () => {
+    const { buildSupportReport } = loadSupportHelpers()
+    const report = buildSupportReport({
+      problemContent: 'password="two words" Authorization: Basic dXNlcjpwYXNz access_token=access-value refreshToken=refresh-value useful detail',
+      includeLogs: true,
+      recentError: 'password="error words" Authorization: Basic c2VjcmV0 access_token=error-access refreshToken=error-refresh; keep this detail',
+      data: { blocks: [], events: [], graph: { nodes: [], edges: [] } },
+    })
+    for (const secret of ['two words', 'dXNlcjpwYXNz', 'access-value', 'refresh-value', 'error words', 'c2VjcmV0', 'error-access', 'error-refresh']) {
+      expect(report).not.toContain(secret)
+    }
+    expect(report).toContain('useful detail')
+    expect(report).toContain('keep this detail')
+    const jsonBlock = report.match(/## 诊断日志[\s\S]*?```json\n([\s\S]*?)\n```/)?.[1]
     expect(() => JSON.parse(jsonBlock!)).not.toThrow()
   })
 
@@ -1533,6 +1552,18 @@ describe('StrataGate Web client contract', () => {
     expect(statusSource).toContain('groups.map((group) =>')
     expect(statusSource).toContain('group.items.map((item) =>')
     expect(statusSource).not.toContain("h('dt', null, 'Block')")
+  })
+
+  it('shows clipboard failure immediately without waiting for draft persistence', () => {
+    const calls: string[] = []
+    const { handleFeedbackIssueResult } = loadSupportHelpers()
+    const result = handleFeedbackIssueResult({ copied: false, opened: true, error: '复制失败：permission denied' }, {
+      setPreviewOpen: (value: boolean) => calls.push('preview:' + value),
+      setError: (value: string) => calls.push('error:' + value),
+    })
+    expect(result.copied).toBe(false)
+    expect(calls[0]).toBe('preview:true')
+    expect(calls[1]).toContain('error:复制失败')
   })
 
   it('keeps Event Extraction and Graph Projection separate in the status details', () => {

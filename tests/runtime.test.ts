@@ -220,7 +220,7 @@ describe('DSH runtime ingestion', () => {
     }
   })
 
-  it('patches feedback drafts without dropping omitted fields or leaving stale bodyMarkdown', async () => {
+  it('patches feedback drafts without dropping omitted fields or losing manual bodyMarkdown', async () => {
     const runtime = new StrataGateRuntime({
       database: ':memory:', namespaceMode: 'project', namespacePrefix: 'dsh', globalNamespace: 'global',
       blockTurnSize: 6, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048,
@@ -246,18 +246,25 @@ describe('DSH runtime ingestion', () => {
         title: 'New title', description: 'Original description', reproduction: ['new step'],
         expected: 'New expected', actual: 'Original actual', errorContext: 'Original error',
       })
-      const withBody = runtime.adminSaveFeedbackDraft(namespace, { bodyMarkdown: '## old body' }).draft
-      expect(withBody.bodyMarkdown).toBe('## old body')
+      const withBody = runtime.adminSaveFeedbackDraft(namespace, { bodyMarkdown: '## 问题描述\n\nManual body.\n\n## 自定义备注\n\nKeep this custom section.' }).draft
+      expect(withBody.bodyMarkdown).toContain('Manual body.')
+      await runtime.prepareFeedback(session, { title: 'Manual body title patch' })
+      expect(runtime.adminFeedbackDraft(namespace).draft?.bodyMarkdown).toContain('Keep this custom section.')
+      await runtime.prepareFeedback(session, { reproduction: ['repro step after manual edit'] })
+      expect(runtime.adminFeedbackDraft(namespace).draft?.bodyMarkdown).toContain('1. repro step after manual edit')
       await runtime.prepareFeedback(session, { expected: 'Latest expected' })
       const afterStructuredUpdate = runtime.adminFeedbackDraft(namespace).draft!
       expect(afterStructuredUpdate).toMatchObject({
-        title: 'New title', description: 'Original description', reproduction: ['new step'],
+        title: 'Manual body title patch', description: 'Original description', reproduction: ['repro step after manual edit'],
         expected: 'Latest expected', actual: 'Original actual', errorContext: 'Original error',
       })
-      expect(afterStructuredUpdate.bodyMarkdown).toBeUndefined()
+      expect(afterStructuredUpdate.bodyMarkdown).toContain('Manual body.')
+      expect(afterStructuredUpdate.bodyMarkdown).toContain('## 自定义备注')
+      expect(afterStructuredUpdate.bodyMarkdown).toContain('Keep this custom section.')
+      expect(afterStructuredUpdate.bodyMarkdown).toContain('Latest expected')
       const afterBodyClear = runtime.adminSaveFeedbackDraft(namespace, { bodyMarkdown: '' }).draft
       expect(afterBodyClear).toMatchObject({
-        title: 'New title', description: 'Original description', reproduction: ['new step'],
+        title: 'Manual body title patch', description: 'Original description', reproduction: ['repro step after manual edit'],
         expected: 'Latest expected', actual: 'Original actual', errorContext: 'Original error',
       })
       expect(afterBodyClear.bodyMarkdown).toBeUndefined()

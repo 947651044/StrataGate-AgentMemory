@@ -140,6 +140,41 @@ function feedbackText(value: unknown, maximum: number): string {
   return typeof value === 'string' ? value.trim().slice(0, maximum) : ''
 }
 
+const FEEDBACK_MARKDOWN_HEADINGS: Record<string, string> = {
+  description: '问题描述',
+  reproduction: '复现步骤',
+  expected: '预期行为',
+  actual: '实际行为',
+  errorContext: '相关错误信息',
+}
+
+function patchFeedbackMarkdown(markdown: string, input: FeedbackDraftInput): string {
+  let result = markdown.trim()
+  for (const [key, heading] of Object.entries(FEEDBACK_MARKDOWN_HEADINGS)) {
+    if (!Object.prototype.hasOwnProperty.call(input, key)) continue
+    const raw = input[key as keyof FeedbackDraftInput]
+    const text = Array.isArray(raw)
+      ? raw.map((item, index) => {
+          const value = feedbackText(item, 2_000)
+          return value ? `${index + 1}. ${value}` : ''
+        }).filter(Boolean).join('\n')
+      : feedbackText(raw, key === 'description' ? 20_000 : key === 'expected' || key === 'actual' ? 10_000 : 20_000)
+    const marker = `## ${heading}`
+    const start = result.indexOf(marker)
+    const nextHeading = /\n##\s+/g
+    if (start < 0) {
+      if (text) result = `${result ? `${result}\n\n` : ''}${marker}\n\n${text}`
+      continue
+    }
+    nextHeading.lastIndex = start + marker.length
+    const next = nextHeading.exec(result)
+    const end = next ? next.index : result.length
+    const replacement = text ? `${marker}\n\n${text}` : ''
+    result = result.slice(0, start) + replacement + (next ? `${replacement ? '\n\n' : ''}${result.slice(end).trimStart()}` : '')
+  }
+  return result.trim()
+}
+
 function normalizeFeedbackDraft(input: FeedbackDraftInput, previous?: FeedbackDraft | null): FeedbackDraft {
   const has = (key: keyof FeedbackDraftInput): boolean => Object.prototype.hasOwnProperty.call(input, key)
   const updatesStructuredBody = ['description', 'reproduction', 'expected', 'actual', 'errorContext']
@@ -149,8 +184,8 @@ function normalizeFeedbackDraft(input: FeedbackDraftInput, previous?: FeedbackDr
     : previous?.reproduction ?? []
   const bodyMarkdown = has('bodyMarkdown')
     ? feedbackText(input.bodyMarkdown, 50_000)
-    : updatesStructuredBody
-    ? undefined
+    : updatesStructuredBody && previous?.bodyMarkdown
+    ? patchFeedbackMarkdown(previous.bodyMarkdown, input)
     : previous?.bodyMarkdown
   return {
     title: has('title') ? feedbackText(input.title, 240) : previous?.title ?? '',

@@ -2749,8 +2749,10 @@ window.__ModuleLoader__.load({
     function redactText(value) {
       return String(value ?? '')
         .replace(/\b(?:sk|gh[opasu]|github_pat)_[A-Za-z0-9_-]{8,}\b/g, '[REDACTED]')
+        .replace(/(["']?\b(?:api[_-]?key|token|password|passwd|access[_-]?token|refresh[_-]?token|secret|authorization)["']?\s*[:=]\s*)(["'])([\s\S]*?)\2/gi, '$1$2[REDACTED]$2')
+        .replace(/(\bauthorization\s*:\s*)(Bearer|Basic|Token)\s+[^\s,;}]+/gi, '$1$2 [REDACTED]')
         .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]{8,}={0,2}\b/gi, 'Bearer [REDACTED]')
-        .replace(/(["']?\b(?:api[_-]?key|token|password|passwd|secret|authorization)["']?\s*[:=]\s*["']?)([^"'\s,;}]+)(["']?)/gi, '$1[REDACTED]$3')
+        .replace(/(["']?\b(?:api[_-]?key|token|password|passwd|access[_-]?token|refresh[_-]?token|secret|authorization)["']?\s*[:=]\s*)([^\s,;}]+)/gi, '$1[REDACTED]')
     }
 
     function redactedJson(value) {
@@ -3035,6 +3037,18 @@ window.__ModuleLoader__.load({
       return result?.copied === false
     }
 
+    function handleFeedbackIssueResult(result, callbacks = {}) {
+      const messages = []
+      if (result?.copied) {
+        callbacks.setStatus?.(result.opened ? '报告已复制。请在新打开的 Issue 中粘贴、检查并提交。' : '报告已复制，但浏览器可能拦截了新窗口。请点击下方普通链接打开 Issue。')
+      } else {
+        if (shouldExpandFeedbackPreview(result)) callbacks.setPreviewOpen?.(true)
+        messages.push((result?.error || '复制或打开 Issue 失败') + ' 报告仍保留在预览中；请手动复制或下载诊断文件。' + (result?.opened ? '' : ' 也可点击下方普通链接打开 Issue。'))
+        callbacks.setError?.(messages.join(' '))
+      }
+      return result
+    }
+
     function downloadSupportReport(report, documentRef = document, urlRef = URL) {
       const blob = new Blob([report], { type: 'text/plain;charset=utf-8' })
       const objectUrl = urlRef.createObjectURL(blob)
@@ -3110,21 +3124,13 @@ window.__ModuleLoader__.load({
       }
       const copyAndOpen = () => {
         setStatus(''); setError('')
-        const save = saveDraft()
+        void saveDraft().catch((reason) => setError((current) => {
+          const message = '保存反馈草稿失败：' + String(reason?.message || reason)
+          return current ? current + ' ' + message : message
+        }))
         const issue = copyReportAndOpenIssue(reportSnapshot.text, navigator?.clipboard, (url) => window.open(url, '_blank'), title)
-        void Promise.allSettled([save, issue]).then(([saved, opened]) => {
-          const messages = []
-          if (opened.status === 'fulfilled') {
-            const result = opened.value
-            if (result.copied) setStatus(result.opened ? '报告已复制。请在新打开的 Issue 中粘贴、检查并提交。' : '报告已复制，但浏览器可能拦截了新窗口。请点击下方普通链接打开 Issue。')
-            else {
-              if (shouldExpandFeedbackPreview(result)) setPreviewOpen(true)
-              messages.push(result.error + ' 报告仍保留在预览中；请手动复制或下载诊断文件。' + (result.opened ? '' : ' 也可点击下方普通链接打开 Issue。'))
-            }
-          } else messages.push('复制或打开 Issue 失败：' + String(opened.reason?.message || opened.reason))
-          if (saved.status === 'rejected') messages.push('保存反馈草稿失败：' + String(saved.reason?.message || saved.reason))
-          if (messages.length) setError(messages.join(' '))
-        })
+        void issue.then((result) => handleFeedbackIssueResult(result, { setStatus, setError, setPreviewOpen }))
+          .catch((reason) => setError('复制或打开 Issue 失败：' + String(reason?.message || reason)))
       }
       const copyAiPrompt = () => {
         setStatus(''); setError('')
