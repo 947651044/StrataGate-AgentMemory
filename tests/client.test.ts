@@ -1382,6 +1382,7 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain("'正在压缩 ' + status.blockSummary.processing + ' 个短期记忆块'")
     expect(source).toContain("'正在更新知识图谱 · ' + graphProgress")
     expect(source).toContain("'知识图谱更新未完成 · ' + graphProgress")
+    expect(source).toContain("migrationState === 'failed' ? '查看详情并手动重试。' : '查看详情。'")
     expect(source).toContain('可查看详情并手动重试。')
     expect(source).not.toContain('sg-processing-alert')
     expect(source).not.toContain('正在触发记忆整理')
@@ -1442,6 +1443,10 @@ describe('StrataGate Web client contract', () => {
       processingJobDetails: [{ kind: 'graph-projection', id: 'g1', state: 'processing' }],
       failedJobDetails: [{ kind: 'graph-projection', id: 'g2', state: 'terminal-failed', attempts: 3, nextRetryAt: null }],
     })).toMatchObject({ graphProjection: { processing: 1, terminalFailed: 1 } })
+    expect(taskStatus({
+      processingJobDetails: [{ kind: 'graph-projection', id: 'retry-1', status: 'failed', state: 'retryable', nextRetryAt: '2026-09-19T00:01:00.000Z', attempts: 1 }],
+      failedJobDetails: [{ kind: 'graph-projection', id: 'retry-1', status: 'failed', state: 'retryable', nextRetryAt: '2026-09-19T00:01:00.000Z', attempts: 1 }],
+    })).toMatchObject({ graphProjection: { processing: 1, retryable: 1, terminalFailed: 0 } })
   })
 
   it('separates status refresh from per-job retry with explicit feedback', () => {
@@ -1451,7 +1456,7 @@ describe('StrataGate Web client contract', () => {
     expect(statusSource).toContain("{ method: 'POST' }")
     expect(statusSource).toContain('重试此任务')
     expect(statusSource).toContain('正在处理…')
-    expect(statusSource).toContain('短期记忆整理')
+    expect(statusSource).toContain('短期记忆压缩详情')
     expect(statusSource).toContain('保存原始对话')
     expect(statusSource).toContain('压缩短期记忆块')
     expect(statusSource).toContain('提取长期记忆')
@@ -1500,6 +1505,33 @@ describe('StrataGate Web client contract', () => {
     expect(rendered).toContain('"sg-process-stage-name"},"更新知识图谱"')
     expect(rendered).toContain('长期记忆提取')
     expect(rendered).toContain('知识图谱更新')
+  })
+
+  it('uses the clicked stage for detail titles and only exposes terminal retry actions', () => {
+    const { ProcessingStatus } = loadSupportHelpers()
+    const details = [{ id: 'blk-1', sourceId: 'blk-1', sequence: 1, title: '测试块', threadId: 'thread-1', turnRange: [1, 4], shouldExtract: true }]
+    const job = (kind: string, state: string, nextRetryAt: string | null) => ({
+      id: kind + '-1', kind, status: 'failed', state, attempts: state === 'retryable' ? 1 : 3, nextRetryAt,
+      updatedAt: '2026-09-19T00:00:00.000Z', lastError: kind + ' failed', blockIds: ['blk-1'], blockDetails: details,
+    })
+    const props = (stage: string, jobs: any[]) => ({
+      overview: { processingJobs: jobs.length, failedJobs: jobs.length, processingJobDetails: [], failedJobDetails: jobs },
+      blocks: [], conversations: [{ id: 'thread-1', label: '测试对话' }], namespace: 'dsh:project:test', serverVersion: '0.2.73', stage,
+      onBack: () => {}, refresh: async () => null,
+    })
+    const summaryRetryable = JSON.stringify(ProcessingStatus(props('summary', [job('block-summary', 'retryable', '2026-09-19T00:01:00.000Z')])))
+    expect(summaryRetryable).toContain('短期记忆压缩详情')
+    expect(summaryRetryable).toContain('计划自动重试')
+    expect(summaryRetryable).not.toContain('重试此任务')
+    const extractionTerminal = JSON.stringify(ProcessingStatus(props('extraction', [job('event-extraction', 'terminal-failed', null)])))
+    expect(extractionTerminal).toContain('长期记忆提取详情')
+    expect(extractionTerminal).toContain('重试此任务')
+    const graphTerminal = JSON.stringify(ProcessingStatus(props('graph', [job('graph-projection', 'terminal-failed', null)])))
+    expect(graphTerminal).toContain('知识图谱提取详情')
+    expect(graphTerminal).toContain('提取长期记忆')
+    expect(graphTerminal).toContain('已完成')
+    expect(graphTerminal).toContain('更新失败，可重试')
+    expect(graphTerminal).toContain('重试此任务')
   })
 
   it('does not claim legacy background work is empty when the old server omits job details', () => {

@@ -1351,9 +1351,13 @@ window.__ModuleLoader__.load({
         'event-extraction': result.eventExtraction,
         'graph-projection': result.graphProjection,
       }
+      const processingKeys = new Set()
       for (const job of overview?.processingJobDetails || []) {
         const group = kindMap[job.kind]
-        if (group) group.processing += 1
+        if (group) {
+          processingKeys.add(statusJobKey(job))
+          group.processing += 1
+        }
       }
       for (const job of overview?.failedJobDetails || []) {
         const group = kindMap[job.kind]
@@ -1361,8 +1365,8 @@ window.__ModuleLoader__.load({
         const retryable = Boolean(job.nextRetryAt) && Number(job.attempts || 0) < 3
         if (retryable) {
           group.retryable += 1
-          group.processing += 1
-        } else group.terminalFailed += 1
+          if (!processingKeys.has(statusJobKey(job))) group.processing += 1
+        } else if (!retryable) group.terminalFailed += 1
       }
       return result
     }
@@ -1380,18 +1384,18 @@ window.__ModuleLoader__.load({
       const status = taskStatus(overview)
       const migration = overview?.graphMigration || {}
       const alerts = []
-      const add = (key, title, copy, kind) => alerts.push({ key, title, copy, kind })
+      const add = (key, title, copy, kind, stage) => alerts.push({ key, title, copy, kind, stage })
       if (status.blockSummary.processing > 0) {
-        add('summary-processing', '正在压缩 ' + status.blockSummary.processing + ' 个短期记忆块', '后台压缩仍在继续。', 'processing')
+        add('summary-processing', '正在压缩 ' + status.blockSummary.processing + ' 个短期记忆块', '后台压缩仍在继续。', 'processing', 'summary')
       }
       if (status.blockSummary.terminalFailed > 0) {
-        add('summary-failed', status.blockSummary.terminalFailed + ' 个短期记忆块压缩失败', '可查看详情并手动重试。', 'attention')
+        add('summary-failed', status.blockSummary.terminalFailed + ' 个短期记忆块压缩失败', '可查看详情并手动重试。', 'attention', 'summary')
       }
       if (status.eventExtraction.processing > 0) {
-        add('extraction-processing', status.eventExtraction.processing > 1 ? '正在提取 ' + status.eventExtraction.processing + ' 个长期记忆' : '正在提取长期记忆', '后台提取仍在继续。', 'processing')
+        add('extraction-processing', status.eventExtraction.processing > 1 ? '正在提取 ' + status.eventExtraction.processing + ' 个长期记忆' : '正在提取长期记忆', '后台提取仍在继续。', 'processing', 'extraction')
       }
       if (status.eventExtraction.terminalFailed > 0) {
-        add('extraction-failed', status.eventExtraction.terminalFailed + ' 个长期记忆提取失败', '可查看详情并手动重试。', 'attention')
+        add('extraction-failed', status.eventExtraction.terminalFailed + ' 个长期记忆提取失败', '可查看详情并手动重试。', 'attention', 'extraction')
       }
       const graphState = graphMigrationState(overview, status)
       const graphProgress = String(Number(migration.projected || 0)) + '/' + String(Number(migration.total || 0)) + ' Events'
@@ -1399,18 +1403,18 @@ window.__ModuleLoader__.load({
         const failed = Number(status.graphProjection.terminalFailed || 0)
         add('graph-processing', failed > 0
           ? '知识图谱更新中 · ' + graphProgress + '，' + failed + ' 批失败'
-          : '正在更新知识图谱 · ' + graphProgress, '后台图谱投影仍在继续。', 'processing')
+          : '正在更新知识图谱 · ' + graphProgress, '后台图谱投影仍在继续。', 'processing', 'graph')
       } else if (graphState === 'failed') {
-        add('graph-failed', '知识图谱有 ' + status.graphProjection.terminalFailed + ' 批更新失败 · 已完成 ' + graphProgress, '可查看详情并手动重试。', 'attention')
+        add('graph-failed', '知识图谱有 ' + status.graphProjection.terminalFailed + ' 批更新失败 · 已完成 ' + graphProgress, '可查看详情并手动重试。', 'attention', 'graph')
       } else if (graphState === 'incomplete') {
-        add('graph-incomplete', '知识图谱更新未完成 · ' + graphProgress, '当前没有任务继续运行。点击查看详情。', 'attention')
+        add('graph-incomplete', '知识图谱更新未完成 · ' + graphProgress, '查看详情。', 'attention', 'graph')
       }
       if (!alerts.length) return null
       return h('div', { className: 'sg-memory-alerts', 'aria-live': 'polite' }, alerts.map((alert) => h('button', {
         key: alert.key,
         type: 'button',
         className: 'sg-memory-alert ' + alert.kind,
-        onClick: onOpen,
+        onClick: () => onOpen(alert.stage),
         'aria-label': alert.title + '。' + alert.copy + '查看详情。',
       },
       h('span', { className: 'sg-memory-alert-mark', 'aria-hidden': 'true' }, alert.kind === 'attention' ? '⚠' : '↻'),
@@ -2105,7 +2109,7 @@ window.__ModuleLoader__.load({
           h('select', { value: eventFilters.status, onChange: (event) => setEventFilters({ ...eventFilters, status: event.target.value }), 'aria-label': '事件状态' }, h('option', { value: '' }, '全部状态'), Object.entries(EVENT_STATUS_TEXT).map(([value, label]) => h('option', { key: value, value }, label))))
       return h('section', { className: 'sg-long-explorer ' + (fullScreen ? 'fullscreen' : ''), 'aria-label': fullScreen ? '长期记忆全屏探索' : '长期记忆浏览' },
         h('nav', { className: 'sg-long-tabs' }, h('button', { className: mode === 'graph' ? 'active' : '', onClick: () => setMode('graph') }, '知识图谱'), h('button', { className: mode === 'timeline' ? 'active' : '', onClick: () => setMode('timeline') }, '事件时间线')),
-        migrationState !== 'complete' ? h('div', { className: 'sg-migration ' + (migrationState === 'processing' ? 'processing' : 'attention'), role: 'status' }, h('span', { className: 'sg-processing-icon', 'aria-hidden': 'true' }, migrationState === 'processing' ? '↻' : '⚠'), h('span', null, migrationNotice), h('small', null, migrationState === 'processing' ? '后台图谱投影仍在继续。' : '查看详情并手动重试。')) : null,
+        migrationState !== 'complete' ? h('div', { className: 'sg-migration ' + (migrationState === 'processing' ? 'processing' : 'attention'), role: 'status' }, h('span', { className: 'sg-processing-icon', 'aria-hidden': 'true' }, migrationState === 'processing' ? '↻' : '⚠'), h('span', null, migrationNotice), h('small', null, migrationState === 'processing' ? '后台图谱投影仍在继续。' : migrationState === 'failed' ? '查看详情并手动重试。' : '查看详情。')) : null,
         h('div', { className: 'sg-long-toolbar' },
           h(SearchBox, { value: query, onChange: setQuery }),
           h('button', { type: 'button', className: 'sg-toolbar-button', 'aria-expanded': filtersOpen ? 'true' : 'false', onClick: () => setFiltersOpen(!filtersOpen) }, '筛选 ▾', activeFilterCount ? h('span', { className: 'sg-active-filter-count' }, activeFilterCount) : null),
@@ -2349,7 +2353,7 @@ window.__ModuleLoader__.load({
       })
     }
 
-    function ProcessingStatus({ overview, blocks, conversations, namespace, serverVersion, onBack, backLabel = '返回', refresh }) {
+    function ProcessingStatus({ overview, blocks, conversations, namespace, serverVersion, onBack, backLabel = '返回', refresh, stage = 'summary' }) {
       const failures = overview.failedJobDetails || []
       const failedKeys = new Set(failures.map(statusJobKey))
       const terminalFailedKeys = new Set(failures
@@ -2455,8 +2459,8 @@ window.__ModuleLoader__.load({
             : summaryJob
               ? { kind: 'waiting', mark: '○', label: '排队中' }
               : { kind: 'done', mark: '✓', label: '已完成' }
-        const stageForJobs = (jobs, failed, emptyLabel) => {
-          if (failed) return { kind: 'failed', mark: '!', label: '终态失败，可重试' }
+        const stageForJobs = (jobs, failed, emptyLabel, failedLabel = '终态失败，可重试') => {
+          if (failed) return { kind: 'failed', mark: '!', label: failedLabel }
           if (jobs.some((job) => job.status === 'running')) return { kind: 'processing', mark: '●', label: '处理中' }
           if (jobs.some((job) => job.state === 'retryable')) return { kind: 'processing', mark: '↻', label: '计划自动重试' }
           if (jobs.length) return { kind: 'waiting', mark: '○', label: '排队中' }
@@ -2466,13 +2470,15 @@ window.__ModuleLoader__.load({
           ? stageForJobs(extractionJobs, true, '等待提取')
           : extractionJobs.length
             ? stageForJobs(extractionJobs, false, '等待提取')
+            : graphJobs.length
+              ? { kind: 'done', mark: '✓', label: '已完成' }
             : shortStage.kind !== 'done'
               ? { kind: 'waiting', mark: '○', label: '等待短期摘要' }
               : item.shouldExtract === false
                 ? { kind: 'skipped', mark: '–', label: '无需提取' }
                 : { kind: 'waiting', mark: '○', label: '等待提取' }
         const graphStage = graphFailed
-          ? stageForJobs(graphJobs, true, '等待图谱更新')
+          ? stageForJobs(graphJobs, true, '等待图谱更新', '更新失败，可重试')
           : graphJobs.length
             ? stageForJobs(graphJobs, false, '等待图谱更新')
             : extractionStage.kind === 'failed' || extractionStage.kind === 'waiting' || extractionStage.kind === 'processing'
@@ -2534,9 +2540,14 @@ window.__ModuleLoader__.load({
         : detailsUnavailable
           ? '仍有 ' + rawProcessingCount + ' 个后台任务正在整理'
           : '本轮整理已经完成'
+      const detailTitle = stage === 'extraction'
+        ? '长期记忆提取详情'
+        : stage === 'graph'
+          ? '知识图谱提取详情'
+          : '短期记忆压缩详情'
       return h(React.Fragment, null,
         h(BackBar, { label: backLabel, onBack }),
-        h('div', { className: 'sg-intro' }, h('h2', null, '短期记忆整理'), h('p', null, summary)),
+        h('div', { className: 'sg-intro' }, h('h2', null, detailTitle), h('p', null, summary)),
         h('div', { className: 'sg-process-summary' }, h('strong', null, '原始对话已保存，不会丢失'), h('span', null, '整理在后台进行，你可以继续使用。')),
         detailsUnavailable ? h('div', { className: 'sg-process-notice', role: 'status' },
           h('strong', null, versionMismatch ? '前后端版本尚未同步' : '暂时无法读取完整任务详情'),
@@ -2554,7 +2565,7 @@ window.__ModuleLoader__.load({
               h('div', { className: 'sg-process-stages' }, itemStages(item).map(([name, stage]) => h('div', { key: name, className: 'sg-process-stage' }, h('span', { className: 'sg-process-stage-state ' + stage.kind, 'aria-hidden': 'true' }, stage.mark), h('span', { className: 'sg-process-stage-name' }, name), h('span', { className: 'sg-process-stage-state ' + stage.kind }, stage.label)))),
               technicalJobs.length ? h('details', { className: 'sg-process-tech' }, h('summary', null, '查看技术详情'), technicalJobs.map((job) => {
                 const key = retryKey(job)
-                const failed = failedKeys.has(key)
+                const failed = terminalFailedKeys.has(key)
                 const busy = retrying === key
                 return h('div', { key, className: 'sg-process-job' },
                   h('div', { className: 'sg-process-job-head' }, h('strong', null, taskLabel(job.kind)), h('span', { className: 'sg-stage-value ' + (terminalFailedKeys.has(key) ? 'failed' : job.status === 'running' || job.state === 'retryable' ? 'processing' : 'waiting') }, technicalStatusText(job.status, job))),
@@ -3500,7 +3511,7 @@ window.__ModuleLoader__.load({
       if (loading && !selected) content = h(Loading)
       else if (!selected) content = h(Empty, { title: '还没有记忆', copy: '完成一些 DSH 对话后，短期记忆和长期记忆会出现在这里。' })
       else if (view.name === 'event') content = h(EventDetail, { event: view.item, project, source, onBack: goBack, backLabel, onNode: openGraphNode })
-      else if (view.name === 'status') content = h(ProcessingStatus, { overview: selected, blocks: data.blocks, conversations, namespace, serverVersion: overview.pluginVersion, onBack: view.back ? goBack : () => setView({ name: 'root' }), backLabel: view.back?.name === 'settings' ? '高级设置' : '返回', refresh })
+      else if (view.name === 'status') content = h(ProcessingStatus, { overview: selected, blocks: data.blocks, conversations, namespace, serverVersion: overview.pluginVersion, stage: view.stage, onBack: view.back ? goBack : () => setView({ name: 'root' }), backLabel: view.back?.name === 'settings' ? '高级设置' : '返回', refresh })
       else if (view.name === 'import') content = h(ImportPage, { namespace, onBack: moreBack, refresh })
       else if (view.name === 'structure') content = h(StructurePage, { events: data.events, eventPage: data.pagination?.events, graph: data.graph, openEvent, namespace, onBack: moreBack })
       else if (view.name === 'system') content = h(SystemPage, { selected, blocks: data.blocks, onBack: view.back ? goBack : moreBack, backLabel: view.back?.name === 'settings' ? '高级设置' : '更多', refresh })
@@ -3527,7 +3538,7 @@ window.__ModuleLoader__.load({
               h('a', { className: 'sg-header-contribute', href: STAR_REPOSITORY_URL, target: '_blank', rel: 'noopener noreferrer' }, '参与开发 · Issue / PR →')))),
         h('nav', { className: 'sg-tabs', 'aria-label': '记忆视图' }, [['short', '短期记忆'], ['long', '长期记忆'], ['more', '更多']].map(([id, label]) => h('button', { key: id, type: 'button', className: 'sg-tab ' + (section === id ? 'active' : ''), 'aria-current': section === id ? 'page' : undefined, onClick: () => goSection(id) }, label))),
         error ? h('div', { className: 'sg-error' }, h('div', { className: 'sg-error-title' }, '暂时无法读取完整记忆'), h('div', null, '已显示能够读取的内容，请稍后重新加载。'), h('details', null, h('summary', null, '技术详情'), h('div', { className: 'sg-code' }, error))) : null,
-        view.name === 'status' ? null : h(MemoryStatusAlert, { overview: error ? null : selected, onOpen: () => setView({ name: 'status' }) }),
+        view.name === 'status' ? null : h(MemoryStatusAlert, { overview: error ? null : selected, onOpen: (stage) => setView({ name: 'status', stage }) }),
         h('section', { key: section + ':' + view.name, className: 'sg-view', 'aria-label': 'StrataGate 记忆内容' }, content),
         h('footer', { className: 'sg-footer' }, '发现问题？ ', h('button', { type: 'button', onClick: () => { setSection('more'); setView({ name: 'support' }); setSource(null) } }, '提交反馈')))
     }
