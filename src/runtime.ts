@@ -160,17 +160,34 @@ function patchFeedbackMarkdown(markdown: string, input: FeedbackDraftInput): str
         }).filter(Boolean).join('\n')
       : feedbackText(raw, key === 'description' ? 20_000 : key === 'expected' || key === 'actual' ? 10_000 : 20_000)
     const marker = `## ${heading}`
-    const start = result.indexOf(marker)
-    const nextHeading = /\n##\s+/g
-    if (start < 0) {
+    const lines = result.split('\n')
+    let inFence = false
+    let sectionStart = -1
+    let sectionEnd = lines.length
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = (lines[index] ?? '').replace(/\r$/, '')
+      const trimmed = line.trim()
+      if (/^(?:```|~~~)/.test(trimmed)) {
+        inFence = !inFence
+        continue
+      }
+      if (inFence) continue
+      if (trimmed === marker && sectionStart < 0) {
+        sectionStart = index
+        continue
+      }
+      if (sectionStart >= 0 && /^##\s+\S/.test(line)) {
+        sectionEnd = index
+        break
+      }
+    }
+    if (sectionStart < 0) {
       if (text) result = `${result ? `${result}\n\n` : ''}${marker}\n\n${text}`
       continue
     }
-    nextHeading.lastIndex = start + marker.length
-    const next = nextHeading.exec(result)
-    const end = next ? next.index : result.length
-    const replacement = text ? `${marker}\n\n${text}` : ''
-    result = result.slice(0, start) + replacement + (next ? `${replacement ? '\n\n' : ''}${result.slice(end).trimStart()}` : '')
+    const replacement = text ? [marker, '', ...text.split('\n')] : []
+    lines.splice(sectionStart, sectionEnd - sectionStart, ...replacement)
+    result = lines.join('\n').trim()
   }
   return result.trim()
 }

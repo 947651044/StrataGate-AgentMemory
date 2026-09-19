@@ -273,6 +273,48 @@ describe('DSH runtime ingestion', () => {
     }
   })
 
+  it('patches only a real top-level Markdown section and preserves lookalikes in text and fences', async () => {
+    const runtime = new StrataGateRuntime({
+      database: ':memory:', namespaceMode: 'project', namespacePrefix: 'dsh', globalNamespace: 'global',
+      blockTurnSize: 6, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048,
+    }, fakeModels)
+    try {
+      const namespace = runtime.namespaceFor(session)
+      const bodyMarkdown = [
+        'Intro with literal ## 预期行为 text.',
+        '',
+        '### 预期行为',
+        '',
+        'Keep the custom level-three section.',
+        '',
+        '```md',
+        '## 预期行为',
+        'code sample must remain untouched',
+        '```',
+        '',
+        '## 预期行为',
+        '',
+        'Old expected content.',
+        '',
+        '## 自定义备注',
+        '',
+        'Keep this custom section.',
+      ].join('\n')
+      runtime.adminSaveFeedbackDraft(namespace, { bodyMarkdown })
+      await runtime.prepareFeedback(session, { expected: 'New expected content.' })
+      const updated = runtime.adminFeedbackDraft(namespace).draft?.bodyMarkdown || ''
+      expect(updated).toContain('Intro with literal ## 预期行为 text.')
+      expect(updated).toContain('### 预期行为')
+      expect(updated).toContain('Keep the custom level-three section.')
+      expect(updated).toContain('```md\n## 预期行为\ncode sample must remain untouched\n```')
+      expect(updated).toContain('## 预期行为\n\nNew expected content.')
+      expect(updated).not.toContain('## 预期行为\n\nOld expected content.')
+      expect(updated).toContain('## 自定义备注\n\nKeep this custom section.')
+    } finally {
+      await runtime.close()
+    }
+  })
+
   it('runs malformed external-memory recovery in a resumable background job', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-import-job-'))
     const database = join(directory, 'memory.db')

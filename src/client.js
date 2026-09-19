@@ -2750,8 +2750,9 @@ window.__ModuleLoader__.load({
       return String(value ?? '')
         .replace(/\b(?:sk|gh[opasu]|github_pat)_[A-Za-z0-9_-]{8,}\b/g, '[REDACTED]')
         .replace(/(["']?\b(?:api[_-]?key|token|password|passwd|access[_-]?token|refresh[_-]?token|secret|authorization)["']?\s*[:=]\s*)(["'])([\s\S]*?)\2/gi, '$1$2[REDACTED]$2')
-        .replace(/(\bauthorization\s*:\s*)(Bearer|Basic|Token)\s+[^\s,;}]+/gi, '$1$2 [REDACTED]')
+        .replace(/(\bauthorization\s*[:=]\s*)(Bearer|Basic|Token)\s+[^\s,;}]+/gi, '$1$2 [REDACTED]')
         .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]{8,}={0,2}\b/gi, 'Bearer [REDACTED]')
+        .replace(/\b(?:Basic|Token)\s+[^\s,;}]+/gi, (match) => match.replace(/\s+[^\s,;}]+$/, ' [REDACTED]'))
         .replace(/(["']?\b(?:api[_-]?key|token|password|passwd|access[_-]?token|refresh[_-]?token|secret|authorization)["']?\s*[:=]\s*)([^\s,;}]+)/gi, '$1[REDACTED]')
     }
 

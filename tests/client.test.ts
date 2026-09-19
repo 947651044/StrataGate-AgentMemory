@@ -1294,12 +1294,12 @@ describe('StrataGate Web client contract', () => {
   it('redacts complete free-text credentials without damaging JSON', () => {
     const { buildSupportReport } = loadSupportHelpers()
     const report = buildSupportReport({
-      problemContent: 'password="two words" Authorization: Basic dXNlcjpwYXNz access_token=access-value refreshToken=refresh-value useful detail',
+      problemContent: 'password="two words" Authorization: Basic dXNlcjpwYXNz authorization=Basic basic-credential authorization = Token token-credential Basic bare-basic-credential Token bare-token-credential access_token=access-value refreshToken=refresh-value useful detail',
       includeLogs: true,
       recentError: 'password="error words" Authorization: Basic c2VjcmV0 access_token=error-access refreshToken=error-refresh; keep this detail',
       data: { blocks: [], events: [], graph: { nodes: [], edges: [] } },
     })
-    for (const secret of ['two words', 'dXNlcjpwYXNz', 'access-value', 'refresh-value', 'error words', 'c2VjcmV0', 'error-access', 'error-refresh']) {
+    for (const secret of ['two words', 'dXNlcjpwYXNz', 'basic-credential', 'token-credential', 'bare-basic-credential', 'bare-token-credential', 'access-value', 'refresh-value', 'error words', 'c2Vjcm0', 'c2VjcmV0', 'error-access', 'error-refresh']) {
       expect(report).not.toContain(secret)
     }
     expect(report).toContain('useful detail')
