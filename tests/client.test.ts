@@ -6,7 +6,7 @@ function loadSupportHelpers(stateValues: unknown[] = [], globals: Record<string,
   const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
   const instrumented = source.replace(
     "    exports.name = 'stratagate-dsh'",
-    "    exports.__test = { feedbackDraftMarkdown, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
+    "    exports.__test = { feedbackDraftMarkdown, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, MemoryStatusAlert, taskStatus, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
   )
   let definition: any
   runInNewContext(instrumented, {
@@ -848,7 +848,7 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain("h(EventMemoryDetails, { event: detailedEvent")
     expect(source).toContain("onPointerDown: (event) => event.stopPropagation()")
     expect(source).toContain("onOpenGraphNode: (namespace, nodeId) => navigateToGraphNode(ctx, namespace, nodeId)")
-    expect(source).toContain('正在升级长期记忆')
+    expect(source).toContain('正在更新知识图谱 · ')
     expect(source).toContain('搜索记忆、人物、项目、概念')
     expect(source).not.toContain("['overview', '概览']")
     expect(source).not.toContain('sg-stats')
@@ -1347,7 +1347,7 @@ describe('StrataGate Web client contract', () => {
   it('keeps failures reassuring and exposes related Block settings under More', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
     expect(source).toContain('lastErrorFull')
-    expect(source).toContain('原始内容已经保存，不会丢失。')
+    expect(source).toContain('可查看详情并手动重试。')
     expect(source).toContain('原始对话已保存，不会丢失')
     expect(source).toContain('没有记录技术错误。')
     expect(source).toContain("['raw', '{}', '查看原始数据'")
@@ -1379,10 +1379,11 @@ describe('StrataGate Web client contract', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
     expect(source).toContain('function MemoryStatusAlert')
     expect(source).toContain('sg-memory-alert')
-    expect(source).toContain("needsAttention ? 'attention' : 'processing'")
-    expect(source).toContain("'正在整理 ' + processing + ' 个对话片段'")
-    expect(source).toContain('原始内容已保存，不影响继续使用。')
-    expect(source).toContain('点击查看并重试。')
+    expect(source).toContain("'正在压缩 ' + status.blockSummary.processing + ' 个短期记忆块'")
+    expect(source).toContain("'正在更新知识图谱 · ' + graphProgress")
+    expect(source).toContain("'知识图谱更新未完成 · ' + graphProgress")
+    expect(source).toContain("migrationState === 'failed' ? '查看详情并手动重试。' : '查看详情。'")
+    expect(source).toContain('可查看详情并手动重试。')
     expect(source).not.toContain('sg-processing-alert')
     expect(source).not.toContain('正在触发记忆整理')
     expect(source.match(/h\(MemoryStatusAlert/g)).toHaveLength(1)
@@ -1398,6 +1399,56 @@ describe('StrataGate Web client contract', () => {
     expect(source).toContain("status === 'waiting'")
   })
 
+  it('renders separate product states for summary, extraction, and graph work', () => {
+    const { MemoryStatusAlert, taskStatus } = loadSupportHelpers()
+    const empty = { processing: 0, retryable: 0, terminalFailed: 0, completed: 0, blocked: 0 }
+    const overview = (overrides: any = {}) => ({
+      taskStatus: { blockSummary: empty, eventExtraction: empty, graphProjection: empty },
+      graphMigration: { projected: 136, total: 136, state: 'complete', complete: true },
+      ...overrides,
+    })
+    const render = (value: any) => JSON.stringify(MemoryStatusAlert({ overview: value, onOpen: () => {} }))
+
+    expect(render(overview({ taskStatus: { blockSummary: { ...empty, processing: 3 }, eventExtraction: empty, graphProjection: empty } })))
+      .toContain('正在压缩 3 个短期记忆块')
+    expect(render(overview({ taskStatus: { blockSummary: { ...empty, terminalFailed: 2 }, eventExtraction: empty, graphProjection: empty } })))
+      .toContain('2 个短期记忆块压缩失败')
+    expect(render(overview({ taskStatus: { blockSummary: empty, eventExtraction: { ...empty, processing: 1 }, graphProjection: empty } })))
+      .toContain('正在提取长期记忆')
+    expect(render(overview({ taskStatus: { blockSummary: empty, eventExtraction: { ...empty, terminalFailed: 1 }, graphProjection: empty } })))
+      .toContain('1 个长期记忆提取失败')
+    expect(render(overview({ graphMigration: { projected: 64, total: 136, failed: 0, state: 'processing', complete: false }, taskStatus: { blockSummary: empty, eventExtraction: empty, graphProjection: { ...empty, processing: 1 } } })))
+      .toContain('正在更新知识图谱 · 64/136 Events')
+    expect(render(overview({ graphMigration: { projected: 64, total: 136, failed: 8, state: 'failed', complete: false }, taskStatus: { blockSummary: empty, eventExtraction: empty, graphProjection: { ...empty, terminalFailed: 8 } } })))
+      .toContain('知识图谱有 8 批更新失败 · 已完成 64/136 Events')
+    expect(render(overview({ graphMigration: { projected: 64, total: 136, failed: 3, state: 'processing', complete: false }, taskStatus: { blockSummary: empty, eventExtraction: empty, graphProjection: { ...empty, processing: 1, terminalFailed: 3 } } })))
+      .toContain('知识图谱更新中 · 64/136 Events，3 批失败')
+    expect(render(overview({ graphMigration: { projected: 64, total: 136, failed: 0, state: 'incomplete', complete: false } })))
+      .toContain('知识图谱更新未完成 · 64/136 Events')
+    expect(MemoryStatusAlert({ overview: overview(), onOpen: () => {} })).toBeNull()
+
+    const issueStatus = {
+      blockSummary: empty,
+      eventExtraction: { ...empty, terminalFailed: 1 },
+      graphProjection: { ...empty, terminalFailed: 8 },
+    }
+    const issueAlert = render(overview({ taskStatus: issueStatus, graphMigration: { projected: 64, total: 136, failed: 8, state: 'failed', complete: false } }))
+    expect(issueAlert).toContain('1 个长期记忆提取失败')
+    expect(issueAlert).toContain('知识图谱有 8 批更新失败 · 已完成 64/136 Events')
+    expect(issueAlert).not.toContain('对话片段尚未整理完成')
+    expect(issueAlert).not.toContain('正在升级长期记忆')
+    expect(issueAlert).not.toContain('批待重试')
+
+    expect(taskStatus({
+      processingJobDetails: [{ kind: 'graph-projection', id: 'g1', state: 'processing' }],
+      failedJobDetails: [{ kind: 'graph-projection', id: 'g2', state: 'terminal-failed', attempts: 3, nextRetryAt: null }],
+    })).toMatchObject({ graphProjection: { processing: 1, terminalFailed: 1 } })
+    expect(taskStatus({
+      processingJobDetails: [{ kind: 'graph-projection', id: 'retry-1', status: 'failed', state: 'retryable', nextRetryAt: '2026-09-19T00:01:00.000Z', attempts: 1 }],
+      failedJobDetails: [{ kind: 'graph-projection', id: 'retry-1', status: 'failed', state: 'retryable', nextRetryAt: '2026-09-19T00:01:00.000Z', attempts: 1 }],
+    })).toMatchObject({ graphProjection: { processing: 1, retryable: 1, terminalFailed: 0 } })
+  })
+
   it('separates status refresh from per-job retry with explicit feedback', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
     const statusSource = source.slice(source.indexOf('function processingFingerprint'), source.indexOf('function ImportPage'))
@@ -1405,12 +1456,15 @@ describe('StrataGate Web client contract', () => {
     expect(statusSource).toContain("{ method: 'POST' }")
     expect(statusSource).toContain('重试此任务')
     expect(statusSource).toContain('正在处理…')
-    expect(statusSource).toContain('短期记忆整理')
+    expect(statusSource).toContain('短期记忆压缩详情')
     expect(statusSource).toContain('保存原始对话')
-    expect(statusSource).toContain('生成短期摘要')
-    expect(statusSource).toContain('提炼长期记忆')
+    expect(statusSource).toContain('压缩短期记忆块')
+    expect(statusSource).toContain('提取长期记忆')
+    expect(statusSource).toContain('更新知识图谱')
+    expect(statusSource).toContain('const extractionJobs = item.jobs.filter')
+    expect(statusSource).toContain('const graphJobs = item.jobs.filter')
     expect(statusSource).toContain('等待短期摘要')
-    expect(statusSource).toContain('等待更多对话')
+    expect(statusSource).toContain('等待提取')
     expect(statusSource).toContain('查看技术详情')
     expect(statusSource).toContain('计划重试：')
     expect(statusSource).toContain('自动重试已停止')
@@ -1422,6 +1476,62 @@ describe('StrataGate Web client contract', () => {
     expect(statusSource).toContain('groups.map((group) =>')
     expect(statusSource).toContain('group.items.map((item) =>')
     expect(statusSource).not.toContain("h('dt', null, 'Block')")
+  })
+
+  it('keeps Event Extraction and Graph Projection separate in the status details', () => {
+    const { ProcessingStatus } = loadSupportHelpers()
+    const blockDetails = [{ id: 'blk-1', sourceId: 'blk-1', sequence: 1, title: '测试块', threadId: 'thread-1', turnRange: [1, 4], shouldExtract: true }]
+    const failedJob = (kind: string, id: string) => ({
+      id, kind, status: 'failed', state: 'terminal-failed', attempts: 3, nextRetryAt: null,
+      updatedAt: '2026-09-18T00:00:00.000Z', lastError: kind + ' failed', blockIds: ['blk-1'], blockDetails,
+    })
+    const rendered = JSON.stringify(ProcessingStatus({
+      overview: {
+        processingJobs: 0,
+        failedJobs: 2,
+        processingJobDetails: [],
+        failedJobDetails: [failedJob('event-extraction', 'extract-1'), failedJob('graph-projection', 'graph-1')],
+      },
+      blocks: [],
+      conversations: [{ id: 'thread-1', label: '测试对话' }],
+      namespace: 'dsh:project:test',
+      serverVersion: '0.2.73',
+      onBack: () => {},
+      refresh: async () => null,
+    }))
+    expect(rendered).toContain('提取长期记忆')
+    expect(rendered).toContain('更新知识图谱')
+    expect(rendered).toContain('"sg-process-stage-name"},"提取长期记忆"')
+    expect(rendered).toContain('"sg-process-stage-name"},"更新知识图谱"')
+    expect(rendered).toContain('长期记忆提取')
+    expect(rendered).toContain('知识图谱更新')
+  })
+
+  it('uses the clicked stage for detail titles and only exposes terminal retry actions', () => {
+    const { ProcessingStatus } = loadSupportHelpers()
+    const details = [{ id: 'blk-1', sourceId: 'blk-1', sequence: 1, title: '测试块', threadId: 'thread-1', turnRange: [1, 4], shouldExtract: true }]
+    const job = (kind: string, state: string, nextRetryAt: string | null) => ({
+      id: kind + '-1', kind, status: 'failed', state, attempts: state === 'retryable' ? 1 : 3, nextRetryAt,
+      updatedAt: '2026-09-19T00:00:00.000Z', lastError: kind + ' failed', blockIds: ['blk-1'], blockDetails: details,
+    })
+    const props = (stage: string, jobs: any[]) => ({
+      overview: { processingJobs: jobs.length, failedJobs: jobs.length, processingJobDetails: [], failedJobDetails: jobs },
+      blocks: [], conversations: [{ id: 'thread-1', label: '测试对话' }], namespace: 'dsh:project:test', serverVersion: '0.2.73', stage,
+      onBack: () => {}, refresh: async () => null,
+    })
+    const summaryRetryable = JSON.stringify(ProcessingStatus(props('summary', [job('block-summary', 'retryable', '2026-09-19T00:01:00.000Z')])))
+    expect(summaryRetryable).toContain('短期记忆压缩详情')
+    expect(summaryRetryable).toContain('计划自动重试')
+    expect(summaryRetryable).not.toContain('重试此任务')
+    const extractionTerminal = JSON.stringify(ProcessingStatus(props('extraction', [job('event-extraction', 'terminal-failed', null)])))
+    expect(extractionTerminal).toContain('长期记忆提取详情')
+    expect(extractionTerminal).toContain('重试此任务')
+    const graphTerminal = JSON.stringify(ProcessingStatus(props('graph', [job('graph-projection', 'terminal-failed', null)])))
+    expect(graphTerminal).toContain('知识图谱提取详情')
+    expect(graphTerminal).toContain('提取长期记忆')
+    expect(graphTerminal).toContain('已完成')
+    expect(graphTerminal).toContain('更新失败，可重试')
+    expect(graphTerminal).toContain('重试此任务')
   })
 
   it('does not claim legacy background work is empty when the old server omits job details', () => {
@@ -1453,7 +1563,7 @@ describe('StrataGate Web client contract', () => {
     }))
     expect(recovered).toContain('帮我试用最新版')
     expect(recovered).toContain('第 13–18 轮')
-    expect(recovered).toContain('生成短期摘要')
+    expect(recovered).toContain('压缩短期记忆块')
     expect(recovered).toContain('处理中')
     expect(recovered).not.toContain('任务仍在整理，具体会话暂不可用')
   })
