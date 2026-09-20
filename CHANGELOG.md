@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.76 - 2026-09-20
+
+- Track exact Event provenance for Graph node names, aliases, and tags without changing the SQLite schema, while keeping legacy metadata visible only when every potential source remains exposable.
+- Prevent hidden or unproven metadata from driving entity merges, citations, adopted names, search claims, or automatic context, and keep canonical-name evidence attached to the name it actually supports.
+- Preserve Fact key/value record boundaries during temporal search so unrelated fields cannot manufacture a current or historical match, while retaining legitimate multi-record queries.
+
 ## 0.2.75 - 2026-09-20
 
 - Keep feedback reports local until the user explicitly pastes them, with stronger credential redaction, privacy-safe Issue URLs, and reliable clipboard, popup, and draft-save failure handling.
