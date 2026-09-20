@@ -6,6 +6,10 @@ import { openNativePath } from '@deepseek-ai/dsh-native-command'
 import type { Session, SessionEvent, SessionSeq } from '@deepseek-ai/dsh-session'
 import {
   DERIVATION_MAX_ATTEMPTS,
+  GRAPH_PROVENANCE_LIMIT,
+  boundEffectiveGraphNodeView,
+  effectiveGraphNodeView,
+  graphTimeline,
   estimateTokens,
   memoryWeightAt,
   rrfRank,
@@ -19,7 +23,7 @@ import {
   type ExternalMemoryImportJob,
   type ExternalMemoryImportWorkItem,
   type BlockContextEntry,
-  type GraphNode,
+  type GraphNodeSearchResult,
   type ElementSearchOptions,
   type MemoryCitation,
   type MemoryElementType,
@@ -769,18 +773,23 @@ export class StrataGateRuntime {
       .filter(Boolean)
       .join('\n\n')
     const eventHits = activationQuery ? await memory.searchEvents(activationQuery, { limit: 20 }) : []
-    let graphNodes: GraphNode[] = []
+    let graphResults: GraphNodeSearchResult[] = []
     if (activationQuery && typeof memory.searchGraphNodes === 'function') {
-      graphNodes = (await memory.searchGraphNodes(activationQuery, 12)).map(({ node }) => node)
+      graphResults = await memory.searchGraphNodes(activationQuery, 12)
     } else if (activationQuery) {
       // Compatibility for an in-flight older core instance; new persistent
       // spaces always use Graph nodes and never create new Element cards.
       const legacy = activatedElements(memory, await memory.searchElements(activationQuery, { limit: 12 }))
-      graphNodes = legacy.map((item) => ({
-        id: item.elementId, name: item.name, type: item.type, aliases: [], currentState: '', status: 'active',
-        confidence: item.fact.confidence ?? 0.8, sourceEventIds: item.fact.sourceEventIds,
-        facts: [{ ...item.fact, confidence: item.fact.confidence ?? 0.8, status: item.fact.status === 'disputed' ? 'disputed' : item.fact.status === 'superseded' ? 'superseded' : 'active' }],
-        createdAt: item.fact.createdAt, updatedAt: item.fact.updatedAt,
+      graphResults = legacy.map((item) => ({
+        node: {
+          id: item.elementId, name: item.name, type: item.type, aliases: [], currentState: '', status: 'active',
+          confidence: item.fact.confidence ?? 0.8, sourceEventIds: item.fact.sourceEventIds,
+          facts: [{ ...item.fact, confidence: item.fact.confidence ?? 0.8, status: item.fact.status === 'disputed' ? 'disputed' : item.fact.status === 'superseded' ? 'superseded' : 'active' }],
+          createdAt: item.fact.createdAt, updatedAt: item.fact.updatedAt,
+        },
+        score: item.score,
+        matchType: item.fact.status === 'superseded' ? 'historical' : 'current',
+        provenanceEventIds: item.fact.sourceEventIds,
       }))
     }
 
@@ -794,11 +803,11 @@ export class StrataGateRuntime {
     const longTermEvents = events
       .filter((event) => !currentEventIds.has(event.id))
       .slice(0, AUTO_EVENT_LIMIT)
-    graphNodes = graphNodes
-      .filter((node) => !node.sourceEventIds.some((id) => currentEventIds.has(id)))
+    graphResults = graphResults
+      .filter((result) => !(result.provenanceEventIds ?? result.node.sourceEventIds).some((id) => currentEventIds.has(id)))
       .slice(0, AUTO_ELEMENT_LIMIT)
 
-    return renderActivatedMemory(longTermEvents, graphNodes)
+    return renderActivatedMemory(longTermEvents, graphResults)
   }
 
   /**
@@ -1650,14 +1659,14 @@ export class StrataGateRuntime {
   async searchGraph(session: Session, query: string, limit = 8): Promise<unknown> {
     await this.flush()
     const results = await (await this.space(session)).searchGraphNodes(query, limit)
-    return this.batch(session, results.map(({ node }) => ({
+    return this.batch(session, results.map(({ node, provenanceEventIds }) => ({
       ref: `graph-node:${node.id}`,
       target: {
-        eventIds: node.sourceEventIds,
+        eventIds: (provenanceEventIds ?? []).slice(0, GRAPH_PROVENANCE_LIMIT),
         elementIds: [],
         citation: citation('graph', node.id, node.name, `graph-node:${node.id}`, 'nodeId'),
       },
-    })), results.map(({ node, score, matchedFields, matchReason }) => compactGraphNode(node, score, matchedFields, matchReason)))
+    })), results.map(compactGraphNode))
   }
 
   async expandGraphNode(session: Session, id: string): Promise<unknown> {
@@ -1665,15 +1674,42 @@ export class StrataGateRuntime {
     const memory = await this.space(session)
     const node = memory.listGraphNodes().find((candidate) => candidate.id === id)
     if (!node) throw new Error(`Unknown graph node: ${id}`)
-    const edges = memory.listGraphEdges().filter(({ fromNodeId, toNodeId }) => fromNodeId === id || toNodeId === id)
+    const view = effectiveGraphNodeView(node, memory.listGraphEdges(), memory.listEvents())
+    if (!view) throw new Error(`Graph node ${id} has no retrievable Event evidence`)
+    const provenanceEventIds = [...new Set([
+      ...view.currentFacts.flatMap(({ sourceEventIds }) => sourceEventIds),
+      ...view.currentEdges.flatMap(({ sourceEventIds }) => sourceEventIds),
+      ...view.historicalFacts.flatMap(({ sourceEventIds }) => sourceEventIds),
+      ...view.historicalEdges.flatMap(({ sourceEventIds }) => sourceEventIds),
+      ...view.currentNodeEventIds,
+      ...view.historicalNodeEventIds,
+    ])].slice(0, GRAPH_PROVENANCE_LIMIT)
+    const legacyMetadataOverflow = !view.node.metadataProvenance && view.node.sourceEventIds.length > GRAPH_PROVENANCE_LIMIT
+    const boundedView = boundEffectiveGraphNodeView(view, new Set(provenanceEventIds), {
+      preserveLegacyMetadata: legacyMetadataOverflow,
+    })
+    const currentFacts = boundedView.currentFacts
+    const historicalFacts = boundedView.historicalFacts
+    const currentEdges = boundedView.currentEdges
+    const historicalEdges = boundedView.historicalEdges
     return this.batch(session, [{
       ref: `graph-node:${node.id}:expanded`,
       target: {
-        eventIds: [...new Set([...node.sourceEventIds, ...edges.flatMap(({ sourceEventIds }) => sourceEventIds)])],
+        eventIds: provenanceEventIds,
         elementIds: [],
-        citation: citation('graph', node.id, node.name, `graph-node:${node.id}:expanded`, 'nodeId', { expanded: true }),
+        citation: citation('graph', node.id, boundedView.node.name, `graph-node:${node.id}:expanded`, 'nodeId', { expanded: true }),
       },
-    }], { node, edges })
+    }], {
+      node: boundedView.node,
+      edges: [...currentEdges, ...historicalEdges],
+      currentFacts,
+      historicalFacts,
+      currentEdges,
+      historicalEdges,
+      provenanceEventIds,
+      ...(legacyMetadataOverflow ? { metadataEvidenceStatus: 'not_expanded' as const } : {}),
+      timeline: graphTimeline(provenanceEventIds, memory.listEvents()),
+    })
   }
 
   private scheduleBlockDerivation(session: Session, memory: StrataGate): void {
@@ -2054,23 +2090,27 @@ function compactEvent(event: EventCard, score: number): Record<string, unknown> 
   }
 }
 
-function compactGraphNode(
-  node: GraphNode,
-  score: number,
-  matchedFields?: readonly string[],
-  matchReason?: string,
-): Record<string, unknown> {
+function compactGraphNode(result: GraphNodeSearchResult): Record<string, unknown> {
+  const { node, score, matchedFields, matchReason } = result
   return {
     id: node.id,
     name: node.name,
     type: node.type,
     aliases: node.aliases.map((alias) => compactText(alias, 160)),
+    ...(node.tags ? { tags: node.tags.map((tag) => compactText(tag, 120)) } : {}),
     currentState: compactText(node.currentState, 500),
     status: node.status,
     rankScore: score,
     ...(matchedFields ? { matchedFields } : {}),
     ...(matchReason ? { matchReason } : {}),
+    ...(result.metadataEvidenceStatus ? { metadataEvidenceStatus: result.metadataEvidenceStatus } : {}),
     scoreMeaning: 'Ranking-only BM25/RRF score; not confidence, probability, or factual accuracy.',
+    ...(result.matchType ? { matchType: result.matchType } : {}),
+    ...(result.currentFacts ? { currentMatches: result.currentFacts } : {}),
+    ...(result.historicalFacts ? { historicalMatches: result.historicalFacts } : {}),
+    ...(result.currentEdges ? { currentRelations: result.currentEdges } : {}),
+    ...(result.historicalEdges ? { historicalRelations: result.historicalEdges } : {}),
+    ...(result.timeline ? { timeline: result.timeline } : {}),
   }
 }
 
@@ -2165,7 +2205,7 @@ function activatedElements(memory: StrataGate, relevance: readonly ElementSearch
   ]).map(({ item }) => item)
 }
 
-function renderActivatedMemory(events: readonly EventCard[], graphNodes: readonly GraphNode[]): string {
+function renderActivatedMemory(events: readonly EventCard[], graphResults: readonly GraphNodeSearchResult[]): string {
   const heading = [
     '[Activated long-term memory]',
     'Historical memory context.',
@@ -2194,13 +2234,23 @@ function renderActivatedMemory(events: readonly EventCard[], graphNodes: readonl
     eventCount += 1
   }
 
-  for (const node of graphNodes) {
+  for (const result of graphResults) {
+    const node = result.node
     const rendered = JSON.stringify({
       nodeId: node.id,
       name: node.name,
       type: node.type,
+      aliases: node.aliases,
+      tags: node.tags,
+      status: node.status,
+      metadataEvidenceStatus: result.metadataEvidenceStatus,
+      matchType: result.matchType,
       currentState: node.currentState,
-      facts: node.facts.filter(({ status }) => status === 'active').map(({ key, value, validFrom, validTo }) => ({ key, value, validFrom, validTo })),
+      facts: node.facts.map(({ key, value, status, validFrom, validTo }) => ({ key, value, status, validFrom, validTo })),
+      currentRelations: result.currentEdges?.map(({ relation, status }) => ({ relation, status })),
+      historicalMatches: result.historicalFacts?.map(({ key, value, status, validFrom, validTo }) => ({ key, value, status, validFrom, validTo })),
+      historicalRelations: result.historicalEdges?.map(({ relation, status, validFrom, validTo }) => ({ relation, status, validFrom, validTo })),
+      timeline: result.timeline,
     })
     const cost = estimateTokens(`\nKnowledgeGraph:\n- ${rendered}`)
     if (tokens + cost > AUTO_MEMORY_TOKEN_BUDGET) break

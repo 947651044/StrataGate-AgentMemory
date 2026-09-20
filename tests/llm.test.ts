@@ -277,7 +277,15 @@ describe('DeepSeek Harness model JSON retries', () => {
     }
     const { bridge, session, calls } = modelBridge([{
       tool: { reason: 'projected', nodes: [{
-        ref: 'locomo', name: 'LoCoMo', type: 'project', tags: ['benchmark', 'evaluation'], sourceEventIds: [event.id],
+        ref: 'locomo', name: 'LoCoMo', type: 'project', tags: ['benchmark', 'evaluation'],
+        metadataProvenance: {
+          name: [event.id],
+          tags: [
+            { value: 'benchmark', sourceEventIds: [event.id] },
+            { value: 'evaluation', sourceEventIds: [event.id] },
+          ],
+        },
+        sourceEventIds: [event.id],
       }], edges: [] },
     }])
 
@@ -286,9 +294,30 @@ describe('DeepSeek Harness model JSON retries', () => {
     }))
 
     expect(result.nodes[0]?.tags).toEqual(['benchmark', 'evaluation'])
+    expect(result.nodes[0]?.metadataProvenance?.name).toEqual([event.id])
     expect(calls.mock.calls[0]?.[0].tools?.[0]?.name).toBe('stratagate_project_knowledge_graph')
     expect(calls.mock.calls[0]?.[0].tools?.[0]?.parameters?.properties?.nodes?.items?.required).toContain('tags')
+    expect(calls.mock.calls[0]?.[0].tools?.[0]?.parameters?.properties?.nodes?.items?.required).toContain('metadataProvenance')
+    expect(calls.mock.calls[0]?.[0].tools?.[0]?.parameters?.properties?.nodes?.items?.properties?.metadataProvenance?.required).toContain('name')
     expect(calls.mock.calls[0]?.[0].system).toContain('tags describe the node')
+  })
+
+  it('rejects a structured Graph node that omits canonical-name provenance', async () => {
+    const event = {
+      id: 'evt_graph_invalid', title: 'Invalid graph', summary: 'The model omitted field provenance.',
+      narrative: '', tags: [], quotes: [], sourceMessageIds: ['msg_graph_invalid'], sourceBlockId: 'blk_graph_invalid',
+      temporal: {}, scope: 'project' as const, criticality: 'routine' as const, confidence: 0.9,
+      status: 'active' as const, supersededBy: null,
+      weight: { mentionCount: 1, lastAdoptedTurn: 1, lastRetrievedAt: null, pinned: false, floorWeight: 0, forcedCap: null },
+      createdAt: '2026-09-20T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z',
+    }
+    const invalid = {
+      tool: { reason: 'invalid', nodes: [{ ref: 'invalid', name: 'Invalid', type: 'project', tags: [], sourceEventIds: [event.id] }], edges: [] },
+    }
+    const { bridge, session } = modelBridge([invalid, invalid])
+    await expect(bridge.run(session, () => bridge.graphProjector({
+      jobId: 'gproj_invalid', projectorVersion: 1, events: [event], existingNodes: [], existingEdges: [],
+    }))).rejects.toThrow(/metadataProvenance/i)
   })
 
   it('compacts historical Graph context before sending it to the model', async () => {
@@ -318,10 +347,10 @@ describe('DeepSeek Harness model JSON retries', () => {
     const context = { jobId: 'gproj_compact', projectorVersion: 1, events: [event], existingNodes, existingEdges }
     const proposedNodes = [
       ...Array.from({ length: 6 }, (_, index) => ({
-        ref: `invalid_${index}`, name: `Invalid ${index}`, type: 'project', tags: [], sourceEventIds: ['evt_unknown'],
+        ref: `invalid_${index}`, name: `Invalid ${index}`, type: 'project', tags: [], metadataProvenance: { name: ['evt_unknown'] }, sourceEventIds: ['evt_unknown'],
       })),
       ...Array.from({ length: 30 }, (_, index) => ({
-        ref: `proposal_${index}`, name: `Proposal ${index}`, type: 'project', tags: [], sourceEventIds: [event.id],
+        ref: `proposal_${index}`, name: `Proposal ${index}`, type: 'project', tags: [], metadataProvenance: { name: [event.id] }, sourceEventIds: [event.id],
       })),
     ]
     const proposedEdges = [

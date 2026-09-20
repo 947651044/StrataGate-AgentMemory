@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { StrataGate } from '@diqier/stratagate'
+import { StrataGate, type GraphNode } from '@diqier/stratagate'
 import { SqliteStorage } from '@diqier/stratagate/sqlite'
 import { describe, expect, it, vi } from 'vitest'
 import type { DshModelBridge } from '../src/llm.js'
@@ -575,9 +575,13 @@ describe('DSH runtime ingestion', () => {
       await memory.completeGraphProjection(projection!.jobId, {
         reason: 'graph',
         nodes: [
-          { ref: 'project', name: 'StrataGate', type: 'project', tags: ['memory plugin'], state: 'released', sourceEventIds: [event.id] },
-          { ref: 'tool', name: 'MCP tool', type: 'tool', sourceEventIds: [event.id] },
-          { ref: 'tool-name', name: 'StrataGate', type: 'tool', tags: ['cli'], sourceEventIds: [event.id] },
+          { ref: 'project', name: 'StrataGate', type: 'project', tags: ['memory plugin'], metadataProvenance: {
+            name: [event.id], tags: [{ value: 'memory plugin', sourceEventIds: [event.id] }],
+          }, state: 'released', sourceEventIds: [event.id] },
+          { ref: 'tool', name: 'MCP tool', type: 'tool', metadataProvenance: { name: [event.id] }, sourceEventIds: [event.id] },
+          { ref: 'tool-name', name: 'StrataGate', type: 'tool', tags: ['cli'], metadataProvenance: {
+            name: [event.id], tags: [{ value: 'cli', sourceEventIds: [event.id] }],
+          }, sourceEventIds: [event.id] },
         ],
         edges: [{ fromRef: 'project', toRef: 'tool', relation: 'memory plugin', sourceEventIds: [event.id] }],
       })
@@ -608,6 +612,138 @@ describe('DSH runtime ingestion', () => {
       const rawBatch = await runtime.searchRaw(active, 'memory plugin', 4, 'namespace') as { results: Array<Record<string, unknown>> }
       expect(rawBatch.results[0]).toMatchObject({ blockId: block.id, message: { id: block.l5Raw[0]!.id } })
       expect(rawBatch.results[0]).not.toHaveProperty('nearby')
+    } finally {
+      await runtime.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps search, expand, auto context, and reinforcement on the same bounded effective Graph evidence', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-dsh-effective-graph-'))
+    const database = join(directory, 'memory.db')
+    const active = {
+      ...session,
+      id: 'effective-graph-session',
+      header: { ...session.header, id: 'effective-graph-session' },
+      deriveMessages: () => [{
+        id: 'current-user', role: 'user', content: [{ type: 'text', text: '黄方以前在 B公司 吗？' }], source: { kind: 'user' },
+      }],
+    } as unknown as Session
+    const runtime = new StrataGateRuntime({
+      database, namespaceMode: 'project', namespacePrefix: 'dsh', globalNamespace: 'global',
+      blockTurnSize: 1, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048,
+    }, fakeModels)
+    try {
+      const memory = await (runtime as unknown as { space: (value: Session) => Promise<StrataGate> }).space(active)
+      await memory.appendTurn({ user: 'Historical source block.', assistant: 'Stored.', threadId: 'older-session' })
+      const block = memory.listBlocks()[0]!
+      const add = (id: string, summary: string) => memory.addEvent({
+        id, title: id, summary, sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id],
+      })
+      const currentA = await add('evt_runtime_current_a', '黄方目前在 A公司。')
+      const historicalB = await add('evt_runtime_historical_b', '黄方曾经在 B公司。')
+      historicalB.status = 'superseded'
+      const unrelated = await add('evt_runtime_unrelated', '与查询无关的更新。')
+      const forgotten = await add('evt_runtime_forgotten', 'secret-forgotten')
+      await memory.forgetEvent(forgotten.id)
+      const now = '2026-09-20T00:00:00.000Z'
+      const nodes = memory.listGraphNodes() as GraphNode[]
+      nodes.push({
+        id: 'node_runtime_person', name: '黄方', type: 'person', aliases: ['HF'], currentState: 'company: B公司 stale',
+        status: 'active', confidence: 0.9, sourceEventIds: [currentA.id, historicalB.id, unrelated.id, forgotten.id],
+        facts: [{
+          id: 'fact_runtime_a', key: '公司', value: 'A公司', status: 'active', confidence: 0.9,
+          sourceEventIds: [currentA.id], createdAt: now, updatedAt: now,
+        }, {
+          id: 'fact_runtime_b', key: '公司', value: 'B公司', status: 'superseded', confidence: 0.9,
+          sourceEventIds: [historicalB.id], createdAt: now, updatedAt: now,
+        }, {
+          id: 'fact_runtime_hidden', key: 'secret', value: 'secret-forgotten', status: 'active', confidence: 0.9,
+          sourceEventIds: [forgotten.id], createdAt: now, updatedAt: now,
+        }],
+        createdAt: now, updatedAt: now,
+      }, {
+        id: 'node_runtime_hidden', name: 'Forgotten Node', type: 'project', aliases: [], currentState: 'secret-forgotten',
+        status: 'active', confidence: 0.9, sourceEventIds: [forgotten.id], facts: [{
+          id: 'fact_runtime_hidden_node', key: 'state', value: 'secret-forgotten', status: 'active', confidence: 0.9,
+          sourceEventIds: [forgotten.id], createdAt: now, updatedAt: now,
+        }], createdAt: now, updatedAt: now,
+      }, {
+        id: 'node_runtime_metadata', name: 'Metadata Entity', type: 'project', aliases: ['saferuntimealias', 'forbiddenruntime'],
+        tags: ['saferuntimetag', 'forbiddenruntimetag'], currentState: '', status: 'active', confidence: 0.9,
+        sourceEventIds: [currentA.id, forgotten.id], metadataProvenance: {
+          name: [currentA.id],
+          aliases: [
+            { value: 'saferuntimealias', sourceEventIds: [currentA.id] },
+            { value: 'forbiddenruntime', sourceEventIds: [forgotten.id] },
+          ],
+          tags: [
+            { value: 'saferuntimetag', sourceEventIds: [currentA.id] },
+            { value: 'forbiddenruntimetag', sourceEventIds: [forgotten.id] },
+          ],
+        }, facts: [], createdAt: now, updatedAt: now,
+      })
+
+      const batch = await runtime.searchGraph(active, 'B公司') as {
+        batchId: string; evidenceRefs: string[]; results: Array<Record<string, unknown>>
+      }
+      const result = batch.results.find(({ id }) => id === 'node_runtime_person')!
+      expect(result).toMatchObject({ matchType: 'historical', currentState: expect.stringContaining('A公司') })
+      expect(String(result.currentState)).not.toContain('stale')
+      expect(result.historicalMatches).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'fact_runtime_b' })]))
+      expect(result.timeline).toEqual([
+        expect.objectContaining({ id: historicalB.id, status: 'superseded' }),
+        expect.objectContaining({ id: currentA.id, status: 'active' }),
+      ])
+
+      const expanded = await runtime.expandGraphNode(active, 'node_runtime_person') as {
+        results: { node: { currentState: string; facts: Array<{ id: string }> }; historicalFacts: Array<{ id: string }>; provenanceEventIds: string[] }
+      }
+      expect(expanded.results.node.currentState).toContain('A公司')
+      expect(expanded.results.node.currentState).not.toContain('stale')
+      expect(expanded.results.node.facts.map(({ id }) => id)).toEqual(['fact_runtime_a'])
+      expect(expanded.results.historicalFacts.map(({ id }) => id)).toEqual(['fact_runtime_b'])
+      expect(expanded.results.provenanceEventIds).not.toContain(forgotten.id)
+      await expect(runtime.expandGraphNode(active, 'node_runtime_hidden')).rejects.toThrow('no retrievable Event evidence')
+
+      const context = await runtime.buildAutoContext(active)
+      expect(context).toContain('"matchType":"historical"')
+      expect(context).toContain('"currentState":"公司: A公司"')
+      expect(context).toContain('"historicalMatches":[{"key":"公司","value":"B公司"')
+      expect(context).not.toContain('stale')
+      expect(context).not.toContain('secret-forgotten')
+
+      const before = new Map(memory.listEvents().map((event) => [event.id, event.weight.mentionCount]))
+      const graphRef = batch.evidenceRefs.find((ref) => ref === 'graph-node:node_runtime_person')!
+      await runtime.assess(active, {
+        verdict: 'sufficient', evidence_refs: [graphRef], fit: 'The matched historical fact answers the question.',
+        missing: '', next_strategy: 'answer',
+      }, batch.batchId)
+      const recorded = await runtime.recordUse(active, 'effective-graph-use', [graphRef], batch.batchId) as { eventIds: string[] }
+      expect(recorded.eventIds).toEqual([historicalB.id, currentA.id])
+      expect(memory.listEvents().find(({ id }) => id === historicalB.id)?.weight.mentionCount).toBe(before.get(historicalB.id)! + 1)
+      expect(memory.listEvents().find(({ id }) => id === currentA.id)?.weight.mentionCount).toBe(before.get(currentA.id)! + 1)
+      expect(memory.listEvents().find(({ id }) => id === unrelated.id)?.weight.mentionCount).toBe(before.get(unrelated.id))
+      expect(memory.listEvents().find(({ id }) => id === forgotten.id)?.weight.mentionCount).toBe(before.get(forgotten.id))
+
+      const metadataSession = {
+        ...active,
+        id: 'effective-graph-metadata-session',
+        header: { ...active.header, id: 'effective-graph-metadata-session' },
+        deriveMessages: () => [{
+          id: 'metadata-user', role: 'user', content: [{ type: 'text', text: 'forbiddenruntime' }], source: { kind: 'user' },
+        }],
+      } as unknown as Session
+      const hiddenMetadata = await runtime.searchGraph(metadataSession, 'forbiddenruntime') as { results: unknown[] }
+      expect(hiddenMetadata.results).toEqual([])
+      const safeMetadata = await runtime.searchGraph(metadataSession, 'saferuntimealias') as { results: Array<Record<string, unknown>> }
+      expect(safeMetadata.results[0]).toMatchObject({ name: 'Metadata Entity', aliases: ['saferuntimealias'], tags: ['saferuntimetag'] })
+      const expandedMetadata = await runtime.expandGraphNode(metadataSession, 'node_runtime_metadata') as { results: { node: { aliases: string[]; tags?: string[] } } }
+      expect(expandedMetadata.results.node.aliases).toEqual(['saferuntimealias'])
+      expect(expandedMetadata.results.node.tags).toEqual(['saferuntimetag'])
+      const metadataContext = await runtime.buildAutoContext(metadataSession)
+      expect(metadataContext).not.toContain('forbiddenruntime')
+      expect(metadataContext).not.toContain('forbiddenruntimetag')
     } finally {
       await runtime.close()
       await rm(directory, { recursive: true, force: true })
@@ -719,6 +855,7 @@ describe('DSH runtime ingestion', () => {
         reason: 'project tool',
         nodes: [{
           ref: 'stratagate', name: 'StrataGate', type: 'project', state: 'packageManager: pnpm',
+          metadataProvenance: { name: [relevant.id] },
           facts: [{ key: 'packageManager', value: 'pnpm', sourceEventIds: [relevant.id] }],
           sourceEventIds: [relevant.id],
         }],
@@ -1468,6 +1605,7 @@ describe('DSH runtime ingestion', () => {
           ref: 'pnpm',
           name: 'pnpm',
           type: 'tool',
+          metadataProvenance: { name: [event.id] },
           state: 'selected package manager',
           facts: [{ key: 'role', value: 'project package manager', sourceEventIds: [event.id] }],
           sourceEventIds: [event.id],

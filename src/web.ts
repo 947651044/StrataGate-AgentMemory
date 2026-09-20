@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import {
   DERIVATION_MAX_ATTEMPTS,
   deterministicBlockLayers,
+  effectiveGraphNodeView,
   estimateTokens,
   EXTERNAL_MEMORY_EXPORT_PROMPT_ZH_CN,
   formatRawTranscript,
@@ -1179,17 +1180,38 @@ async function sources(runtime: StrataGateRuntime, url: URL): Promise<unknown> {
     events = [event]
     ids = new Set(event.sourceMessageIds)
   } else if (nodeId) {
-    const node = snapshot.graphNodes.find(({ id }) => id === nodeId)
-    if (!node) throw new AdminHttpError(404, `Unknown graph node: ${nodeId}`)
-    events = snapshot.events.filter(({ id }) => node.sourceEventIds.includes(id))
+    const rawNode = snapshot.graphNodes.find(({ id }) => id === nodeId)
+    if (!rawNode) throw new AdminHttpError(404, `Unknown graph node: ${nodeId}`)
+    const view = effectiveGraphNodeView(rawNode, snapshot.graphEdges, snapshot.events)
+    if (!view) throw new AdminHttpError(404, `Graph node has no retrievable Event evidence: ${nodeId}`)
+    const edges = [...view.currentEdges, ...view.historicalEdges]
+    const relatedNodeIds = new Set([rawNode.id, ...edges.flatMap(({ fromNodeId, toNodeId }) => [fromNodeId, toNodeId])])
+    const nodes = snapshot.graphNodes
+      .filter(({ id }) => relatedNodeIds.has(id))
+      .flatMap((candidate) => effectiveGraphNodeView(candidate, snapshot.graphEdges, snapshot.events)?.node ?? [])
+    const metadataEventIds = [
+      ...(view.node.metadataProvenance?.name ?? []),
+      ...(view.node.metadataProvenance?.aliases ?? []).flatMap(({ sourceEventIds }) => sourceEventIds),
+      ...(view.node.metadataProvenance?.tags ?? []).flatMap(({ sourceEventIds }) => sourceEventIds),
+    ]
+    const eventIds = new Set([
+      ...view.node.sourceEventIds,
+      ...metadataEventIds,
+      ...view.currentFacts.flatMap(({ sourceEventIds }) => sourceEventIds),
+      ...view.historicalFacts.flatMap(({ sourceEventIds }) => sourceEventIds),
+      ...edges.flatMap(({ sourceEventIds }) => sourceEventIds),
+    ])
+    events = snapshot.events.filter(({ id }) => eventIds.has(id))
     ids = new Set(events.flatMap(({ sourceMessageIds }) => sourceMessageIds))
-    const edges = snapshot.graphEdges.filter(({ fromNodeId, toNodeId }) => fromNodeId === node.id || toNodeId === node.id)
-    const relatedNodeIds = new Set([node.id, ...edges.flatMap(({ fromNodeId, toNodeId }) => [fromNodeId, toNodeId])])
     return {
       namespace,
-      node,
-      nodes: snapshot.graphNodes.filter(({ id }) => relatedNodeIds.has(id)),
+      node: view.node,
+      nodes,
       edges,
+      currentFacts: view.currentFacts,
+      historicalFacts: view.historicalFacts,
+      currentEdges: view.currentEdges,
+      historicalEdges: view.historicalEdges,
       events: events.map((event) => eventSummary(event)),
       messages: sourceMessages(snapshot, ids),
     }
@@ -1226,6 +1248,7 @@ async function sources(runtime: StrataGateRuntime, url: URL): Promise<unknown> {
     ...(eventId ? {
       relatedNodes: snapshot.graphNodes
         .filter(({ id }) => events[0]?.temporal.participantNodeIds?.includes(id))
+        .flatMap((candidate) => effectiveGraphNodeView(candidate, snapshot.graphEdges, snapshot.events)?.node ?? [])
         .map(({ id, name, type, aliases }) => ({ id, name, type, aliases })),
     } : {}),
     elements: elements.map(elementSummary),

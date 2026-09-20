@@ -1142,6 +1142,32 @@ describe('StrataGate admin routes', () => {
     })
   })
 
+  it('filters forgotten Graph metadata and Events from citation source details', async () => {
+    const forgottenEvent = {
+      ...snapshot.events[0]!, id: 'evt_forgotten_graph_detail', title: 'Forgotten source', summary: 'Forgotten alias secret',
+      status: 'forgotten' as const,
+    }
+    const safeRuntime = {
+      adminSnapshot: async () => ({
+        ...snapshot,
+        events: [...snapshot.events, forgottenEvent],
+        graphNodes: [{
+          ...snapshot.graphNodes[0]!, name: 'pnpm', aliases: ['forgotten-secret-alias'],
+          metadataProvenance: {
+            name: ['evt_1'],
+            aliases: [{ value: 'forgotten-secret-alias', sourceEventIds: [forgottenEvent.id] }],
+          },
+          sourceEventIds: ['evt_1', forgottenEvent.id],
+        }],
+      }),
+    } as unknown as StrataGateRuntime
+    const result = await request('/api/stratagate/sources?namespace=graph-safe&nodeId=node_1', 'GET', safeRuntime)
+    expect(result.body.node).toMatchObject({ name: 'pnpm', aliases: [] })
+    expect(result.body.events.map(({ id }: { id: string }) => id)).toEqual(['evt_1'])
+    expect(JSON.stringify(result.body)).not.toContain('forgotten-secret-alias')
+    expect(JSON.stringify(result.body)).not.toContain('Forgotten alias secret')
+  })
+
   it('expands a block into its organized events and elements', async () => {
     const result = await request('/api/stratagate/sources?namespace=dsh%3Aproject%3Atest&blockId=blk_1')
     expect(result.body).toMatchObject({
