@@ -81,14 +81,14 @@ describe('Event-backed knowledge graph', () => {
       results.find(({ node }) => node.id === 'node_person');
     const current = person(await memory.searchGraphNodes('A公司'))!;
     expect(current).toMatchObject({ matchType: 'current' });
-    expect(current.currentFacts).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'fact_company_a' })]));
+    expect(current.currentFacts).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'fact_cn_a' })]));
     expect(current.currentEdges).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'edge_a' })]));
     expect(current.node.currentState).toContain('company: A');
     expect(current.node.currentState).not.toContain('stale cache');
 
     const historical = person(await memory.searchGraphNodes('B公司'))!;
     expect(historical).toMatchObject({ matchType: 'historical' });
-    expect(historical.historicalFacts).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'fact_company_b' })]));
+    expect(historical.historicalFacts).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'fact_cn_b' })]));
     expect(historical.historicalEdges).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'edge_b' })]));
     expect(historical.node.currentState).toContain('company: A');
     expect(historical.provenanceEventIds?.[0]).toBe(historicalB.id);
@@ -254,6 +254,34 @@ describe('Event-backed knowledge graph', () => {
     expect(nodes[0]?.metadataProvenance?.aliases).toEqual(expect.arrayContaining([{ value: 'B', sourceEventIds: [e3.id] }]));
   });
 
+  it('does not merge through a proposal alias that lacks valid field provenance', async () => {
+    const memory = StrataGate.inMemory({ blockTurnSize: 1 });
+    const makeEvent = (id: string) => ({
+      id, title: id, summary: id, sourceBlockId: 'block', sourceMessageIds: [], narrative: '', tags: [], quotes: [], temporal: {}, scope: 'project' as const, criticality: 'routine' as const, confidence: 0.9, status: 'active' as const, supersededBy: null,
+      weight: { mentionCount: 1, lastAdoptedTurn: 0, lastRetrievedAt: null, pinned: false, floorWeight: 0, forcedCap: null }, createdAt: '2026-09-20T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z',
+    });
+    const existingSource = makeEvent('evt_existing');
+    const proposalSource = makeEvent('evt_proposal');
+    const nodes = memory.listGraphNodes() as GraphNode[];
+    nodes.push({
+      id: 'node_existing', name: 'Canonical A', type: 'project', aliases: [], currentState: '', facts: [],
+      status: 'active', confidence: 0.9, sourceEventIds: [existingSource.id], metadataProvenance: { name: [existingSource.id] },
+      createdAt: existingSource.createdAt, updatedAt: existingSource.updatedAt,
+    });
+    const { applyGraphProjection } = await import('../src/graph.js');
+    applyGraphProjection({
+      nodes, edges: memory.listGraphEdges() as GraphEdge[], events: [existingSource, proposalSource],
+      allowedEventIds: new Set([proposalSource.id]), now: proposalSource.createdAt, idFactory: (prefix) => `${prefix}_new`,
+      result: { reason: 'test', nodes: [{
+        ref: 'proposal', name: 'Separate B', type: 'project', aliases: ['Canonical A'], tags: [],
+        metadataProvenance: { name: [proposalSource.id] }, sourceEventIds: [proposalSource.id],
+      }], edges: [] },
+    });
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0]?.aliases).toEqual([]);
+    expect(nodes[1]).toMatchObject({ name: 'Separate B', aliases: [] });
+  });
+
   it('does not fall back to node sources when metadata provenance is missing or mismatched', async () => {
     const memory = StrataGate.inMemory({ blockTurnSize: 1 });
     const makeEvent = (id: string) => ({
@@ -263,15 +291,116 @@ describe('Event-backed knowledge graph', () => {
     const source = makeEvent('evt_projection_source');
     const nodes = memory.listGraphNodes() as GraphNode[];
     const { applyGraphProjection } = await import('../src/graph.js');
+    expect(() => applyGraphProjection({
+      nodes, edges: memory.listGraphEdges() as GraphEdge[], events: [source], allowedEventIds: new Set([source.id]), now: source.createdAt, idFactory: (prefix) => `${prefix}_new`,
+      result: { reason: 'test', nodes: [{ ref: 'missing-name-source', name: 'Rejected', type: 'project', aliases: [], tags: [], sourceEventIds: [source.id] }], edges: [] },
+    })).toThrow(/metadata provenance/i);
     applyGraphProjection({
       nodes, edges: memory.listGraphEdges() as GraphEdge[], events: [source], allowedEventIds: new Set([source.id]), now: source.createdAt, idFactory: (prefix) => `${prefix}_new`,
-      result: { reason: 'test', nodes: [
-        { ref: 'missing-name-source', name: 'Rejected', type: 'project', aliases: [], tags: [], sourceEventIds: [source.id] },
-        { ref: 'mismatched-alias', name: 'Kept', type: 'project', aliases: ['Alias B'], tags: [], metadataProvenance: { name: [source.id], aliases: [{ value: 'Alias C', sourceEventIds: [source.id] }] }, sourceEventIds: [source.id] },
-      ], edges: [] },
+      result: { reason: 'test', nodes: [{ ref: 'mismatched-alias', name: 'Kept', type: 'project', aliases: ['Alias B'], tags: [], metadataProvenance: { name: [source.id], aliases: [{ value: 'Alias C', sourceEventIds: [source.id] }] }, sourceEventIds: [source.id] }], edges: [] },
     });
     expect(nodes.map(({ name }) => name)).toEqual(['Kept']);
     expect(nodes[0]?.aliases).toEqual([]);
+  });
+
+  it('classifies a metadata-only hit from the exact matched field provenance', async () => {
+    const memory = StrataGate.inMemory({ blockTurnSize: 1 });
+    await memory.appendTurn({ user: 'metadata history', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    const current = await memory.addEvent({ id: 'evt_current_name', title: 'current', summary: 'Current canonical name.', sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id] });
+    const historical = await memory.addEvent({ id: 'evt_historical_alias', title: 'historical', summary: 'Historical alias.', sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id] });
+    historical.status = 'superseded';
+    (memory.listGraphNodes() as GraphNode[]).push({
+      id: 'node_metadata_history', name: 'Current Name', type: 'project', aliases: ['Old Alias'], currentState: '', facts: [],
+      metadataProvenance: { name: [current.id], aliases: [{ value: 'Old Alias', sourceEventIds: [historical.id] }] },
+      status: 'active', confidence: 0.9, sourceEventIds: [current.id, historical.id], createdAt: current.createdAt, updatedAt: current.updatedAt,
+    });
+    expect((await memory.searchGraphNodes('Current Name'))[0]?.matchType).toBe('current');
+    const aliasHit = (await memory.searchGraphNodes('Old Alias'))[0]!;
+    expect(aliasHit.matchType).toBe('historical');
+    expect(aliasHit.provenanceEventIds?.[0]).toBe(historical.id);
+  });
+
+  it('keeps key and value matching on the same fact record', async () => {
+    const memory = StrataGate.inMemory({ blockTurnSize: 1 });
+    await memory.appendTurn({ user: 'fact association', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    const event = await memory.addEvent({ id: 'evt_fact_association', title: 'facts', summary: 'Company and location.', sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id] });
+    const now = '2026-09-20T00:00:00.000Z';
+    (memory.listGraphNodes() as GraphNode[]).push({
+      id: 'node_fact_association', name: 'Subject', type: 'person', aliases: [], currentState: '',
+      metadataProvenance: { name: [event.id] }, status: 'active', confidence: 0.9, sourceEventIds: [event.id],
+      facts: [
+        { id: 'fact_company_a', key: 'company', value: 'A', status: 'active', confidence: 0.9, sourceEventIds: [event.id], createdAt: now, updatedAt: now },
+        { id: 'fact_location_a', key: 'location', value: 'A', status: 'active', confidence: 0.9, sourceEventIds: [event.id], createdAt: now, updatedAt: now },
+      ], createdAt: now, updatedAt: now,
+    });
+    const hit = (await memory.searchGraphNodes('company A'))[0]!;
+    expect(hit.currentFacts?.map(({ id }) => id)).toEqual(['fact_company_a']);
+  });
+
+  it('reports missing canonical metadata provenance as a failed projection', async () => {
+    const memory = StrataGate.inMemory({
+      blockTurnSize: 1,
+      graphProjector: async ({ events }) => ({
+        reason: 'custom projector omitted field provenance',
+        nodes: [{ ref: 'invalid', name: 'Invalid node', type: 'project', aliases: [], tags: [], sourceEventIds: [events[0]!.id] }],
+        edges: [],
+      }),
+    });
+    await memory.appendTurn({ user: 'projection validation', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    await memory.addEvent({ id: 'evt_invalid_projection', title: 'invalid', summary: 'invalid projection', sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id] });
+    await memory.resumePendingWork();
+    expect(memory.listGraphNodes()).toEqual([]);
+    expect(memory.listGraphProjectionJobs()[0]).toMatchObject({ status: 'failed' });
+    expect(memory.listGraphProjectionJobs()[0]?.lastError).toMatch(/metadata provenance/i);
+  });
+
+  it('records dropped alias and tag provenance as a completed projection warning', async () => {
+    const memory = StrataGate.inMemory({
+      blockTurnSize: 1,
+      graphProjector: async ({ events }) => ({
+        reason: 'valid node with invalid optional metadata',
+        nodes: [{
+          ref: 'warning', name: 'Warning node', type: 'project', aliases: ['Unproven Alias'], tags: ['unproven-tag'],
+          metadataProvenance: { name: [events[0]!.id] }, sourceEventIds: [events[0]!.id],
+        }],
+        edges: [],
+      }),
+    });
+    await memory.appendTurn({ user: 'projection warning', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    await memory.addEvent({ id: 'evt_projection_warning', title: 'warning', summary: 'warning projection', sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id] });
+    await memory.resumePendingWork();
+    expect(memory.listGraphNodes()[0]).toMatchObject({ name: 'Warning node', aliases: [] });
+    expect(memory.listGraphNodes()[0]?.tags).toEqual([]);
+    expect(memory.listGraphProjectionJobs()[0]).toMatchObject({ status: 'completed', lastError: null });
+    expect(memory.listGraphProjectionJobs()[0]?.reason).toMatch(/Dropped metadata value/i);
+  });
+
+  it('rejects a projection whose source Event became forgotten before completion', async () => {
+    const now = '2026-09-20T00:00:00.000Z';
+    const active = {
+      id: 'evt_existing_active', title: 'active', summary: 'active', sourceBlockId: 'block', sourceMessageIds: [], narrative: '', tags: [], quotes: [], temporal: {}, scope: 'project' as const, criticality: 'routine' as const, confidence: 0.9, status: 'active' as const, supersededBy: null,
+      weight: { mentionCount: 1, lastAdoptedTurn: 0, lastRetrievedAt: null, pinned: false, floorWeight: 0, forcedCap: null }, createdAt: now, updatedAt: now,
+    };
+    const forgotten = { ...active, id: 'evt_forgotten_before_completion', status: 'forgotten' as const };
+    const node: GraphNode = {
+      id: 'node_existing_current', name: 'Existing', type: 'project', aliases: [], currentState: 'company: A',
+      metadataProvenance: { name: [active.id] }, status: 'active', confidence: 0.9, sourceEventIds: [active.id],
+      facts: [{ id: 'fact_existing_a', key: 'company', value: 'A', status: 'active', confidence: 0.9, sourceEventIds: [active.id], createdAt: now, updatedAt: now }],
+      createdAt: now, updatedAt: now,
+    };
+    const { applyGraphProjection } = await import('../src/graph.js');
+    expect(() => applyGraphProjection({
+      nodes: [node], edges: [], events: [active, forgotten], allowedEventIds: new Set([forgotten.id]), now, idFactory: (prefix) => `${prefix}_new`,
+      result: { reason: 'late response', nodes: [{
+        ref: 'existing', name: 'Existing', type: 'project', aliases: [], tags: [], metadataProvenance: { name: [forgotten.id] },
+        facts: [{ key: 'company', value: 'B', sourceEventIds: [forgotten.id] }], sourceEventIds: [forgotten.id],
+      }], edges: [] },
+    })).toThrow(/no valid exposable source Event/i);
+    expect(node.facts).toEqual([expect.objectContaining({ id: 'fact_existing_a', status: 'active', value: 'A' })]);
   });
 
   it('does not expose claims whose provenance falls outside the evidence limit', async () => {

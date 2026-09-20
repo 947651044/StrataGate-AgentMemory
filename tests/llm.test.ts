@@ -302,6 +302,24 @@ describe('DeepSeek Harness model JSON retries', () => {
     expect(calls.mock.calls[0]?.[0].system).toContain('tags describe the node')
   })
 
+  it('rejects a structured Graph node that omits canonical-name provenance', async () => {
+    const event = {
+      id: 'evt_graph_invalid', title: 'Invalid graph', summary: 'The model omitted field provenance.',
+      narrative: '', tags: [], quotes: [], sourceMessageIds: ['msg_graph_invalid'], sourceBlockId: 'blk_graph_invalid',
+      temporal: {}, scope: 'project' as const, criticality: 'routine' as const, confidence: 0.9,
+      status: 'active' as const, supersededBy: null,
+      weight: { mentionCount: 1, lastAdoptedTurn: 1, lastRetrievedAt: null, pinned: false, floorWeight: 0, forcedCap: null },
+      createdAt: '2026-09-20T00:00:00.000Z', updatedAt: '2026-09-20T00:00:00.000Z',
+    }
+    const invalid = {
+      tool: { reason: 'invalid', nodes: [{ ref: 'invalid', name: 'Invalid', type: 'project', tags: [], sourceEventIds: [event.id] }], edges: [] },
+    }
+    const { bridge, session } = modelBridge([invalid, invalid])
+    await expect(bridge.run(session, () => bridge.graphProjector({
+      jobId: 'gproj_invalid', projectorVersion: 1, events: [event], existingNodes: [], existingEdges: [],
+    }))).rejects.toThrow(/metadataProvenance/i)
+  })
+
   it('compacts historical Graph context before sending it to the model', async () => {
     const event = {
       id: 'evt_compact', title: 'Compact graph', summary: 'Only touched records should be returned.',

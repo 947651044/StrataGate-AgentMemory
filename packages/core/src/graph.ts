@@ -277,14 +277,18 @@ export interface ApplyGraphProjectionOptions {
 }
 
 /** Applies a replaceable graph projection without ever treating legacy Elements as evidence. */
-export function applyGraphProjection(options: ApplyGraphProjectionOptions): { nodeIds: string[]; edgeIds: string[] } {
+export function applyGraphProjection(options: ApplyGraphProjectionOptions): { nodeIds: string[]; edgeIds: string[]; warnings: string[] } {
   const refs = new Map<string, GraphNode>();
   const touchedNodes = new Set<string>();
   const touchedEdges = new Set<string>();
+  const warnings: string[] = [];
+  const eventById = new Map(options.events.map((event) => [event.id, event]));
   const validSources = (value: unknown): string[] => {
     const requested = strings(value, 64);
-    return requested.length > 0 && requested.every((id) => options.allowedEventIds.has(id)) ? requested : [];
+    return requested.length > 0 && requested.every((id) => options.allowedEventIds.has(id)
+      && EXPOSED_EVENT_STATUSES.has(eventById.get(id)?.status ?? 'forgotten')) ? requested : [];
   };
+  const activeSources = (ids: readonly string[]): string[] => ids.filter((id) => eventById.get(id)?.status === 'active');
   const metadataEntriesFromProjection = (
     entries: readonly GraphMetadataProvenanceEntry[] | undefined,
     fallbackValues: readonly string[],
@@ -293,9 +297,27 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
     return fallbackValues.flatMap((value) => {
       const entry = byValue.get(normalizeSearchText(value));
       const sourceEventIds = validSources(entry?.sourceEventIds);
-      return sourceEventIds.length > 0 ? [{ value, sourceEventIds }] : [];
+      if (sourceEventIds.length > 0) return [{ value, sourceEventIds }];
+      warnings.push(`Dropped metadata value "${value}" because it lacks matching valid field provenance.`);
+      return [];
     });
   };
+
+  // Validate canonical-name provenance before mutating any node. This keeps an
+  // invalid custom/model projection observable and prevents partial in-memory
+  // writes when the batch must be rejected.
+  for (const proposal of Array.isArray(options.result.nodes) ? options.result.nodes : []) {
+    const ref = text(proposal.ref, 120);
+    const name = text(proposal.name, 160);
+    const sources = validSources(proposal.sourceEventIds);
+    if (!ref || !name || !NODE_TYPES.has(proposal.type)) continue;
+    if (sources.length === 0) {
+      throw new Error(`Graph projection validation failed: node "${ref}" has no valid exposable source Event.`);
+    }
+    if (validSources(proposal.metadataProvenance?.name).length === 0) {
+      throw new Error(`Graph projection validation failed: node "${ref}" name "${name}" lacks valid metadata provenance.`);
+    }
+  }
 
   for (const proposal of Array.isArray(options.result.nodes) ? options.result.nodes : []) {
     const ref = text(proposal.ref, 120);
@@ -311,8 +333,8 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
       aliases: metadataEntriesFromProjection(proposal.metadataProvenance?.aliases, aliases),
       tags: metadataEntriesFromProjection(proposal.metadataProvenance?.tags, tags),
     };
-    const eventById = new Map(options.events.map((event) => [event.id, event]));
-    let node = options.nodes.find((candidate) => entityMatchKind(candidate, { name, aliases, type: proposal.type }, eventById));
+    const provenAliases = projectedMetadata.aliases.map(({ value }) => value);
+    let node = options.nodes.find((candidate) => entityMatchKind(candidate, { name, aliases: provenAliases, type: proposal.type }, eventById));
     if (!node) {
       node = {
         id: options.idFactory('node'), name, type: proposal.type, aliases: [], currentState: '', facts: [],
@@ -373,7 +395,14 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
       const value = Array.isArray(rawFact.value) ? strings(rawFact.value, 40) : text(rawFact.value, 1_200);
       if (!key || (Array.isArray(value) ? value.length === 0 : !value)) continue;
       const factSources = 'sourceEventIds' in rawFact ? validSources(rawFact.sourceEventIds) : sources;
-      if (factSources.length === 0) continue;
+      if (factSources.length === 0) {
+        warnings.push(`Dropped fact "${key}" because it lacks valid exposable Event provenance.`);
+        continue;
+      }
+      if ((node.status === 'active' || node.status === 'disputed') && activeSources(factSources).length === 0) {
+        warnings.push(`Dropped current fact "${key}" because it has no active Event provenance.`);
+        continue;
+      }
       for (const old of node.facts.filter((fact) => fact.status === 'active' && fact.key === key)) {
         old.status = 'superseded';
         if (!old.validTo) old.validTo = validFrom;
@@ -402,6 +431,10 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
     const status = STATUSES.has(proposal.status ?? 'active') ? proposal.status ?? 'active' : 'active';
     const validFrom = text(proposal.validFrom, 80) || chronology(options.events, sources, options.now);
     const validTo = text(proposal.validTo, 80) || undefined;
+    if ((status === 'active' || status === 'disputed') && activeSources(sources).length === 0) {
+      warnings.push(`Dropped current edge "${relation}" because it has no active Event provenance.`);
+      continue;
+    }
     for (const old of options.edges.filter((edge) => edge.status === 'active'
       && edge.fromNodeId === from.id && edge.relation === relation && edge.toNodeId !== to.id)) {
       old.status = 'superseded';
@@ -429,5 +462,5 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
     const participantNodeIds = options.nodes.filter((node) => node.sourceEventIds.includes(event.id)).map(({ id }) => id);
     event.temporal.participantNodeIds = [...new Set([...(event.temporal.participantNodeIds ?? []), ...participantNodeIds])];
   }
-  return { nodeIds: [...touchedNodes], edgeIds: [...touchedEdges] };
+  return { nodeIds: [...touchedNodes], edgeIds: [...touchedEdges], warnings: unique(warnings) };
 }

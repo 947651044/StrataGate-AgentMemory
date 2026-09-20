@@ -1416,11 +1416,13 @@ export class StrataGate {
       job.status = 'completed';
       job.nodeIds = touched.nodeIds;
       job.edgeIds = touched.edgeIds;
-      job.reason = typeof result.reason === 'string' ? result.reason.trim().replace(/\s+/g, ' ').slice(0, 500) || null : null;
+      const normalizedReason = typeof result.reason === 'string' ? result.reason.trim().replace(/\s+/g, ' ') : '';
+      const warning = touched.warnings.length > 0 ? `Validation: ${touched.warnings.join(' ')}` : '';
+      job.reason = [warning, normalizedReason].filter(Boolean).join(' ').slice(0, 500) || null;
       job.lastError = null;
       job.nextRetryAt = null;
       job.updatedAt = toUtc8Iso(this.now());
-      return touched;
+      return { nodeIds: touched.nodeIds, edgeIds: touched.edgeIds };
     });
   }
 
@@ -1831,46 +1833,44 @@ export class StrataGate {
     };
     const matchDetails = (node: GraphNode) => {
       const view = viewById.get(node.id)!;
-      const knownFactKeyTokens = new Set([
-        ...view.currentFacts.flatMap(({ key }) => [...tokenSet(key)]),
-        ...view.historicalFacts.flatMap(({ key }) => [...tokenSet(key)]),
-      ]);
+      const queryParts = normalizeSearchText(query).split(/[^\p{Letter}\p{Number}_]+/gu).filter(Boolean);
+      const explicitFactKeys = dedupe([...view.currentFacts, ...view.historicalFacts].map(({ key }) => key))
+        .filter((key) => queryParts.includes(normalizeSearchText(key)));
+      const knownFactKeyTokens = new Set(explicitFactKeys.flatMap((key) => [...tokenSet(key)]));
       const queryKeyTokens = queryTokens.filter((token) => knownFactKeyTokens.has(token));
       const valueQueryTokens = queryTokens.filter((token) => !queryKeyTokens.includes(token));
-      const currentEvidence = [
-        ...view.currentFacts.map((fact) => `${fact.key} ${factValue(fact)}`),
-        ...view.currentEdges.map((edge) => `${edge.relation} ${endpoint(node.id, edge)}`),
-      ].join(' ');
-      const historicalEvidence = [
-        ...view.historicalFacts.map((fact) => `${fact.key} ${factValue(fact)}`),
-        ...view.historicalEdges.map((edge) => `${edge.relation} ${endpoint(node.id, edge)}`),
-      ].join(' ');
-      const currentTokens = tokenSet(currentEvidence);
-      const historicalTokens = tokenSet(historicalEvidence);
-      const sharedTokens = new Set([...currentTokens].filter((token) => historicalTokens.has(token)));
-      const distinctive = queryTokens.filter((token) => !sharedTokens.has(token));
-      const meaningfulTokens = distinctive.length > 0 ? distinctive : queryTokens;
+      const meaningfulTokens = queryTokens;
       const factMatchesFor = (facts: readonly GraphNode['facts'][number][]): GraphNode['facts'][number][] => {
         if (queryKeyTokens.length === 0) return facts.filter((fact) => hasAny(`${fact.key} ${factValue(fact)}`, meaningfulTokens));
         const keyFacts = facts.filter((fact) => queryKeyTokens.some((token) => tokenSet(fact.key).has(token)));
         const directMatches = keyFacts.filter((fact) => valueQueryTokens.length === 0
           || valueQueryTokens.some((token) => tokenSet(factValue(fact)).has(token)));
-        const directValueTokens = new Set(directMatches.flatMap((fact) => [...tokenSet(factValue(fact))]));
-        return facts.filter((fact) => {
-          if (directMatches.includes(fact)) return true;
-          if (keyFacts.includes(fact) || directMatches.length === 0) return false;
-          return [...tokenSet(factValue(fact))].some((token) => directValueTokens.has(token));
-        });
+        return directMatches;
       };
-      const currentFacts = factMatchesFor(view.currentFacts);
-      const historicalFacts = factMatchesFor(view.historicalFacts);
+      let currentFacts = factMatchesFor(view.currentFacts);
+      let historicalFacts = factMatchesFor(view.historicalFacts);
       const edgeMatches = (edge: GraphEdge, supportingFacts: readonly GraphNode['facts'][number][]): boolean => {
         if (queryKeyTokens.length === 0) return hasAny(endpoint(node.id, edge), meaningfulTokens);
         return supportingFacts.length > 0
           && hasAny(endpoint(node.id, edge), valueQueryTokens.length > 0 ? valueQueryTokens : queryTokens);
       };
-      const currentEdges = view.currentEdges.filter((edge) => edgeMatches(edge, currentFacts));
-      const historicalEdges = view.historicalEdges.filter((edge) => edgeMatches(edge, historicalFacts));
+      let currentEdges = view.currentEdges.filter((edge) => edgeMatches(edge, currentFacts));
+      let historicalEdges = view.historicalEdges.filter((edge) => edgeMatches(edge, historicalFacts));
+      if (queryKeyTokens.length === 0) {
+        const overlap = (value: string): number => {
+          const available = tokenSet(value);
+          return meaningfulTokens.filter((token) => available.has(token)).length;
+        };
+        const scoredFacts = [...currentFacts, ...historicalFacts].map((fact) => [fact.id, overlap(`${fact.key} ${factValue(fact)}`)] as const);
+        const scoredEdges = [...currentEdges, ...historicalEdges].map((edge) => [edge.id, overlap(endpoint(node.id, edge))] as const);
+        const best = Math.max(0, ...scoredFacts.map(([, score]) => score), ...scoredEdges.map(([, score]) => score));
+        const bestFacts = new Set(scoredFacts.filter(([, score]) => score === best).map(([id]) => id));
+        const bestEdges = new Set(scoredEdges.filter(([, score]) => score === best).map(([id]) => id));
+        currentFacts = currentFacts.filter(({ id }) => bestFacts.has(id));
+        historicalFacts = historicalFacts.filter(({ id }) => bestFacts.has(id));
+        currentEdges = currentEdges.filter(({ id }) => bestEdges.has(id));
+        historicalEdges = historicalEdges.filter(({ id }) => bestEdges.has(id));
+      }
       const metadataFields: Array<readonly [string, string]> = [
         ['name', node.name],
         ['aliases', node.aliases.join(' ')],
@@ -1878,25 +1878,24 @@ export class StrataGate {
         ['type', node.type],
       ];
       const metadataMatches = metadataFields.filter(([, value]) => hasAny(value, queryTokens)).map(([field]) => field);
-      const metadataEventIds = node.metadataProvenance
+      const matchedMetadataEventIds = node.metadataProvenance
         ? dedupe([
-          ...(metadataMatches.length > 0 ? (node.metadataProvenance.name ?? []) : []),
+          ...(metadataMatches.includes('name') ? (node.metadataProvenance.name ?? []) : []),
           ...(node.metadataProvenance.aliases ?? []).filter(({ value }) => hasAny(value, queryTokens)).flatMap(({ sourceEventIds }) => sourceEventIds),
           ...(node.metadataProvenance.tags ?? []).filter(({ value }) => hasAny(value, queryTokens)).flatMap(({ sourceEventIds }) => sourceEventIds),
+          ...(metadataMatches.includes('type') ? [...view.currentNodeEventIds, ...view.historicalNodeEventIds] : []),
         ])
-        : dedupe([...view.currentNodeEventIds, ...view.historicalNodeEventIds]);
-      const hasCurrentEvidence = view.currentFacts.length > 0 || view.currentEdges.length > 0
-        || view.currentNodeEventIds.length > 0;
-      const hasHistoricalEvidence = view.historicalFacts.length > 0 || view.historicalEdges.length > 0
-        || view.historicalNodeEventIds.length > 0;
+        : metadataMatches.length > 0 ? dedupe([...view.currentNodeEventIds, ...view.historicalNodeEventIds]) : [];
+      const eventStatus = new Map(this.events.map((event) => [event.id, event.status]));
+      const metadataCurrentHit = matchedMetadataEventIds.some((id) => eventStatus.get(id) === 'active');
+      const metadataHistoricalHit = matchedMetadataEventIds.some((id) => eventStatus.get(id) === 'superseded');
       const currentRecordHit = currentFacts.length > 0 || currentEdges.length > 0;
       const historicalRecordHit = historicalFacts.length > 0 || historicalEdges.length > 0;
       const hasRecordHit = currentRecordHit || historicalRecordHit;
       // Entity metadata selects the node, but once a fact/endpoint provides the
       // semantic match it must not manufacture a second temporal-state hit.
-      const currentHit = currentRecordHit || (!hasRecordHit && metadataMatches.length > 0 && hasCurrentEvidence);
-      const historicalHit = historicalRecordHit
-        || (!hasRecordHit && metadataMatches.length > 0 && !hasCurrentEvidence && hasHistoricalEvidence);
+      const currentHit = currentRecordHit || (!hasRecordHit && metadataMatches.length > 0 && metadataCurrentHit);
+      const historicalHit = historicalRecordHit || (!hasRecordHit && metadataMatches.length > 0 && metadataHistoricalHit);
       const relationMatches = [...view.currentEdges, ...view.historicalEdges]
         .some((edge) => hasAny(edge.relation, queryTokens));
       const matchedFields = [
@@ -1909,7 +1908,7 @@ export class StrataGate {
       ];
       return {
         view, currentFacts, historicalFacts, currentEdges, historicalEdges,
-        metadataMatches, metadataEventIds, currentHit, historicalHit, matchedFields,
+        metadataMatches, matchedMetadataEventIds, currentHit, historicalHit, matchedFields,
       };
     };
     const candidates = views.map(({ node }) => node);
@@ -1946,27 +1945,36 @@ export class StrataGate {
       ]);
       const currentContextFacts = details.view.currentFacts.filter(({ key }) => historicalKeys.has(key));
       const currentContextEdges = details.view.currentEdges.filter(({ relation }) => historicalRelations.has(relation));
-      const metadataCandidates = details.metadataEventIds.length > 0
-        ? details.metadataEventIds
-        : details.currentHit
-          ? [...details.view.currentNodeEventIds,
-             ...details.view.currentFacts.flatMap(({ sourceEventIds }) => sourceEventIds),
-             ...details.view.currentEdges.flatMap(({ sourceEventIds }) => sourceEventIds)]
-          : [...details.view.historicalNodeEventIds,
-             ...details.view.historicalFacts.flatMap(({ sourceEventIds }) => sourceEventIds),
-             ...details.view.historicalEdges.flatMap(({ sourceEventIds }) => sourceEventIds)];
+      const nameEventIds = node.metadataProvenance?.name ?? [];
+      const metadataCandidates = dedupe([...details.matchedMetadataEventIds, ...nameEventIds]);
       const metadataOnly = matchedEventIds.length === 0 && details.metadataMatches.length > 0;
-      const allMetadataEventIds = dedupe(metadataCandidates);
-      const legacyMetadataOverflow = metadataOnly && !node.metadataProvenance
-        && allMetadataEventIds.length > GRAPH_PROVENANCE_LIMIT;
-      const metadataEventIds = metadataOnly && !legacyMetadataOverflow
-        ? allMetadataEventIds.slice(0, GRAPH_PROVENANCE_LIMIT)
+      const hasVisibleLegacyMetadata = !node.metadataProvenance
+        && Boolean(node.name || node.aliases.length > 0 || (node.tags?.length ?? 0) > 0);
+      const legacyMetadataEventIds = hasVisibleLegacyMetadata
+        ? dedupe([...details.view.currentNodeEventIds, ...details.view.historicalNodeEventIds])
         : [];
-      const provenanceEventIds = dedupe([...matchedEventIds, ...currentContextEventIds, ...metadataEventIds])
-        .slice(0, GRAPH_PROVENANCE_LIMIT);
+      const recordPriority = dedupe([
+        ...matchedEventIds,
+        ...currentContextEventIds,
+      ]);
+      const legacyMetadataFits = node.metadataProvenance !== undefined || !hasVisibleLegacyMetadata
+        || dedupe([...recordPriority, ...legacyMetadataEventIds]).length <= GRAPH_PROVENANCE_LIMIT;
+      const legacyMetadataNotExpanded = hasVisibleLegacyMetadata && !legacyMetadataFits;
+      const prioritized = node.metadataProvenance
+        ? dedupe([
+          ...matchedEventIds,
+          ...(metadataOnly ? metadataCandidates : []),
+          ...currentContextEventIds,
+          ...(!metadataOnly ? metadataCandidates : []),
+        ])
+        : recordPriority;
+      const provenanceEventIds = dedupe([
+        ...prioritized,
+        ...(legacyMetadataFits ? legacyMetadataEventIds : []),
+      ]).slice(0, GRAPH_PROVENANCE_LIMIT);
       const evidenceIds = new Set(provenanceEventIds);
       const boundedView = boundEffectiveGraphNodeView(details.view, evidenceIds, {
-        preserveLegacyMetadata: legacyMetadataOverflow,
+        preserveLegacyMetadata: legacyMetadataNotExpanded,
       });
       const bounded = <T extends GraphFact | GraphEdge>(record: T): T | null => {
         const sourceEventIds = record.sourceEventIds.filter((id) => evidenceIds.has(id));
@@ -1986,7 +1994,7 @@ export class StrataGate {
         currentEdges: dedupe([...details.currentEdges, ...currentContextEdges]).flatMap((record) => bounded(record) ?? []),
         historicalEdges: details.historicalEdges.flatMap((record) => bounded(record) ?? []),
         provenanceEventIds,
-        ...(legacyMetadataOverflow ? { metadataEvidenceStatus: 'not_expanded' as const } : {}),
+        ...(legacyMetadataNotExpanded ? { metadataEvidenceStatus: 'not_expanded' as const } : {}),
         timeline: graphTimeline(provenanceEventIds, this.events),
       };
     });

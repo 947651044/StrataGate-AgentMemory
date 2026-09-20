@@ -461,7 +461,9 @@ export class DshModelBridge {
         return value && sourceEventIds.length > 0 ? [{ value, sourceEventIds }] : []
       })
       const metadataName = strings(rawMetadata.name).filter((id) => eventIds.has(id))
-      if (metadataName.length === 0) return []
+      if (metadataName.length === 0) {
+        throw new Error(`Graph projection validation failed: node "${text(item.ref)}" name "${text(item.name)}" lacks valid metadata provenance.`)
+      }
       const metadataAliases = metadataEntries(rawMetadata.aliases)
       const metadataTags = metadataEntries(rawMetadata.tags)
       const metadataProvenance = {
@@ -661,8 +663,9 @@ export class DshModelBridge {
         }
       }
     }
+    const validationDetail = lastError?.message ? `: ${lastError.message}` : ''
     throw new ModelJsonResponseError(
-      `StrataGate model did not produce a valid ${STRUCTURED_TOOLS[kind].name} call after ${attemptsUsed} attempt${attemptsUsed === 1 ? '' : 's'}`,
+      `StrataGate model did not produce a valid ${STRUCTURED_TOOLS[kind].name} call after ${attemptsUsed} attempt${attemptsUsed === 1 ? '' : 's'}${validationDetail}`,
       { cause: lastError, response: lastResponse },
     )
   }
