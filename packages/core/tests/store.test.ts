@@ -67,6 +67,26 @@ describe('StrataGate lifecycle', () => {
     expect(memoryWeightAt(event, memory.turn)).toBe(1);
   });
 
+  it('ranks exhaustive raw fallback instead of returning the first weak matches', async () => {
+    const memory = StrataGate.inMemory({ blockTurnSize: 1, summarizer: nonExtractingSummarizer, idFactory: ids() });
+    for (let index = 0; index < 1_000; index += 1) {
+      await memory.appendTurn({ user: `StrataGate archive note ${index}`, assistant: 'acknowledged' });
+    }
+    await memory.appendTurn({ user: 'StrataGate target migration decision', assistant: 'The target is the PostgreSQL migration.' });
+    const hits = memory.searchRawMemory('StrataGate target migration', 6);
+    expect(hits.some(({ message }) => message.content.includes('target migration decision'))).toBe(true);
+  }, 30_000);
+
+  it('preserves Chinese tokens and applies thread scope before ranking', async () => {
+    const memory = StrataGate.inMemory({ blockTurnSize: 1, summarizer: nonExtractingSummarizer, idFactory: ids() });
+    await memory.appendTurn({ user: '星河项目由李明负责', assistant: '其他会话高相关结果', threadId: 'other' });
+    await memory.appendTurn({ user: '星河项目由王芳负责', assistant: '当前会话证据', threadId: 'current' });
+    expect(memory.searchRawMemory('李明', 3).some(({ message }) => message.content.includes('李明'))).toBe(true);
+    const scoped = memory.searchRawMemory('星河项目', 3, { threadId: 'current' });
+    expect(scoped).toHaveLength(1);
+    expect(scoped.every(({ message }) => message.threadId === 'current')).toBe(true);
+  });
+
   it('keeps forgotten events out of search without deleting their provenance', async () => {
     const memory = StrataGate.inMemory({ blockTurnSize: 1, summarizer, extractor, idFactory: ids() });
     await memory.appendTurn({ user: 'Please keep answers concise.', assistant: 'Understood.' });

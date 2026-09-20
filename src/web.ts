@@ -39,9 +39,52 @@ function graphProjectionIsProcessing(job: {
   attempts: number
   nextRetryAt: string | null
 }): boolean {
-  if (job.status === 'running') return true
-  return job.attempts < DERIVATION_MAX_ATTEMPTS && (job.status === 'pending'
-    || (job.status === 'failed' && job.nextRetryAt !== null))
+  return derivationJobState(job, false) === 'processing'
+    || derivationJobState(job, false) === 'retryable'
+}
+
+type DerivationJobState = 'processing' | 'retryable' | 'terminal-failed' | 'completed' | 'blocked'
+
+function derivationJobState(job: {
+  status: string
+  attempts: number
+  nextRetryAt: string | null
+}, completed: boolean): DerivationJobState {
+  if (completed || job.status === 'succeeded' || job.status === 'skipped' || job.status === 'completed') return 'completed'
+  if (job.status === 'running') return 'processing'
+  if (job.status === 'pending') return job.attempts < DERIVATION_MAX_ATTEMPTS ? 'processing' : 'blocked'
+  if (job.status === 'failed') {
+    const retryable = job.attempts < DERIVATION_MAX_ATTEMPTS
+      && job.nextRetryAt !== null
+      && Number.isFinite(Date.parse(job.nextRetryAt))
+    return retryable ? 'retryable' : 'terminal-failed'
+  }
+  return 'blocked'
+}
+
+function summarizeDerivationJobs(jobs: ReadonlyArray<{
+  status: string
+  attempts: number
+  nextRetryAt: string | null
+}>, completed: (job: { status: string }) => boolean): {
+  processing: number
+  retryable: number
+  terminalFailed: number
+  completed: number
+  blocked: number
+} {
+  const result = { processing: 0, retryable: 0, terminalFailed: 0, completed: 0, blocked: 0 }
+  for (const job of jobs) {
+    const state = derivationJobState(job, completed(job))
+    if (state === 'processing') result.processing += 1
+    else if (state === 'retryable') {
+      result.retryable += 1
+      result.processing += 1
+    } else if (state === 'terminal-failed') result.terminalFailed += 1
+    else if (state === 'completed') result.completed += 1
+    else result.blocked += 1
+  }
+  return result
 }
 
 function installedPackageVersion(names: readonly string[]): string {
@@ -476,10 +519,14 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
       lastError: string | null
       updatedAt: string
     }) => {
+      const state = derivationJobState(job, kind === 'block-summary'
+        ? job.status === 'succeeded'
+        : job.status === 'succeeded' || job.status === 'skipped')
       const details = blockDetails([job.blockId])
       return {
         id: job.blockId,
         kind,
+        state,
         status: job.status,
         attempts: job.attempts,
         nextRetryAt: job.nextRetryAt,
@@ -495,12 +542,14 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
       }
     }
     const describeGraphJob = (job: (typeof snapshot.graphProjectionJobs)[number]) => {
+      const state = derivationJobState(job, job.status === 'completed')
       const blockIds = [...new Set(job.sourceEventIds.flatMap((eventId) =>
         snapshot.events.find(({ id }) => id === eventId)?.sourceBlockId ?? []))]
       const details = blockDetails(blockIds)
       return {
         id: job.id,
         kind: 'graph-projection' as const,
+        state,
         status: job.status,
         attempts: job.attempts,
         nextRetryAt: job.nextRetryAt,
@@ -514,12 +563,11 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
         sourceEventIds: job.sourceEventIds,
       }
     }
-    const failedJobs = snapshot.summaryJobs.filter(({ status }) => status === 'failed').length
-      + snapshot.extractionJobs.filter(({ status }) => status === 'failed').length
-      + snapshot.graphProjectionJobs.filter(({ status }) => status === 'failed').length
-    const processingJobs = snapshot.summaryJobs.filter(({ status, nextRetryAt }) => status === 'pending' || status === 'running' || (status === 'failed' && nextRetryAt !== null)).length
-      + snapshot.extractionJobs.filter(({ status, nextRetryAt }) => status === 'running' || (status === 'failed' && nextRetryAt !== null)).length
-      + snapshot.graphProjectionJobs.filter(graphProjectionIsProcessing).length
+    const summaryStatus = summarizeDerivationJobs(snapshot.summaryJobs, (job) => job.status === 'succeeded')
+    const extractionStatus = summarizeDerivationJobs(snapshot.extractionJobs, (job) => job.status === 'succeeded' || job.status === 'skipped')
+    const graphStatus = summarizeDerivationJobs(snapshot.graphProjectionJobs, (job) => job.status === 'completed')
+    const failedJobs = summaryStatus.terminalFailed + extractionStatus.terminalFailed + graphStatus.terminalFailed
+    const processingJobs = summaryStatus.processing + extractionStatus.processing + graphStatus.processing
     const failedJobDetails = [
       ...snapshot.summaryJobs
         .filter(({ status }) => status === 'failed')
@@ -533,10 +581,12 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
     ]
     const processingJobDetails = [
       ...snapshot.summaryJobs
-        .filter(({ status, nextRetryAt }) => status === 'pending' || status === 'running' || (status === 'failed' && nextRetryAt !== null))
+        .filter((job) => derivationJobState(job, job.status === 'succeeded') === 'processing'
+          || derivationJobState(job, job.status === 'succeeded') === 'retryable')
         .map((job) => describeBlockJob('block-summary', job)),
       ...snapshot.extractionJobs
-        .filter(({ status, nextRetryAt }) => status === 'running' || (status === 'failed' && nextRetryAt !== null))
+        .filter((job) => derivationJobState(job, job.status === 'succeeded' || job.status === 'skipped') === 'processing'
+          || derivationJobState(job, job.status === 'succeeded' || job.status === 'skipped') === 'retryable')
         .map((job) => describeBlockJob('event-extraction', job)),
       ...snapshot.graphProjectionJobs
         .filter(graphProjectionIsProcessing)
@@ -563,14 +613,35 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
       elements: snapshot.elements.length,
       graphNodes: snapshot.graphNodes.length,
       graphEdges: snapshot.graphEdges.length,
+      taskStatus: {
+        blockSummary: summaryStatus,
+        eventExtraction: extractionStatus,
+        graphProjection: graphStatus,
+      },
       graphMigration: (() => {
         const projected = new Set(snapshot.graphProjectionJobs
           .filter(({ status, projectorVersion }) => status === 'completed' && projectorVersion === KNOWLEDGE_GRAPH_PROJECTOR_VERSION)
           .flatMap(({ sourceEventIds }) => sourceEventIds)).size
-        const failed = snapshot.graphProjectionJobs.filter(({ status }) => status === 'failed').length
-        const running = snapshot.graphProjectionJobs.filter(({ status }) => status === 'running').length
         const total = snapshot.events.filter(({ status }) => status !== 'forgotten' && status !== 'archived').length
-        return { projected, total, failed, running, complete: projected >= total }
+        const complete = projected >= total
+        const state = complete
+          ? 'complete'
+          : graphStatus.processing > 0
+            ? 'processing'
+            : graphStatus.terminalFailed > 0
+              ? 'failed'
+              : 'incomplete'
+        return {
+          projected,
+          total,
+          pending: snapshot.graphProjectionJobs.filter(({ status }) => status === 'pending').length,
+          running: snapshot.graphProjectionJobs.filter(({ status }) => status === 'running').length,
+          failed: graphStatus.terminalFailed,
+          retryable: graphStatus.retryable,
+          processing: graphStatus.processing,
+          state,
+          complete,
+        }
       })(),
       usageReceipts: snapshot.usageReceipts.length,
       memoryUseCount: snapshot.usageReceipts.filter((receipt) =>
@@ -884,19 +955,43 @@ async function memories(runtime: StrataGateRuntime, url: URL): Promise<unknown> 
   const offset = numeric(url.searchParams.get('offset'), 0, 0, Number.MAX_SAFE_INTEGER)
   const limit = numeric(url.searchParams.get('limit'), 100, 1, 200)
   let values: unknown[]
-  if (kind === 'events') values = [...snapshot.events].sort((left, right) => {
-    const time = (event: EventCard): string => event.temporal.happenedStart ?? event.temporal.happenedEnd
-      ?? event.temporal.mentionedAt ?? event.createdAt
-    return time(right).localeCompare(time(left))
-  }).map((event) => ({
-    ...(eventSummary(event, snapshot) as object),
-    relatedNodes: snapshot.graphNodes
-      .filter(({ id }) => (event.temporal.participantNodeIds ?? []).includes(id))
-      .map(({ id, name, type, aliases }) => ({ id, name, type, aliases })),
-    relatedElements: snapshot.elements
-      .filter(({ sourceEventIds }) => sourceEventIds.includes(event.id))
-      .map(({ id, name }) => ({ id, name })),
-  }))
+  if (kind === 'events') {
+    const timeline = url.searchParams.get('timeline') === 'true'
+    const timeFilter = url.searchParams.get('time')?.trim() ?? ''
+    const participant = url.searchParams.get('participant')?.trim() ?? ''
+    const eventType = url.searchParams.get('eventType')?.trim() ?? ''
+    const eventStatus = url.searchParams.get('eventStatus')?.trim() ?? ''
+    const now = new Date()
+    const weekAgo = now.getTime() - 7 * 86_400_000
+    const occurrence = (event: EventCard): { value: string; known: boolean } => {
+      const happened = event.temporal.happenedStart ?? event.temporal.happenedEnd
+      return { value: happened ?? event.temporal.mentionedAt ?? event.createdAt, known: Boolean(happened) }
+    }
+    values = [...snapshot.events]
+      .sort((left, right) => occurrence(right).value.localeCompare(occurrence(left).value))
+      .filter((event) => !timeline || (event.status !== 'forgotten' && event.status !== 'archived'))
+      .filter((event) => !eventType || event.temporal.eventType === eventType)
+      .filter((event) => !eventStatus || event.temporal.status === eventStatus)
+      .filter((event) => !participant || (event.temporal.participantNodeIds ?? []).includes(participant))
+      .filter((event) => {
+        if (!timeFilter) return true
+        const info = occurrence(event)
+        if (timeFilter === 'unknown') return !info.known
+        const time = Date.parse(info.value)
+        if (timeFilter === 'today') return Number.isFinite(time) && new Date(time).toDateString() === now.toDateString()
+        if (timeFilter === 'week') return Number.isFinite(time) && time >= weekAgo
+        return true
+      })
+      .map((event) => ({
+        ...(eventSummary(event, snapshot) as object),
+        relatedNodes: snapshot.graphNodes
+          .filter(({ id }) => (event.temporal.participantNodeIds ?? []).includes(id))
+          .map(({ id, name, type, aliases }) => ({ id, name, type, aliases })),
+        relatedElements: snapshot.elements
+          .filter(({ sourceEventIds }) => sourceEventIds.includes(event.id))
+          .map(({ id, name }) => ({ id, name })),
+      }))
+  }
   else if (kind === 'graph') {
     const eventMap = new Map(snapshot.events.map((event) => [event.id, event]))
     return {
@@ -913,13 +1008,25 @@ async function memories(runtime: StrataGateRuntime, url: URL): Promise<unknown> 
         const projected = new Set(snapshot.graphProjectionJobs
           .filter(({ status, projectorVersion }) => status === 'completed' && projectorVersion === KNOWLEDGE_GRAPH_PROJECTOR_VERSION)
           .flatMap(({ sourceEventIds }) => sourceEventIds)).size
+        const graphStatus = summarizeDerivationJobs(snapshot.graphProjectionJobs, (job) => job.status === 'completed')
+        const total = snapshot.events.filter(({ status }) => status !== 'forgotten' && status !== 'archived').length
+        const complete = projected >= total
         return {
           projected,
-          total: snapshot.events.filter(({ status }) => status !== 'forgotten' && status !== 'archived').length,
+          total,
           pending: snapshot.graphProjectionJobs.filter(({ status }) => status === 'pending').length,
           running: snapshot.graphProjectionJobs.filter(({ status }) => status === 'running').length,
-          failed: snapshot.graphProjectionJobs.filter(({ status }) => status === 'failed').length,
-          complete: projected >= snapshot.events.filter(({ status }) => status !== 'forgotten' && status !== 'archived').length,
+          failed: graphStatus.terminalFailed,
+          retryable: graphStatus.retryable,
+          processing: graphStatus.processing,
+          state: complete
+            ? 'complete'
+            : graphStatus.processing > 0
+              ? 'processing'
+              : graphStatus.terminalFailed > 0
+                ? 'failed'
+                : 'incomplete',
+          complete,
         }
       })(),
     }

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.75 - 2026-09-20
+
+- Keep feedback reports local until the user explicitly pastes them, with stronger credential redaction, privacy-safe Issue URLs, and reliable clipboard, popup, and draft-save failure handling.
+- Make feedback draft updates patch-oriented while treating an explicitly saved Markdown body as authoritative, so stale structured fields cannot reappear.
+- Patch only real top-level canonical feedback sections while preserving custom sections, inline lookalikes, indented code, and correctly matched fenced code blocks.
+
+## 0.2.74 - 2026-09-19
+
+- Separate short-term memory compression, long-term memory extraction, and knowledge graph update status in the UI.
+- Distinguish active, retryable, terminal-failed, completed, and blocked work while preserving manual retry behavior.
+- Add stage-specific status details and regression coverage for memory derivation and graph migration states.
+
+## 0.2.72 - 2026-09-18
+
+- Filter the Event timeline by query, time, entity, type, and status before calculating totals and applying pagination, and refresh the view when filters change.
+- Isolate DSH compatibility dependency trees and verify package peers against the matrix-specific host root.
+
+## 0.2.73 - 2026-09-18
+
+- Add exact runtime-family support for `@deepseek-ai/dsh@0.1.6-alpha.1`, including its `0.1.6-alpha.1` internal DSH and Session Format packages while retaining the existing 0.1.2 and 0.1.5 families.
+- Strengthen the clean-install smoke gate with a live StrataGate Admin API probe, 0.1.6 legacy Session migration coverage, and a negative case proving that an optional plugin load failure cannot pass merely because the DSH Web Host remains available.
+- Document that DSH 0.1.6's official DeepSeek profile may enable Session Log request metadata by default; StrataGate does not change that host setting.
+
 ## 0.2.71 - 2026-09-15
 
 - Persist each Event's formation turn in the version 11 storage schema and migrate reliable legacy values from source Blocks, keeping decay and adoption trajectories anchored to the Event's actual lifecycle.

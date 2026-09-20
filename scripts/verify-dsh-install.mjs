@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -86,6 +86,13 @@ async function smokeWeb(cli, root, env, version) {
     const html = await response.text()
     assert(html.includes('__DSH_BOOT__'), `${version}: Web shell omitted the DSH boot payload`)
 
+    const overviewResponse = await fetch(`${origin}/api/stratagate/overview`, { headers: { cookie } })
+    assert(overviewResponse.status === 200, `${version}: StrataGate admin probe returned HTTP ${overviewResponse.status}`)
+    const overview = await overviewResponse.json()
+    assert(overview?.readonly === true, `${version}: StrataGate admin probe omitted its read-only contract`)
+    assert(overview?.pluginVersion === manifest.version, `${version}: StrataGate admin probe reported plugin ${overview?.pluginVersion ?? '<missing>'}`)
+    assert(Array.isArray(overview?.namespaces), `${version}: StrataGate admin probe omitted namespaces`)
+
     const call = async (method, args) => {
       const rpcId = randomUUID()
       const rpcResponse = await fetch(`${origin}/api/${method}`, {
@@ -135,6 +142,36 @@ async function smokeWeb(cli, root, env, version) {
       child.kill('SIGKILL')
       await once(child, 'exit')
     }
+  }
+}
+
+async function verifyPluginFailureIsDetected(cli, root, env, version, profile) {
+  const rootPath = realpathSync(root)
+  const patch = realpathSync(join(profile, 'cordis.patch.yml'))
+  assert(patch.startsWith(`${rootPath}${sep}`), `${version}: refusing to modify a profile patch outside the disposable smoke root: ${patch}`)
+  const original = readFileSync(patch)
+  writeFileSync(patch, [
+    '- id: stratagate-memory',
+    '  name: stratagate-dsh',
+    '  inject: [stratagate-intentional-missing-service]',
+    '',
+    original.toString(),
+  ].join('\n'))
+  try {
+    let failure
+    try {
+      await smokeWeb(cli, root, env, `${version} intentional-plugin-failure`)
+    } catch (error) {
+      failure = error
+    }
+    assert(failure, `${version}: smoke test passed even though StrataGate was intentionally broken`)
+    const message = failure instanceof Error ? failure.message : String(failure)
+    assert(
+      message.includes('StrataGate admin probe returned HTTP 404'),
+      `${version}: intentional plugin activation failure did not prove that the Web Host stayed up while the StrataGate probe failed:\n${message}`,
+    )
+  } finally {
+    writeFileSync(patch, original)
   }
 }
 
@@ -190,14 +227,17 @@ try {
     const config = run(process.execPath, [cli, '--profile', 'web', '--dump-config'], root, dshEnv)
     assert(config.includes("sessionRoot: !!js dshHomePath('sessions')"), `${version}: sessionRoot was not wired to the host DSH_HOME`)
     await smokeWeb(cli, root, dshEnv, version)
+    if (version === '0.1.6-alpha.1') {
+      await verifyPluginFailureIsDetected(cli, root, dshEnv, version, profile)
+    }
     const projectId = process.platform === 'win32' ? '--C-redacted-workspace--' : '--redacted-workspace--'
     const legacyDirectory = join(dshHome, 'sessions', projectId, 'fixture-legacy-citations')
     assert(existsSync(join(legacyDirectory, 'session.jsonl')), `${version}: immutable v0 fixture was removed`)
-    if (version === '0.1.5-rc.1') {
+    if (version === '0.1.5-rc.1' || version === '0.1.6-alpha.1') {
       assert(existsSync(join(legacyDirectory, 'session.v1.jsonl')), `${version}: legacy citation bridge was not published`)
       assert(existsSync(join(legacyDirectory, 'stratagate-legacy-citations-v1.json')), `${version}: migration receipt was not published`)
     }
-    console.log(`Verified DSH ${version}: complete CLI install, recoverable stale-peer repair, startup, two session titles/pages, and legacy migration.`)
+    console.log(`Verified DSH ${version}: complete CLI install, recoverable stale-peer repair, startup, StrataGate admin capability, two session titles/pages, and legacy migration.`)
   }
 } finally {
   for (const root of roots) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 250 })

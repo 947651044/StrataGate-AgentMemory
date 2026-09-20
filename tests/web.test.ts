@@ -299,6 +299,11 @@ describe('StrataGate admin routes', () => {
     expect(overview.body.namespaces[0]).toMatchObject({
       failedJobs: 1,
       processingJobs: 0,
+      taskStatus: {
+        blockSummary: { processing: 0, terminalFailed: 1 },
+        eventExtraction: { processing: 0, terminalFailed: 0 },
+        graphProjection: { processing: 0, terminalFailed: 0 },
+      },
       failedJobDetails: [{
         id: 'blk_1', kind: 'block-summary', attempts: 3,
         lastError: summaryFailure, lastErrorFull: summaryFailure,
@@ -355,6 +360,83 @@ describe('StrataGate admin routes', () => {
     } as unknown as StrataGateRuntime
     const extractionFailure = await request('/api/stratagate/memories?namespace=dsh%3Aproject%3Asummary&kind=blocks', 'GET', extractionFailureRuntime)
     expect(extractionFailure.body.items[0]).toMatchObject({ status: 'failed', processingStatus: 'pending', summaryJob: { status: 'succeeded' } })
+  })
+
+  it('ignores legacy Element projection jobs and separates terminal extraction and graph failures', async () => {
+    const legacyPending = Array.from({ length: 7 }, (_, index) => ({
+      id: 'element-legacy-' + index,
+      sourceEventIds: ['evt_1'],
+      status: 'pending' as const,
+      attempts: 0,
+      elementIds: [],
+      reason: 'legacy',
+      lastError: null,
+      createdAt: '2026-08-18T00:00:00.000Z',
+      updatedAt: '2026-08-18T00:00:00.000Z',
+    }))
+    const quiet = await request('/api/stratagate/overview', 'GET', {
+      adminNamespaces: async () => ['dsh:project:legacy'],
+      adminSnapshot: async () => ({
+        ...snapshot,
+        events: [],
+        graphNodes: [],
+        graphProjectionJobs: [],
+        summaryJobs: [],
+        extractionJobs: [],
+        elementProjectionJobs: legacyPending,
+      }),
+      adminWorkspaceName: () => 'Legacy workspace',
+    } as unknown as StrataGateRuntime)
+    expect(quiet.body.namespaces[0]).toMatchObject({
+      failedJobs: 0,
+      processingJobs: 0,
+      failedJobDetails: [],
+      processingJobDetails: [],
+      taskStatus: {
+        blockSummary: { processing: 0, terminalFailed: 0 },
+        eventExtraction: { processing: 0, terminalFailed: 0 },
+        graphProjection: { processing: 0, terminalFailed: 0 },
+      },
+      graphMigration: { projected: 0, total: 0, state: 'complete' },
+    })
+
+    const graphFailures = Array.from({ length: 8 }, (_, index) => ({
+      ...snapshot.graphProjectionJobs[0]!,
+      id: 'graph-terminal-' + index,
+      status: 'failed' as const,
+      attempts: 3,
+      nextRetryAt: null,
+      lastError: 'graph failure ' + index,
+      nodeIds: [],
+      edgeIds: [],
+    }))
+    const issue = await request('/api/stratagate/overview', 'GET', {
+      adminNamespaces: async () => ['dsh:project:issue-55'],
+      adminSnapshot: async () => ({
+        ...snapshot,
+        summaryJobs: [],
+        extractionJobs: [{
+          blockId: 'blk_1', status: 'failed' as const, attempts: 3,
+          lastError: 'event extraction failure', nextRetryAt: null,
+          updatedAt: '2026-08-18T00:02:00.000Z',
+        }],
+        graphProjectionJobs: graphFailures,
+        elementProjectionJobs: legacyPending,
+      }),
+      adminWorkspaceName: () => 'Issue 55 workspace',
+    } as unknown as StrataGateRuntime)
+    expect(issue.body.namespaces[0]).toMatchObject({
+      failedJobs: 9,
+      processingJobs: 0,
+      taskStatus: {
+        blockSummary: { terminalFailed: 0 },
+        eventExtraction: { terminalFailed: 1 },
+        graphProjection: { terminalFailed: 8 },
+      },
+      graphMigration: { state: 'failed', failed: 8, projected: 0, total: 1 },
+    })
+    expect(issue.body.namespaces[0].failedJobDetails).toHaveLength(9)
+    expect(issue.body.namespaces[0].failedJobDetails.every((job: any) => job.kind !== 'element-projection')).toBe(true)
   })
 
   it('rejects Block Summary retries while the job is not failed', async () => {
@@ -550,6 +632,53 @@ describe('StrataGate admin routes', () => {
     expect(blocks.body.items[0].currentTokens).toBe(blocks.body.items[0].l5Tokens)
     expect(blocks.body.items[0].layerTokens).toHaveLength(6)
     expect(blocks.body.items[0].layerTokens.find(({ level }: { level: number }) => level === 5)).toMatchObject({ percentOfL5: 100 })
+  })
+
+  it('filters the complete Event timeline before pagination', async () => {
+    const events = Array.from({ length: 100 }, (_, index) => {
+      const position = index + 1
+      const timestamp = new Date(Date.UTC(2026, 0, 2) - index * 60_000).toISOString()
+      const target = position === 80
+      return {
+        ...snapshot.events[0]!,
+        id: `evt_${String(position).padStart(3, '0')}`,
+        title: target ? 'Needle Event' : `Ordinary Event ${position}`,
+        summary: target ? 'Only this later-page Event matches.' : 'Ordinary timeline entry.',
+        temporal: target
+          ? { mentionedAt: timestamp, participantNodeIds: ['node_target'], eventType: 'incident', status: 'ongoing' as const }
+          : { happenedStart: timestamp, participantNodeIds: ['node_other'], eventType: 'decision', status: 'occurred' as const },
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
+    })
+    const pagedRuntime = {
+      adminSnapshot: async () => ({ ...snapshot, events }),
+    } as unknown as StrataGateRuntime
+    const base = '/api/stratagate/memories?namespace=timeline&kind=events&timeline=true&limit=40'
+
+    const firstPage = await request(`${base}&offset=0`, 'GET', pagedRuntime)
+    expect(firstPage.body).toMatchObject({ total: 100, offset: 0, limit: 40 })
+    expect(firstPage.body.items).toHaveLength(40)
+    expect(firstPage.body.items.map(({ id }: { id: string }) => id)).not.toContain('evt_080')
+
+    const search = await request(`${base}&offset=0&q=Needle%20Event`, 'GET', pagedRuntime)
+    expect(search.body).toMatchObject({ total: 1, offset: 0, items: [{ id: 'evt_080' }] })
+
+    const filters = [
+      'eventType=incident',
+      'participant=node_target',
+      'eventStatus=ongoing',
+      'time=unknown',
+    ]
+    for (const filter of filters) {
+      const result = await request(`${base}&offset=0&${filter}`, 'GET', pagedRuntime)
+      expect(result.body).toMatchObject({ total: 1, offset: 0, items: [{ id: 'evt_080' }] })
+    }
+
+    const cleared = await request(`${base}&offset=0`, 'GET', pagedRuntime)
+    expect(cleared.body).toMatchObject({ total: 100, offset: 0, limit: 40 })
+    expect(cleared.body.items).toHaveLength(40)
+    expect(cleared.body.items[0].id).toBe('evt_001')
   })
 
   it('serves one revision-aware dashboard snapshot and returns 304 when unchanged', async () => {

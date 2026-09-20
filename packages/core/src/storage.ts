@@ -131,9 +131,31 @@ export interface LoadedStrataGateState {
   revision: number;
 }
 
+export interface RawMessageIndexDelta {
+  upsert: Array<Pick<RawMessage, 'id' | 'content'>>;
+  deleteIds: string[];
+}
+
 export interface StorageAdapter {
   load(namespace: string): Promise<LoadedStrataGateState | null>;
-  save(namespace: string, snapshot: StrataGateSnapshot, expectedRevision: number): Promise<number>;
+  save(
+    namespace: string,
+    snapshot: StrataGateSnapshot,
+    expectedRevision: number,
+    rawMessageIndexDelta?: RawMessageIndexDelta,
+  ): Promise<number>;
+  /**
+   * Return a bounded set of raw-message ids for lexical candidate recall.
+   * Implementations may return null when an index is unavailable; callers
+   * must then use their exhaustive in-memory ranking path.
+   */
+  searchRawMessageIds?(
+    namespace: string,
+    tokens: readonly string[],
+    limit: number,
+    threadId?: string,
+    includeUnthreaded?: boolean,
+  ): string[] | null;
   close?(): Promise<void>;
 }
 
