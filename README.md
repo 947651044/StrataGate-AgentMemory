@@ -98,9 +98,7 @@ Short-term decay gradually reduces the detail that older conversations contribut
 
 ## How it works
 
-![Figure 1: StrataGate workflow—memory formation, automatic activation, active retrieval, and evidence assessment (Chinese labels)](docs/assets/aaed14b0b43a76334008117f6ca104af.png)
-
-*The four-round retrieval budget in Figure 1 is an example evaluation setting. Integrations control their own retrieval loops and budgets. The diagrams use Chinese labels; the accompanying text explains each mechanism in English.*
+![Figure 1: StrataGate workflow—memory formation, automatic activation, active retrieval, and evidence assessment](docs/assets/stratagate-overall-flow-en.png)
 
 StrataGate's workflow covers memory formation, recall when answering, and feedback after adoption.
 
@@ -156,7 +154,7 @@ StrataGate separately manages conversation detail, long-term information updates
 
 Recent discussions usually need their full detail. Older conversations can remain in context as concise views. StrataGate stores several levels of detail for the same conversation block and gradually reduces what older Blocks display by default as more conversation accumulates.
 
-![Figure 2: Short-term memory—L0–L5 views, display decay, and on-demand expansion (Chinese labels)](docs/assets/41fc676096d0a13337a1c03aaf8f499b.png)
+![Figure 2: Short-term memory—L0–L5 views, display decay, and on-demand expansion](docs/assets/stratagate-short-term-memory-en.png)
 
 **One conversation block, six levels of detail.**
 
@@ -169,11 +167,15 @@ Each fully processed Block contains these views:
 | L0 | Title and tags | Identify a piece of history with minimal context |
 | L1 | Short summary | Understand the discussion's topic |
 | L2 | Key facts | Review decisions, constraints, plans, and outcomes |
-| L3 | Rule-condensed dialogue | Preserve the discussion while removing bounded redundancy |
-| L4 | Readable, near-verbatim dialogue | Check fuller language context |
+| L3 | Deterministically condensed dialogue | Remove standalone fillers from a fixed allowlist; keep only the first duplicate long or code-like paragraph; retain tool names and result summaries |
+| L4 | Near-verbatim dialogue without internal messages | Remove system messages; only trim outer whitespace and add role labels to user and assistant text; retain names and summaries for recognized tool records |
 | L5 | Source messages and tool records | Verify provenance and specific details |
 
-The model produces L0–L2 summaries. Code generates L3 and L4 deterministically. L3 may condense standalone greetings, pure confirmations, repeated long pasted content, and tool arguments; it does not perform free-form semantic paraphrasing.
+The model produces L0–L2 summaries. L3 and L4 do not use model paraphrasing; code generates them with these fixed rules:
+
+- **L4:** Remove system messages. User and assistant text is preserved except for trimming outer whitespace and adding `User`, `Assistant`, or other role labels. Recognized structured tool records retain the tool name and a result summary of at most 160 characters while omitting raw `arguments`, `params`, `input`, and `request` fields. Tool-role text that is not recognized as tool JSON remains unchanged.
+- **L3:** Condense further without semantic rewriting. A sentence is removed only when, after trailing punctuation is stripped, it exactly matches a fixed filler allowlist such as `ok`, `thanks`, `got it`, `好的`, `明白`, `收到`, `谢谢`, or `可以`. After whitespace normalization and case folding, code-like paragraphs and paragraphs of at least 80 characters are deduplicated: the first copy remains verbatim, and later exact duplicates become an omission marker. Tool records use the same name-and-result-summary form as L4.
+- **Length guard:** If generated L4 would be longer than L5, L5 is used instead. If L3 would be longer than L4, L4 is used instead, preserving `L3 ≤ L4 ≤ L5`.
 
 Source records are saved first, followed by summarization and Event processing. Only a fully processed, ready Block can replace its corresponding native history and participate in decay.
 
@@ -181,11 +183,9 @@ Source records are saved first, followed by summarization and Event processing. 
 
 Display changes follow exponential decay:
 
-$$
-w_{\text{block}}(age)=e^{-\lambda_{\text{block}}\,age}
-$$
+<p align="center"><strong>w<sub>block</sub>(age) = e<sup>−λ<sub>block</sub> · age</sup></strong></p>
 
-The default $\lambda_{\text{block}}$ is **0.30**. Code maps weight ranges to display levels. Smaller coefficients preserve detail for longer and therefore consume more context.
+The default decay coefficient λ<sub>block</sub> is **0.30**. Code maps weight ranges to display levels. Smaller coefficients preserve detail for longer and therefore consume more context.
 
 In this formula, `age` is the distance between the current display anchor and the latest ready Block in the same conversation. It measures conversation progress, **not elapsed calendar days**. Unsealed turns and Blocks still awaiting model processing do not advance this decay.
 
@@ -220,7 +220,7 @@ Older conversations can therefore remain lightweight during ordinary use while r
 
 Short-term memory retains a discussion's context. Long-term memory extracts information worth using in future sessions. StrataGate records decisions, preferences, plans, and changes as Events, then uses those Events to organize a knowledge graph.
 
-![Figure 4: Long-term memory updates—Event extraction, historical relationships, and the current-state graph (Chinese labels)](docs/assets/fc07e5b6e1cc07c115faa773a2718aa9.png)
+![Figure 4: Long-term memory updates—Event extraction, historical relationships, and the current-state graph](docs/assets/stratagate-long-term-update-en.png)
 
 **Event cards record what happened and retain their sources.**
 
@@ -299,33 +299,27 @@ The model assesses semantic sufficiency. Code validates references and protocol 
 
 These checks make retrieval traceable and auditable, but the model can still misjudge evidence. When sufficient information is unavailable, the agent should continue searching or state that it cannot confirm the answer.
 
-Integrations control active-retrieval loops and budgets. The four-round limit in Figure 1 is an example evaluation setting, not a fixed limit for every integration.
-
 <a id="use-only-reinforcement"></a>
 
 ### 4. Reinforce only memories actually used: more adoptions mean slower future decay
 
 Long-term memories also decay as conversations progress. Here, the changing quantity is an Event's weight, which participates in later recall and ranking. Unlike a short-term Block, an Event does not move through L0–L5 display levels as its weight decays.
 
-![Figure 3: Long-term memory weights—natural decay, retrieval without reinforcement, and adoption-based reinforcement (Chinese labels)](docs/assets/cecc9d191a4b9bf22a479623e2ebdc1d.png)
+![Figure 3: Long-term memory weights—natural decay, retrieval without reinforcement, and adoption-based reinforcement](docs/assets/stratagate-long-term-weight-en.png)
 
 **New Events have an initial weight that decays when they are not adopted.**
 
 The base Event-weight function is:
 
-$$
-w(t,n)=\max\left(floor,e^{-\lambda(n)t}\right)
-$$
+<p align="center"><strong>w(t,n) = max(floor, e<sup>−λ(n)t</sup>)</strong></p>
 
-$$
-\lambda(n)=\frac{0.15}{1+1.5\ln(n)}
-$$
+<p align="center"><strong>λ(n) = 0.15 / (1 + 1.5 ln(n))</strong></p>
 
 Here:
 
-- $t$ is the difference between the current turn and the last adoption turn; new Events start counting from creation;
-- $n$ is the internal adoption count, initialized to 1 and incremented for each recorded adoption;
-- $floor$ is the minimum weight assigned according to the memory's criticality.
+- `t` is the difference between the current turn and the last adoption turn; new Events start counting from creation;
+- `n` is the internal adoption count, initialized to 1 and incremented for each recorded adoption;
+- `floor` is the minimum weight assigned according to the memory's criticality.
 
 Long-term decay also uses conversation turns rather than elapsed wall-clock time. Lower weight may reduce a memory's priority in later recall, but decay does not delete its historical record.
 
