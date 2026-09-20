@@ -3045,7 +3045,7 @@ window.__ModuleLoader__.load({
       } else {
         if (shouldExpandFeedbackPreview(result)) callbacks.setPreviewOpen?.(true)
         messages.push((result?.error || '复制或打开 Issue 失败') + ' 报告仍保留在预览中；请手动复制或下载诊断文件。' + (result?.opened ? '' : ' 也可点击下方普通链接打开 Issue。'))
-        callbacks.setError?.(messages.join(' '))
+        callbacks.setError?.((current) => current ? current + ' ' + messages.join(' ') : messages.join(' '))
       }
       return result
     }
@@ -3131,7 +3131,10 @@ window.__ModuleLoader__.load({
         }))
         const issue = copyReportAndOpenIssue(reportSnapshot.text, navigator?.clipboard, (url) => window.open(url, '_blank'), title)
         void issue.then((result) => handleFeedbackIssueResult(result, { setStatus, setError, setPreviewOpen }))
-          .catch((reason) => setError('复制或打开 Issue 失败：' + String(reason?.message || reason)))
+          .catch((reason) => setError((current) => {
+            const message = '复制或打开 Issue 失败：' + String(reason?.message || reason)
+            return current ? current + ' ' + message : message
+          }))
       }
       const copyAiPrompt = () => {
         setStatus(''); setError('')

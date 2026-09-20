@@ -1351,6 +1351,9 @@ describe('StrataGate Web client contract', () => {
     expect(new URL(titled[0]!).searchParams.get('body')).toBe(ISSUE_BODY_HINT)
     expect([...new URL(titled[0]!).searchParams.keys()].sort()).toEqual(['body', 'title'])
     expect(titled[0]!).not.toContain('chat snapshot')
+
+    const popupBlocked = await copyReportAndOpenIssue(report, { writeText: async () => {} }, () => null)
+    expect(popupBlocked).toEqual({ copied: true, opened: false, error: '' })
   })
 
   it('starts the Issue action immediately instead of waiting for the local draft save', async () => {
@@ -1557,13 +1560,18 @@ describe('StrataGate Web client contract', () => {
   it('shows clipboard failure immediately without waiting for draft persistence', () => {
     const calls: string[] = []
     const { handleFeedbackIssueResult } = loadSupportHelpers()
+    let combinedError = '保存反馈草稿失败：disk full'
     const result = handleFeedbackIssueResult({ copied: false, opened: true, error: '复制失败：permission denied' }, {
       setPreviewOpen: (value: boolean) => calls.push('preview:' + value),
-      setError: (value: string) => calls.push('error:' + value),
+      setError: (update: string | ((current: string) => string)) => {
+        combinedError = typeof update === 'function' ? update(combinedError) : update
+        calls.push('error:' + combinedError)
+      },
     })
     expect(result.copied).toBe(false)
     expect(calls[0]).toBe('preview:true')
-    expect(calls[1]).toContain('error:复制失败')
+    expect(calls[1]).toContain('保存反馈草稿失败')
+    expect(calls[1]).toContain('复制失败')
   })
 
   it('keeps Event Extraction and Graph Projection separate in the status details', () => {

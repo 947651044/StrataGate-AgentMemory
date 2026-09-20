@@ -209,7 +209,7 @@ describe('DSH runtime ingestion', () => {
         draft: { title: 'Draft title', description: 'Observed failure.', errorContext: 'EACCES' },
       })
       expect(second.adminSaveFeedbackDraft(second.namespaceFor(session), { bodyMarkdown: '' })).toMatchObject({
-        draft: { title: 'Draft title', description: 'Observed failure.', reproduction: ['First step', 'Second step'], expected: '', actual: '', errorContext: 'EACCES' },
+        draft: { title: 'Draft title', description: '', reproduction: [], expected: '', actual: '', errorContext: '' },
       })
       const afterCooldown = Date.parse('2026-09-10T00:00:00.000Z')
       second.notePluginError(session, new Error('later failure'))
@@ -255,8 +255,8 @@ describe('DSH runtime ingestion', () => {
       await runtime.prepareFeedback(session, { expected: 'Latest expected' })
       const afterStructuredUpdate = runtime.adminFeedbackDraft(namespace).draft!
       expect(afterStructuredUpdate).toMatchObject({
-        title: 'Manual body title patch', description: 'Original description', reproduction: ['repro step after manual edit'],
-        expected: 'Latest expected', actual: 'Original actual', errorContext: 'Original error',
+        title: 'Manual body title patch', description: '', reproduction: ['repro step after manual edit'],
+        expected: 'Latest expected', actual: '', errorContext: '',
       })
       expect(afterStructuredUpdate.bodyMarkdown).toContain('Manual body.')
       expect(afterStructuredUpdate.bodyMarkdown).toContain('## 自定义备注')
@@ -264,10 +264,15 @@ describe('DSH runtime ingestion', () => {
       expect(afterStructuredUpdate.bodyMarkdown).toContain('Latest expected')
       const afterBodyClear = runtime.adminSaveFeedbackDraft(namespace, { bodyMarkdown: '' }).draft
       expect(afterBodyClear).toMatchObject({
-        title: 'Manual body title patch', description: 'Original description', reproduction: ['repro step after manual edit'],
-        expected: 'Latest expected', actual: 'Original actual', errorContext: 'Original error',
+        title: 'Manual body title patch', description: '', reproduction: [], expected: '', actual: '', errorContext: '',
       })
       expect(afterBodyClear.bodyMarkdown).toBeUndefined()
+      await runtime.prepareFeedback(session, { actual: 'Actual after explicit body clear' })
+      expect(runtime.adminFeedbackDraft(namespace).draft).toMatchObject({
+        title: 'Manual body title patch', description: '', reproduction: [], expected: '',
+        actual: 'Actual after explicit body clear', errorContext: '',
+      })
+      expect(runtime.adminFeedbackDraft(namespace).draft?.bodyMarkdown).toBeUndefined()
     } finally {
       await runtime.close()
     }
@@ -290,7 +295,17 @@ describe('DSH runtime ingestion', () => {
         '```md',
         '## 预期行为',
         'code sample must remain untouched',
+        '~~~',
+        'mixed fence must remain inside the backtick fence',
         '```',
+        '',
+        '~~~~md',
+        '```',
+        'long fence content must remain inside',
+        '~~~~',
+        '',
+        '    ## 预期行为',
+        '    indented code must remain untouched',
         '',
         '## 预期行为',
         '',
@@ -306,7 +321,11 @@ describe('DSH runtime ingestion', () => {
       expect(updated).toContain('Intro with literal ## 预期行为 text.')
       expect(updated).toContain('### 预期行为')
       expect(updated).toContain('Keep the custom level-three section.')
-      expect(updated).toContain('```md\n## 预期行为\ncode sample must remain untouched\n```')
+      expect(updated).toContain('```md\n## 预期行为\ncode sample must remain untouched')
+      expect(updated).toContain('mixed fence must remain inside the backtick fence\n```')
+      expect(updated).toContain('~~~\nmixed fence must remain inside the backtick fence\n```')
+      expect(updated).toContain('~~~~md\n```\nlong fence content must remain inside\n~~~~')
+      expect(updated).toContain('    ## 预期行为\n    indented code must remain untouched')
       expect(updated).toContain('## 预期行为\n\nNew expected content.')
       expect(updated).not.toContain('## 预期行为\n\nOld expected content.')
       expect(updated).toContain('## 自定义备注\n\nKeep this custom section.')

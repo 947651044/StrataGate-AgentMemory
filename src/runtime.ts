@@ -161,18 +161,22 @@ function patchFeedbackMarkdown(markdown: string, input: FeedbackDraftInput): str
       : feedbackText(raw, key === 'description' ? 20_000 : key === 'expected' || key === 'actual' ? 10_000 : 20_000)
     const marker = `## ${heading}`
     const lines = result.split('\n')
-    let inFence = false
+    let fence: { character: '`' | '~', length: number } | null = null
     let sectionStart = -1
     let sectionEnd = lines.length
     for (let index = 0; index < lines.length; index += 1) {
       const line = (lines[index] ?? '').replace(/\r$/, '')
-      const trimmed = line.trim()
-      if (/^(?:```|~~~)/.test(trimmed)) {
-        inFence = !inFence
+      if (fence) {
+        const closingFence = line.match(/^ {0,3}(`+|~+)[ \t]*$/)
+        if (closingFence?.[1]?.[0] === fence.character && closingFence[1].length >= fence.length) fence = null
         continue
       }
-      if (inFence) continue
-      if (trimmed === marker && sectionStart < 0) {
+      const openingFence = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+      if (openingFence?.[1] && (openingFence[1][0] === '~' || !openingFence[2]?.includes('`'))) {
+        fence = { character: openingFence[1][0] as '`' | '~', length: openingFence[1].length }
+        continue
+      }
+      if (line === marker && sectionStart < 0) {
         sectionStart = index
         continue
       }
@@ -194,9 +198,12 @@ function patchFeedbackMarkdown(markdown: string, input: FeedbackDraftInput): str
 
 function normalizeFeedbackDraft(input: FeedbackDraftInput, previous?: FeedbackDraft | null): FeedbackDraft {
   const has = (key: keyof FeedbackDraftInput): boolean => Object.prototype.hasOwnProperty.call(input, key)
+  const replacesStructuredBody = has('bodyMarkdown')
   const updatesStructuredBody = ['description', 'reproduction', 'expected', 'actual', 'errorContext']
     .some((key) => has(key as keyof FeedbackDraftInput))
-  const reproduction = has('reproduction')
+  const reproduction = replacesStructuredBody
+    ? []
+    : has('reproduction')
     ? (Array.isArray(input.reproduction) ? input.reproduction : []).map((value) => feedbackText(value, 2_000)).filter(Boolean).slice(0, 20)
     : previous?.reproduction ?? []
   const bodyMarkdown = has('bodyMarkdown')
@@ -206,11 +213,11 @@ function normalizeFeedbackDraft(input: FeedbackDraftInput, previous?: FeedbackDr
     : previous?.bodyMarkdown
   return {
     title: has('title') ? feedbackText(input.title, 240) : previous?.title ?? '',
-    description: has('description') ? feedbackText(input.description, 20_000) : previous?.description ?? '',
+    description: replacesStructuredBody ? '' : has('description') ? feedbackText(input.description, 20_000) : previous?.description ?? '',
     reproduction,
-    expected: has('expected') ? feedbackText(input.expected, 10_000) : previous?.expected ?? '',
-    actual: has('actual') ? feedbackText(input.actual, 10_000) : previous?.actual ?? '',
-    errorContext: has('errorContext') ? feedbackText(input.errorContext, 20_000) : previous?.errorContext ?? '',
+    expected: replacesStructuredBody ? '' : has('expected') ? feedbackText(input.expected, 10_000) : previous?.expected ?? '',
+    actual: replacesStructuredBody ? '' : has('actual') ? feedbackText(input.actual, 10_000) : previous?.actual ?? '',
+    errorContext: replacesStructuredBody ? '' : has('errorContext') ? feedbackText(input.errorContext, 20_000) : previous?.errorContext ?? '',
     ...(bodyMarkdown ? { bodyMarkdown } : {}),
     updatedAt: new Date().toISOString(),
   }
