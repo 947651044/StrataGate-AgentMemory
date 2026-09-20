@@ -373,6 +373,17 @@ export interface GraphFact {
   updatedAt: string;
 }
 
+export interface GraphMetadataProvenanceEntry {
+  value: string;
+  sourceEventIds: string[];
+}
+
+export interface GraphNodeMetadataProvenance {
+  name?: string[];
+  aliases?: GraphMetadataProvenanceEntry[];
+  tags?: GraphMetadataProvenanceEntry[];
+}
+
 export interface GraphNode {
   id: string;
   name: string;
@@ -380,6 +391,8 @@ export interface GraphNode {
   aliases: string[];
   /** Optional semantic roles used for discovery and dynamic graph presentation. */
   tags?: string[];
+  /** Optional field-level Event provenance; absent on legacy nodes. */
+  metadataProvenance?: GraphNodeMetadataProvenance;
   currentState: string;
   facts: GraphFact[];
   status: GraphRecordStatus;
@@ -410,6 +423,8 @@ export interface GraphNodeProjection {
   aliases?: string[];
   /** Semantic roles are additive metadata and never replace the stable node type. */
   tags?: string[];
+  /** New projectors should cite the exact Events for each metadata value. */
+  metadataProvenance?: GraphNodeMetadataProvenance;
   state?: string;
   facts?: Array<{ key: string; value: string | string[]; sourceEventIds: string[] }>;
   status?: GraphRecordStatus;

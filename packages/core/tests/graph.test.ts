@@ -115,6 +115,122 @@ describe('Event-backed knowledge graph', () => {
     expect(disputed.node.currentState).toContain('[disputed]');
     expect(await memory.searchGraphNodes('Hidden Entity')).toEqual([]);
     expect(await memory.searchGraphNodes('Archived Entity')).toEqual([]);
+    expect(person(await memory.searchGraphNodes('packageManager'))?.matchType).toBe('current');
+    for (const result of [current, historical, multiSource]) {
+      const evidence = new Set(result.provenanceEventIds);
+      for (const record of [
+        ...(result.currentFacts ?? []), ...(result.historicalFacts ?? []),
+        ...(result.currentEdges ?? []), ...(result.historicalEdges ?? []),
+      ]) {
+        expect(record.sourceEventIds.length).toBeGreaterThan(0);
+        expect(record.sourceEventIds.every((id) => evidence.has(id))).toBe(true);
+      }
+    }
+  });
+
+  it('fails safe for legacy metadata and filters field-level metadata provenance', async () => {
+    const memory = StrataGate.inMemory({
+      blockTurnSize: 1,
+      summarizer: async () => ({ l0Title: 'graph', l0Tags: [], l1Summary: 'graph', l2Keypoints: [], shouldExtract: false }),
+    });
+    await memory.appendTurn({ user: 'metadata evidence', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    const add = async (id: string) => memory.addEvent({
+      id, title: id, summary: id, sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id],
+    });
+    const active = await add('evt_metadata_active');
+    const forgotten = await add('evt_metadata_forgotten');
+    await memory.forgetEvent(forgotten.id);
+    const now = '2026-09-20T00:00:00.000Z';
+    const nodes = memory.listGraphNodes() as GraphNode[];
+    nodes.push({
+      id: 'node_legacy_metadata', name: 'LegacyUnique', type: 'project', aliases: ['forbiddenlegacy'], tags: ['forbiddentag'],
+      currentState: '', status: 'active', confidence: 0.9, sourceEventIds: [active.id, forgotten.id], facts: [], createdAt: now, updatedAt: now,
+    }, {
+      id: 'node_field_metadata', name: 'Field Entity', type: 'project', aliases: ['safe-alias', 'forgotten-alias-2'], tags: ['safe-tag', 'forgotten-tag-2'],
+      metadataProvenance: {
+        name: [active.id],
+        aliases: [
+          { value: 'safe-alias', sourceEventIds: [active.id] },
+          { value: 'forbiddenlegacy-2', sourceEventIds: [forgotten.id] },
+        ],
+        tags: [
+          { value: 'safe-tag', sourceEventIds: [active.id] },
+          { value: 'forbiddentag-2', sourceEventIds: [forgotten.id] },
+        ],
+      },
+      currentState: '', status: 'active', confidence: 0.9, sourceEventIds: [active.id, forgotten.id], facts: [], createdAt: now, updatedAt: now,
+    });
+
+    expect(await memory.searchGraphNodes('forbiddenlegacy')).toEqual([]);
+    expect(await memory.searchGraphNodes('forbiddentag')).toEqual([]);
+    const safeAlias = await memory.searchGraphNodes('safe-alias');
+    expect(safeAlias[0]?.node.name).toBe('Field Entity');
+    expect(safeAlias[0]?.node.aliases).toEqual(['safe-alias']);
+    expect(safeAlias[0]?.node.aliases).not.toContain('forbiddenlegacy-2');
+    expect(safeAlias[0]?.node.tags).toEqual(['safe-tag']);
+    const legacyName = await memory.searchGraphNodes('LegacyUnique');
+    expect(legacyName).toEqual([]);
+  });
+
+  it('does not expose claims whose provenance falls outside the evidence limit', async () => {
+    const memory = StrataGate.inMemory({
+      blockTurnSize: 1,
+      summarizer: async () => ({ l0Title: 'graph', l0Tags: [], l1Summary: 'graph', l2Keypoints: [], shouldExtract: false }),
+    });
+    await memory.appendTurn({ user: 'many graph facts', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    const events = await Promise.all(Array.from({ length: 7 }, (_, index) => memory.addEvent({
+      id: `evt_many_${index}`, title: `event-${index}`, summary: `event-${index}`, sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id],
+    })));
+    const now = '2026-09-20T00:00:00.000Z';
+    (memory.listGraphNodes() as GraphNode[]).push({
+      id: 'node_many_facts', name: 'Many Facts', type: 'project', aliases: [], currentState: '', status: 'active', confidence: 0.9,
+      sourceEventIds: events.map(({ id }) => id), facts: events.map((event, index) => ({
+        id: `fact_many_${index}`, key: `fact${index}`, value: `needle-${index}`, status: 'active' as const,
+        confidence: 0.9, sourceEventIds: [event.id], createdAt: now, updatedAt: now,
+      })), createdAt: now, updatedAt: now,
+    });
+    const result = (await memory.searchGraphNodes('needle'))[0]!;
+    const evidence = new Set(result.provenanceEventIds);
+    expect(result.provenanceEventIds).toHaveLength(GRAPH_PROVENANCE_LIMIT);
+    expect(result.currentFacts?.length).toBeLessThanOrEqual(GRAPH_PROVENANCE_LIMIT);
+    expect(result.node.currentState).not.toContain('needle-6');
+    for (const record of result.currentFacts ?? []) {
+      expect(record.sourceEventIds.length).toBeGreaterThan(0);
+      expect(record.sourceEventIds.every((id) => evidence.has(id))).toBe(true);
+    }
+  });
+
+  it('returns current context for a historical Edge without changing its match type', async () => {
+    const memory = StrataGate.inMemory({
+      blockTurnSize: 1,
+      summarizer: async () => ({ l0Title: 'graph', l0Tags: [], l1Summary: 'graph', l2Keypoints: [], shouldExtract: false }),
+    });
+    await memory.appendTurn({ user: 'edge history', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    const add = async (id: string, summary: string) => memory.addEvent({
+      id, title: id, summary, sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id],
+    });
+    const currentEvent = await add('evt_edge_current', '黄方目前在 A公司。');
+    const historicalEvent = await add('evt_edge_historical', '黄方曾经在 B公司。');
+    historicalEvent.status = 'superseded';
+    const now = '2026-09-20T00:00:00.000Z';
+    const nodes = memory.listGraphNodes() as GraphNode[];
+    nodes.push(
+      { id: 'edge_person', name: '黄方', type: 'person', aliases: [], currentState: '', status: 'active', confidence: 0.9, sourceEventIds: [currentEvent.id, historicalEvent.id], facts: [], createdAt: now, updatedAt: now },
+      { id: 'edge_a_company', name: 'A公司', type: 'organization', aliases: ['AlphaCorp'], currentState: '', status: 'active', confidence: 0.9, sourceEventIds: [currentEvent.id], facts: [], createdAt: now, updatedAt: now },
+      { id: 'edge_b_company', name: 'B公司', type: 'organization', aliases: ['BetaCorp'], currentState: '', status: 'active', confidence: 0.9, sourceEventIds: [historicalEvent.id], facts: [], createdAt: now, updatedAt: now },
+    );
+    (memory.listGraphEdges() as GraphEdge[]).push(
+      { id: 'edge_current', fromNodeId: 'edge_person', toNodeId: 'edge_a_company', relation: 'works_at', status: 'active', confidence: 0.9, sourceEventIds: [currentEvent.id], createdAt: now, updatedAt: now },
+      { id: 'edge_historical', fromNodeId: 'edge_person', toNodeId: 'edge_b_company', relation: 'works_at', status: 'superseded', confidence: 0.9, sourceEventIds: [historicalEvent.id], createdAt: now, updatedAt: now },
+    );
+    const historical = (await memory.searchGraphNodes('B公司')).find(({ node }) => node.id === 'edge_person')!;
+    expect(historical.matchType).toBe('historical');
+    expect(historical.historicalEdges).toEqual([expect.objectContaining({ id: 'edge_historical' })]);
+    expect(historical.currentEdges).toEqual([expect.objectContaining({ id: 'edge_current' })]);
+    expect(historical.provenanceEventIds).toEqual([historicalEvent.id, currentEvent.id]);
   });
 
   it('projects stable nodes and directed edges while keeping Event as source of truth', async () => {
@@ -139,7 +255,14 @@ describe('Event-backed knowledge graph', () => {
         reason: 'projected',
         nodes: [
           { ref: 'person', name: 'chenhw7', type: 'person', tags: ['developer'], sourceEventIds: [events[0]!.id] },
-          { ref: 'project', name: 'StrataGate', type: 'project', tags: ['memory-plugin', 'dsh-plugin'], aliases: ['strata_gate'], state: '已发布', sourceEventIds: [events[0]!.id] },
+          { ref: 'project', name: 'StrataGate', type: 'project', tags: ['memory-plugin', 'dsh-plugin'], aliases: ['strata_gate'], metadataProvenance: {
+            name: [events[0]!.id],
+            aliases: [{ value: 'strata_gate', sourceEventIds: [events[0]!.id] }],
+            tags: [
+              { value: 'memory-plugin', sourceEventIds: [events[0]!.id] },
+              { value: 'dsh-plugin', sourceEventIds: [events[0]!.id] },
+            ],
+          }, state: '已发布', sourceEventIds: [events[0]!.id] },
           { ref: 'tool', name: 'npm', type: 'tool', tags: ['package-manager'], sourceEventIds: [events[0]!.id] },
         ],
         edges: [
@@ -163,6 +286,14 @@ describe('Event-backed knowledge graph', () => {
     });
     expect(memory.listGraphNodes().every((node) => node.sourceEventIds.includes(memory.listEvents()[0]!.id))).toBe(true);
     expect(memory.listGraphNodes().find(({ name }) => name === 'StrataGate')?.tags).toEqual(['memory-plugin', 'dsh-plugin']);
+    expect(memory.listGraphNodes().find(({ name }) => name === 'StrataGate')?.metadataProvenance?.aliases).toEqual([
+      expect.objectContaining({ value: 'strata_gate', sourceEventIds: expect.arrayContaining([memory.listEvents()[0]!.id]) }),
+    ]);
+    const snapshot = memory.exportSnapshot();
+    expect(normalizeSnapshot(JSON.parse(JSON.stringify(snapshot))).graphNodes.find(({ name }) => name === 'StrataGate')?.metadataProvenance).toBeDefined();
+    const legacySnapshot = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
+    delete (legacySnapshot.graphNodes.find(({ name }) => name === 'StrataGate') as { metadataProvenance?: unknown }).metadataProvenance;
+    expect(normalizeSnapshot(legacySnapshot).graphNodes.find(({ name }) => name === 'StrataGate')?.metadataProvenance).toBeUndefined();
     expect((await memory.searchGraphNodes('memory-plugin'))[0]?.node.name).toBe('StrataGate');
     expect(memory.listGraphProjectionJobs()[0]).toMatchObject({ status: 'completed', projectorVersion: 1, attempts: 1 });
   });

@@ -10,7 +10,7 @@ import {
 import { applyElementChanges, elementViewAt } from './elements.js';
 import { normalizeStandardEventType } from './events.js';
 import { externalMemoryJsonExtractor, parseExternalMemoryExport } from './external-memory.js';
-import { GRAPH_PROVENANCE_LIMIT, applyGraphProjection, effectiveGraphNodeView, graphTimeline } from './graph.js';
+import { GRAPH_PROVENANCE_LIMIT, applyGraphProjection, boundEffectiveGraphNodeView, effectiveGraphNodeView, graphTimeline } from './graph.js';
 import { normalizeRetrievalAssessment, type RetrievalAssessment, type RetrievalAssessmentInput } from './retrieval.js';
 import { SqliteStorage } from './sqlite.js';
 import {
@@ -1373,17 +1373,24 @@ export class StrataGate {
       const eventText = normalizeSearchText(events.map((event) => [
         event.title, event.summary, event.tags.join(' '), (event.temporal.participants ?? []).join(' '),
       ].join(' ')).join(' '));
-      const relevantNodes = this.graphNodes.filter((node) => [node.name, ...node.aliases]
-        .some((name) => eventText.includes(normalizeSearchText(name))))
-        .concat([...this.graphNodes].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 24));
+      const effectiveViews = this.graphNodes.flatMap((node) => effectiveGraphNodeView(node, this.graphEdges, this.events) ?? []);
+      const effectiveNodes = effectiveViews.map(({ node }) => node);
+      const relevantNodes = effectiveNodes.filter((node) => [node.name, ...node.aliases]
+        .some((name) => name && eventText.includes(normalizeSearchText(name))))
+        .concat([...effectiveNodes].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 24));
       const existingNodes = [...new Map(relevantNodes.map((node) => [node.id, node])).values()].slice(0, 32);
       const nodeIds = new Set(existingNodes.map(({ id }) => id));
+      const visibleEdgeIds = new Set(effectiveViews.flatMap(({ currentEdges, historicalEdges }) => [
+        ...currentEdges,
+        ...historicalEdges,
+      ]).map(({ id }) => id));
       return {
         jobId: job.id,
         projectorVersion: job.projectorVersion,
         events: structuredClone(events),
         existingNodes: structuredClone(existingNodes),
-        existingEdges: structuredClone(this.graphEdges.filter(({ fromNodeId, toNodeId }) => nodeIds.has(fromNodeId) && nodeIds.has(toNodeId)).slice(-60)),
+        existingEdges: structuredClone(this.graphEdges.filter(({ id, fromNodeId, toNodeId }) => visibleEdgeIds.has(id)
+          && nodeIds.has(fromNodeId) && nodeIds.has(toNodeId)).slice(-60)),
       };
     });
   }
@@ -1809,13 +1816,12 @@ export class StrataGate {
     if (queryTokens.length === 0) return [];
     const views = this.graphNodes.flatMap((node) => effectiveGraphNodeView(node, this.graphEdges, this.events) ?? []);
     const viewById = new Map(views.map((view) => [view.node.id, view]));
-    const nodeById = new Map(this.graphNodes.map((node) => [node.id, node]));
     const dedupe = <T>(values: readonly T[]): T[] => [...new Set(values)];
     const factValue = (fact: GraphNode['facts'][number]): string =>
       Array.isArray(fact.value) ? fact.value.join(' ') : fact.value;
     const endpoint = (nodeId: string, edge: GraphEdge): string => {
       const otherId = edge.fromNodeId === nodeId ? edge.toNodeId : edge.fromNodeId;
-      const other = nodeById.get(otherId);
+      const other = viewById.get(otherId)?.node;
       return other ? `${other.name} ${other.aliases.join(' ')}` : '';
     };
     const tokenSet = (value: string): Set<string> => new Set(searchTokens(value));
@@ -1845,7 +1851,7 @@ export class StrataGate {
       const sharedOnlyQuery = distinctive.length === 0;
       const factMatches = (fact: GraphNode['facts'][number]): boolean =>
         hasAny(factValue(fact), meaningfulTokens)
-        || (sharedOnlyQuery && allIn(queryTokens, fact.key));
+        || allIn(queryTokens, fact.key);
       const edgeMatches = (edge: GraphEdge): boolean => hasAny(endpoint(node.id, edge), meaningfulTokens);
       const currentFacts = view.currentFacts.filter(factMatches);
       const historicalFacts = view.historicalFacts.filter(factMatches);
@@ -1858,6 +1864,13 @@ export class StrataGate {
         ['type', node.type],
       ];
       const metadataMatches = metadataFields.filter(([, value]) => hasAny(value, queryTokens)).map(([field]) => field);
+      const metadataEventIds = node.metadataProvenance
+        ? dedupe([
+          ...(metadataMatches.includes('name') ? (node.metadataProvenance.name ?? []) : []),
+          ...(node.metadataProvenance.aliases ?? []).filter(({ value }) => hasAny(value, queryTokens)).flatMap(({ sourceEventIds }) => sourceEventIds),
+          ...(node.metadataProvenance.tags ?? []).filter(({ value }) => hasAny(value, queryTokens)).flatMap(({ sourceEventIds }) => sourceEventIds),
+        ])
+        : dedupe([...view.currentNodeEventIds, ...view.historicalNodeEventIds]);
       const hasCurrentEvidence = view.currentFacts.length > 0 || view.currentEdges.length > 0
         || view.currentNodeEventIds.length > 0;
       const hasHistoricalEvidence = view.historicalFacts.length > 0 || view.historicalEdges.length > 0
@@ -1882,7 +1895,7 @@ export class StrataGate {
       ];
       return {
         view, currentFacts, historicalFacts, currentEdges, historicalEdges,
-        metadataMatches, currentHit, historicalHit, matchedFields,
+        metadataMatches, metadataEventIds, currentHit, historicalHit, matchedFields,
       };
     };
     const candidates = views.map(({ node }) => node);
@@ -1917,36 +1930,41 @@ export class StrataGate {
         ...details.view.currentFacts.filter(({ key }) => historicalKeys.has(key)).flatMap(({ sourceEventIds }) => sourceEventIds),
         ...details.view.currentEdges.filter(({ relation }) => historicalRelations.has(relation)).flatMap(({ sourceEventIds }) => sourceEventIds),
       ]);
-      const metadataCandidates = details.currentHit
-        ? [...details.view.currentNodeEventIds,
-          ...details.view.currentFacts.flatMap(({ sourceEventIds }) => sourceEventIds),
-          ...details.view.currentEdges.flatMap(({ sourceEventIds }) => sourceEventIds)]
-        : [...details.view.historicalNodeEventIds,
-          ...details.view.historicalFacts.flatMap(({ sourceEventIds }) => sourceEventIds),
-          ...details.view.historicalEdges.flatMap(({ sourceEventIds }) => sourceEventIds)];
+      const currentContextFacts = details.view.currentFacts.filter(({ key }) => historicalKeys.has(key));
+      const currentContextEdges = details.view.currentEdges.filter(({ relation }) => historicalRelations.has(relation));
+      const metadataCandidates = details.metadataEventIds.length > 0
+        ? details.metadataEventIds
+        : details.currentHit
+          ? [...details.view.currentNodeEventIds,
+             ...details.view.currentFacts.flatMap(({ sourceEventIds }) => sourceEventIds),
+             ...details.view.currentEdges.flatMap(({ sourceEventIds }) => sourceEventIds)]
+          : [...details.view.historicalNodeEventIds,
+             ...details.view.historicalFacts.flatMap(({ sourceEventIds }) => sourceEventIds),
+             ...details.view.historicalEdges.flatMap(({ sourceEventIds }) => sourceEventIds)];
       const metadataEventIds = matchedEventIds.length === 0 && details.metadataMatches.length > 0
         ? dedupe(metadataCandidates).slice(0, 1)
         : [];
       const provenanceEventIds = dedupe([...matchedEventIds, ...currentContextEventIds, ...metadataEventIds])
         .slice(0, GRAPH_PROVENANCE_LIMIT);
       const evidenceIds = new Set(provenanceEventIds);
-      const bounded = <T extends GraphFact | GraphEdge>(record: T): T => ({
-        ...record,
-        sourceEventIds: record.sourceEventIds.filter((id) => evidenceIds.has(id)),
-      });
+      const boundedView = boundEffectiveGraphNodeView(details.view, evidenceIds);
+      const bounded = <T extends GraphFact | GraphEdge>(record: T): T | null => {
+        const sourceEventIds = record.sourceEventIds.filter((id) => evidenceIds.has(id));
+        return sourceEventIds.length > 0 ? { ...record, sourceEventIds } : null;
+      };
       const matchType = details.currentHit && details.historicalHit
         ? 'both' as const
         : details.historicalHit ? 'historical' as const : 'current' as const;
       return {
-        node: details.view.node,
+        node: boundedView.node,
         score,
         matchedFields: details.matchedFields,
         matchReason: `Meaningful ${matchType} match in ${details.matchedFields.join(', ')}; relation text is ranking-only.`,
         matchType,
-        currentFacts: details.currentFacts.map(bounded),
-        historicalFacts: details.historicalFacts.map(bounded),
-        currentEdges: details.currentEdges.map(bounded),
-        historicalEdges: details.historicalEdges.map(bounded),
+        currentFacts: dedupe([...details.currentFacts, ...currentContextFacts]).flatMap((record) => bounded(record) ?? []),
+        historicalFacts: details.historicalFacts.flatMap((record) => bounded(record) ?? []),
+        currentEdges: dedupe([...details.currentEdges, ...currentContextEdges]).flatMap((record) => bounded(record) ?? []),
+        historicalEdges: details.historicalEdges.flatMap((record) => bounded(record) ?? []),
         provenanceEventIds,
         timeline: graphTimeline(provenanceEventIds, this.events),
       };

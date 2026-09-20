@@ -664,6 +664,20 @@ describe('DSH runtime ingestion', () => {
           id: 'fact_runtime_hidden_node', key: 'state', value: 'secret-forgotten', status: 'active', confidence: 0.9,
           sourceEventIds: [forgotten.id], createdAt: now, updatedAt: now,
         }], createdAt: now, updatedAt: now,
+      }, {
+        id: 'node_runtime_metadata', name: 'Metadata Entity', type: 'project', aliases: ['saferuntimealias', 'forbiddenruntime'],
+        tags: ['saferuntimetag', 'forbiddenruntimetag'], currentState: '', status: 'active', confidence: 0.9,
+        sourceEventIds: [currentA.id, forgotten.id], metadataProvenance: {
+          name: [currentA.id],
+          aliases: [
+            { value: 'saferuntimealias', sourceEventIds: [currentA.id] },
+            { value: 'forbiddenruntime', sourceEventIds: [forgotten.id] },
+          ],
+          tags: [
+            { value: 'saferuntimetag', sourceEventIds: [currentA.id] },
+            { value: 'forbiddenruntimetag', sourceEventIds: [forgotten.id] },
+          ],
+        }, facts: [], createdAt: now, updatedAt: now,
       })
 
       const batch = await runtime.searchGraph(active, 'B公司') as {
@@ -707,6 +721,25 @@ describe('DSH runtime ingestion', () => {
       expect(memory.listEvents().find(({ id }) => id === currentA.id)?.weight.mentionCount).toBe(before.get(currentA.id)! + 1)
       expect(memory.listEvents().find(({ id }) => id === unrelated.id)?.weight.mentionCount).toBe(before.get(unrelated.id))
       expect(memory.listEvents().find(({ id }) => id === forgotten.id)?.weight.mentionCount).toBe(before.get(forgotten.id))
+
+      const metadataSession = {
+        ...active,
+        id: 'effective-graph-metadata-session',
+        header: { ...active.header, id: 'effective-graph-metadata-session' },
+        deriveMessages: () => [{
+          id: 'metadata-user', role: 'user', content: [{ type: 'text', text: 'forbiddenruntime' }], source: { kind: 'user' },
+        }],
+      } as unknown as Session
+      const hiddenMetadata = await runtime.searchGraph(metadataSession, 'forbiddenruntime') as { results: unknown[] }
+      expect(hiddenMetadata.results).toEqual([])
+      const safeMetadata = await runtime.searchGraph(metadataSession, 'saferuntimealias') as { results: Array<Record<string, unknown>> }
+      expect(safeMetadata.results[0]).toMatchObject({ name: 'Metadata Entity', aliases: ['saferuntimealias'], tags: ['saferuntimetag'] })
+      const expandedMetadata = await runtime.expandGraphNode(metadataSession, 'node_runtime_metadata') as { results: { node: { aliases: string[]; tags?: string[] } } }
+      expect(expandedMetadata.results.node.aliases).toEqual(['saferuntimealias'])
+      expect(expandedMetadata.results.node.tags).toEqual(['saferuntimetag'])
+      const metadataContext = await runtime.buildAutoContext(metadataSession)
+      expect(metadataContext).not.toContain('forbiddenruntime')
+      expect(metadataContext).not.toContain('forbiddenruntimetag')
     } finally {
       await runtime.close()
       await rm(directory, { recursive: true, force: true })

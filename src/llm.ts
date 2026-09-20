@@ -156,12 +156,27 @@ const GRAPH_FACT: ValueSchemaSpec = {
   properties: { key: { type: 'string', required: true }, value: { ...VALUE, required: true }, sourceEventIds: { ...STRING_ARRAY, required: true } },
 }
 
+const GRAPH_METADATA_ENTRY: ValueSchemaSpec = {
+  type: 'object', additionalProperties: false,
+  properties: { value: { type: 'string', required: true }, sourceEventIds: { ...STRING_ARRAY, required: true } },
+}
+
+const GRAPH_METADATA_PROVENANCE: ValueSchemaSpec = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    name: STRING_ARRAY,
+    aliases: { type: 'array', items: GRAPH_METADATA_ENTRY },
+    tags: { type: 'array', items: GRAPH_METADATA_ENTRY },
+  },
+}
+
 const GRAPH_NODE: ValueSchemaSpec = {
   type: 'object', additionalProperties: false,
   properties: {
     ref: { type: 'string', required: true }, name: { type: 'string', required: true },
     type: { type: 'string', enum: ['person', 'project', 'organization', 'tool', 'place'], required: true },
-    aliases: STRING_ARRAY, tags: { ...STRING_ARRAY, required: true }, state: { type: 'string' }, facts: { type: 'array', items: GRAPH_FACT },
+    aliases: STRING_ARRAY, tags: { ...STRING_ARRAY, required: true }, metadataProvenance: GRAPH_METADATA_PROVENANCE,
+    state: { type: 'string' }, facts: { type: 'array', items: GRAPH_FACT },
     status: { type: 'string', enum: ['active', 'superseded', 'disputed', 'archived'] },
     validFrom: { type: 'string' }, validTo: { type: 'string' }, confidence: { type: 'number' },
     sourceEventIds: { ...STRING_ARRAY, required: true },
@@ -282,6 +297,7 @@ function compactGraphProjectionContext(context: GraphProjectionContext): unknown
       type: node.type,
       aliases: node.aliases.slice(0, 12),
       tags: node.tags?.slice(0, 12),
+      metadataProvenance: node.metadataProvenance,
       currentState: node.currentState.slice(0, 600),
       facts: node.facts
         .filter(({ status }) => status === 'active' || status === 'disputed')
@@ -421,7 +437,7 @@ export class DshModelBridge {
   readonly graphProjector: GraphProjector = async (context: GraphProjectionContext): Promise<GraphProjectionResult> => {
     const eventIds = new Set(context.events.map((event) => event.id))
     const raw = object(await this.callStructured('graphProjector',
-      `Project the supplied Events into the current Knowledge Graph, then call ${STRUCTURED_TOOLS.graphProjector.name} exactly once. Events are the sole source of truth; never use legacy Element data. Return only nodes and edges touched by the supplied Events; never echo unchanged historical graph records. Return at most 24 nodes and 32 edges. Use stable entity nodes for people, projects, organizations, tools, and places. Use aliases to merge spelling/case/separator variants. Give every returned node 1-6 concise semantic role tags such as benchmark, evaluation, memory-plugin, parser, or development-tool; tags describe the node's specific role and never replace its person/project/organization/tool/place type. Reuse stable tag wording when possible. Put attributes in node facts and every relationship in a directed edge using fromRef/toRef—never encode a relationship as a fact string. Prefer concise canonical Chinese relation labels such as 使用、属于、创建、参与、贡献、依赖、位于、相关. Every node, fact, and edge must cite only supplied Event ids. Do not return text.`,
+      `Project the supplied Events into the current Knowledge Graph, then call ${STRUCTURED_TOOLS.graphProjector.name} exactly once. Events are the sole source of truth; never use legacy Element data. Return only nodes and edges touched by the supplied Events; never echo unchanged historical graph records. Return at most 24 nodes and 32 edges. Use stable entity nodes for people, projects, organizations, tools, and places. Use aliases to merge spelling/case/separator variants. Give every returned node 1-6 concise semantic role tags such as benchmark, evaluation, memory-plugin, parser, or development-tool; tags describe the node's specific role and never replace its person/project/organization/tool/place type. Reuse stable tag wording when possible. For every node name, alias, and tag, include metadataProvenance with the exact supplied Event ids that support that individual value; never use an unrelated active Event as a substitute. Put attributes in node facts and every relationship in a directed edge using fromRef/toRef—never encode a relationship as a fact string. Prefer concise canonical Chinese relation labels such as 使用、属于、创建、参与、贡献、依赖、位于、相关. Every node, fact, edge, and metadata provenance id must cite only supplied Event ids. Do not return text.`,
       compactGraphProjectionContext(context),
     ))
     const nodes = (Array.isArray(raw.nodes) ? raw.nodes : []).flatMap((candidate) => {
@@ -437,8 +453,24 @@ export class DshModelBridge {
         if (sourceEventIds.length === 0) return []
         return [{ key: text(fact.key), value, sourceEventIds }]
       })
+      const rawMetadata = object(item.metadataProvenance)
+      const metadataEntries = (value: unknown) => (Array.isArray(value) ? value : []).flatMap((candidate) => {
+        const entry = object(candidate)
+        const value = text(entry.value)
+        const sourceEventIds = strings(entry.sourceEventIds).filter((id) => eventIds.has(id))
+        return value && sourceEventIds.length > 0 ? [{ value, sourceEventIds }] : []
+      })
+      const metadataName = strings(rawMetadata.name).filter((id) => eventIds.has(id))
+      const metadataAliases = metadataEntries(rawMetadata.aliases)
+      const metadataTags = metadataEntries(rawMetadata.tags)
+      const metadataProvenance = {
+        ...(metadataName.length > 0 ? { name: metadataName } : {}),
+        ...(metadataAliases.length > 0 ? { aliases: metadataAliases } : {}),
+        ...(metadataTags.length > 0 ? { tags: metadataTags } : {}),
+      }
       return [{
         ref: text(item.ref), name: text(item.name), type, aliases: strings(item.aliases), tags: strings(item.tags).slice(0, 12),
+        ...(Object.keys(metadataProvenance).length > 0 ? { metadataProvenance } : {}),
         ...(text(item.state) ? { state: text(item.state) } : {}), facts,
         ...(typeof item.status === 'string' ? { status: item.status as 'active' } : {}),
         ...(text(item.validFrom) ? { validFrom: text(item.validFrom) } : {}),

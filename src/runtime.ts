@@ -7,6 +7,7 @@ import type { Session, SessionEvent, SessionSeq } from '@deepseek-ai/dsh-session
 import {
   DERIVATION_MAX_ATTEMPTS,
   GRAPH_PROVENANCE_LIMIT,
+  boundEffectiveGraphNodeView,
   effectiveGraphNodeView,
   graphTimeline,
   estimateTokens,
@@ -1683,15 +1684,11 @@ export class StrataGateRuntime {
       ...view.currentNodeEventIds,
       ...view.historicalNodeEventIds,
     ])].slice(0, GRAPH_PROVENANCE_LIMIT)
-    const evidenceIds = new Set(provenanceEventIds)
-    const bounded = <T extends { sourceEventIds: string[] }>(record: T): T => ({
-      ...record,
-      sourceEventIds: record.sourceEventIds.filter((eventId) => evidenceIds.has(eventId)),
-    })
-    const currentFacts = view.currentFacts.map(bounded)
-    const historicalFacts = view.historicalFacts.map(bounded)
-    const currentEdges = view.currentEdges.map(bounded)
-    const historicalEdges = view.historicalEdges.map(bounded)
+    const boundedView = boundEffectiveGraphNodeView(view, new Set(provenanceEventIds))
+    const currentFacts = boundedView.currentFacts
+    const historicalFacts = boundedView.historicalFacts
+    const currentEdges = boundedView.currentEdges
+    const historicalEdges = boundedView.historicalEdges
     return this.batch(session, [{
       ref: `graph-node:${node.id}:expanded`,
       target: {
@@ -1700,7 +1697,7 @@ export class StrataGateRuntime {
         citation: citation('graph', node.id, node.name, `graph-node:${node.id}:expanded`, 'nodeId', { expanded: true }),
       },
     }], {
-      node: { ...view.node, facts: currentFacts },
+      node: boundedView.node,
       edges: [...currentEdges, ...historicalEdges],
       currentFacts,
       historicalFacts,
@@ -2096,6 +2093,7 @@ function compactGraphNode(result: GraphNodeSearchResult): Record<string, unknown
     name: node.name,
     type: node.type,
     aliases: node.aliases.map((alias) => compactText(alias, 160)),
+    ...(node.tags ? { tags: node.tags.map((tag) => compactText(tag, 120)) } : {}),
     currentState: compactText(node.currentState, 500),
     status: node.status,
     rankScore: score,
@@ -2237,6 +2235,8 @@ function renderActivatedMemory(events: readonly EventCard[], graphResults: reado
       nodeId: node.id,
       name: node.name,
       type: node.type,
+      aliases: node.aliases,
+      tags: node.tags,
       status: node.status,
       matchType: result.matchType,
       currentState: node.currentState,

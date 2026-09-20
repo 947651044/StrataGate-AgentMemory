@@ -3,7 +3,9 @@ import type {
   EventCard,
   GraphEdge,
   GraphFact,
+  GraphMetadataProvenanceEntry,
   GraphNode,
+  GraphNodeMetadataProvenance,
   GraphNodeProjection,
   GraphProjectionResult,
   GraphRecordStatus,
@@ -35,6 +37,55 @@ function factText(fact: Pick<GraphFact, 'key' | 'value'>): string {
 
 function renderCurrentState(facts: readonly GraphFact[]): string {
   return facts.map((fact) => `${factText(fact)}${fact.status === 'disputed' ? ' [disputed]' : ''}`).join('\n');
+}
+
+const EXPOSED_EVENT_STATUSES = new Set<EventCard['status']>(['active', 'superseded']);
+
+function exposedSources(
+  ids: readonly string[] | undefined,
+  eventById: ReadonlyMap<string, EventCard>,
+): string[] {
+  return unique((ids ?? []).filter((id) => EXPOSED_EVENT_STATUSES.has(eventById.get(id)?.status ?? 'forgotten')));
+}
+
+function metadataEntries(
+  entries: readonly GraphMetadataProvenanceEntry[] | undefined,
+  eventById: ReadonlyMap<string, EventCard>,
+): GraphMetadataProvenanceEntry[] {
+  return (entries ?? []).flatMap((entry) => {
+    const value = typeof entry.value === 'string' ? entry.value.trim() : '';
+    const sourceEventIds = exposedSources(entry.sourceEventIds, eventById);
+    return value && sourceEventIds.length > 0 ? [{ value, sourceEventIds }] : [];
+  });
+}
+
+function effectiveMetadata(
+  node: GraphNode,
+  eventById: ReadonlyMap<string, EventCard>,
+): Pick<GraphNode, 'name' | 'aliases' | 'tags' | 'metadataProvenance'> {
+  if (!node.metadataProvenance) {
+    const potentialSources = unique(node.sourceEventIds ?? []);
+    const allSourcesExposed = potentialSources.length > 0
+      && potentialSources.every((id) => EXPOSED_EVENT_STATUSES.has(eventById.get(id)?.status ?? 'forgotten'));
+    return allSourcesExposed
+      ? { name: node.name, aliases: [...node.aliases], ...(node.tags ? { tags: [...node.tags] } : {}) }
+      : { name: '', aliases: [] };
+  }
+
+  const nameSources = exposedSources(node.metadataProvenance.name, eventById);
+  const aliases = metadataEntries(node.metadataProvenance.aliases, eventById);
+  const tags = metadataEntries(node.metadataProvenance.tags, eventById);
+  const metadataProvenance: GraphNodeMetadataProvenance = {
+    ...(nameSources.length > 0 ? { name: nameSources } : {}),
+    ...(aliases.length > 0 ? { aliases } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+  };
+  return {
+    name: nameSources.length > 0 ? node.name : '',
+    aliases: aliases.map(({ value }) => value),
+    ...(tags.length > 0 ? { tags: tags.map(({ value }) => value) } : {}),
+    metadataProvenance,
+  };
 }
 
 /**
@@ -90,13 +141,63 @@ export function effectiveGraphNodeView(
     && currentNodeEventIds.length === 0 && historicalNodeEventIds.length === 0) return null;
 
   const visibleNodeSources = unique([...currentNodeEventIds, ...historicalNodeEventIds]);
+  const metadata = effectiveMetadata(node, eventById);
+  const effectiveNode = { ...node, ...metadata };
+  if (!Object.prototype.hasOwnProperty.call(metadata, 'tags')) delete effectiveNode.tags;
   return {
-    node: {
-      ...node,
-      currentState: renderCurrentState(currentFacts),
-      facts: currentFacts,
-      sourceEventIds: visibleNodeSources,
-    },
+    node: { ...effectiveNode, currentState: renderCurrentState(currentFacts), facts: currentFacts, sourceEventIds: visibleNodeSources },
+    currentFacts,
+    historicalFacts,
+    currentEdges,
+    historicalEdges,
+    currentNodeEventIds,
+    historicalNodeEventIds,
+  };
+}
+
+export function boundEffectiveGraphNodeView(
+  view: EffectiveGraphNodeView,
+  eventIds: ReadonlySet<string>,
+): EffectiveGraphNodeView {
+  const boundRecord = <T extends GraphFact | GraphEdge>(record: T): T | null => {
+    const sourceEventIds = record.sourceEventIds.filter((id) => eventIds.has(id));
+    return sourceEventIds.length > 0 ? { ...record, sourceEventIds } : null;
+  };
+  const currentFacts = view.currentFacts.flatMap((record) => boundRecord(record) ?? []);
+  const historicalFacts = view.historicalFacts.flatMap((record) => boundRecord(record) ?? []);
+  const currentEdges = view.currentEdges.flatMap((record) => boundRecord(record) ?? []);
+  const historicalEdges = view.historicalEdges.flatMap((record) => boundRecord(record) ?? []);
+  const metadata = view.node.metadataProvenance
+    ? (() => {
+      const name = (view.node.metadataProvenance?.name ?? []).filter((id) => eventIds.has(id));
+      const aliases = (view.node.metadataProvenance?.aliases ?? []).flatMap((entry) => {
+        const sourceEventIds = entry.sourceEventIds.filter((id) => eventIds.has(id));
+        return sourceEventIds.length > 0 ? [{ ...entry, sourceEventIds }] : [];
+      });
+      const tags = (view.node.metadataProvenance?.tags ?? []).flatMap((entry) => {
+        const sourceEventIds = entry.sourceEventIds.filter((id) => eventIds.has(id));
+        return sourceEventIds.length > 0 ? [{ ...entry, sourceEventIds }] : [];
+      });
+      return {
+        name: name.length > 0 ? view.node.name : '',
+        aliases: aliases.map(({ value }) => value),
+        ...(tags.length > 0 ? { tags: tags.map(({ value }) => value) } : {}),
+        metadataProvenance: {
+          ...(name.length > 0 ? { name } : {}),
+          ...(aliases.length > 0 ? { aliases } : {}),
+          ...(tags.length > 0 ? { tags } : {}),
+        },
+      };
+    })()
+    : (view.node.sourceEventIds.length > 0 && view.node.sourceEventIds.every((id) => eventIds.has(id))
+      ? { name: view.node.name, aliases: [...view.node.aliases], ...(view.node.tags ? { tags: [...view.node.tags] } : {}) }
+      : { name: '', aliases: [] });
+  const currentNodeEventIds = view.currentNodeEventIds.filter((id) => eventIds.has(id));
+  const historicalNodeEventIds = view.historicalNodeEventIds.filter((id) => eventIds.has(id));
+  const boundedNode = { ...view.node, ...metadata };
+  if (!Object.prototype.hasOwnProperty.call(metadata, 'tags')) delete boundedNode.tags;
+  return {
+    node: { ...boundedNode, currentState: renderCurrentState(currentFacts), facts: currentFacts, sourceEventIds: unique([...currentNodeEventIds, ...historicalNodeEventIds]) },
     currentFacts,
     historicalFacts,
     currentEdges,
@@ -169,6 +270,18 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
     const requested = strings(value, 64);
     return requested.length > 0 && requested.every((id) => options.allowedEventIds.has(id)) ? requested : [];
   };
+  const metadataEntriesFromProjection = (
+    entries: readonly GraphMetadataProvenanceEntry[] | undefined,
+    fallbackValues: readonly string[],
+    fallbackSources: readonly string[],
+  ): GraphMetadataProvenanceEntry[] => {
+    const byValue = new Map((entries ?? []).map((entry) => [normalizeSearchText(entry.value), entry]));
+    return fallbackValues.map((value) => {
+      const requested = byValue.get(normalizeSearchText(value))?.sourceEventIds;
+      const sourceEventIds = validSources(requested) ?? [];
+      return { value, sourceEventIds: sourceEventIds.length > 0 ? sourceEventIds : [...fallbackSources] };
+    });
+  };
 
   for (const proposal of Array.isArray(options.result.nodes) ? options.result.nodes : []) {
     const ref = text(proposal.ref, 120);
@@ -177,6 +290,12 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
     if (!ref || !name || !NODE_TYPES.has(proposal.type) || sources.length === 0) continue;
     const aliases = strings(proposal.aliases, 20).filter((alias) => normalizeSearchText(alias) !== normalizeSearchText(name));
     const tags = strings(proposal.tags, 12);
+    const projectedNameSources = validSources(proposal.metadataProvenance?.name);
+    const projectedMetadata = {
+      name: projectedNameSources.length > 0 ? projectedNameSources : [...sources],
+      aliases: metadataEntriesFromProjection(proposal.metadataProvenance?.aliases, aliases, sources),
+      tags: metadataEntriesFromProjection(proposal.metadataProvenance?.tags, tags, sources),
+    };
     let node = options.nodes.find((candidate) => sameEntity(candidate, { ...proposal, name, aliases }));
     if (!node) {
       node = {
@@ -188,6 +307,26 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
     }
     node.aliases = [...new Set([...node.aliases, ...aliases])];
     if (tags.length > 0) node.tags = [...new Set([...(node.tags ?? []), ...tags])].slice(0, 12);
+    const previousMetadata = node.metadataProvenance;
+    const aliasEntries = [...(previousMetadata?.aliases ?? [])];
+    for (const entry of projectedMetadata.aliases) {
+      const existing = aliasEntries.find((candidate) => normalizeSearchText(candidate.value) === normalizeSearchText(entry.value));
+      if (existing) existing.sourceEventIds = [...new Set([...existing.sourceEventIds, ...entry.sourceEventIds])];
+      else aliasEntries.push(entry);
+    }
+    const tagEntries = [...(previousMetadata?.tags ?? [])];
+    for (const entry of projectedMetadata.tags) {
+      const existing = tagEntries.find((candidate) => normalizeSearchText(candidate.value) === normalizeSearchText(entry.value));
+      if (existing) existing.sourceEventIds = [...new Set([...existing.sourceEventIds, ...entry.sourceEventIds])];
+      else tagEntries.push(entry);
+    }
+    node.metadataProvenance = {
+      ...(projectedMetadata.name.length > 0
+        ? { name: [...new Set([...(previousMetadata?.name ?? []), ...projectedMetadata.name])] }
+        : previousMetadata?.name ? { name: [...previousMetadata.name] } : {}),
+      ...(aliasEntries.length > 0 ? { aliases: aliasEntries } : {}),
+      ...(tagEntries.length > 0 ? { tags: tagEntries } : {}),
+    };
     node.status = STATUSES.has(proposal.status ?? 'active') ? proposal.status ?? 'active' : 'active';
     node.confidence = confidence(proposal.confidence);
     node.sourceEventIds = [...new Set([...node.sourceEventIds, ...sources])];

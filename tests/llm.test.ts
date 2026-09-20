@@ -277,7 +277,15 @@ describe('DeepSeek Harness model JSON retries', () => {
     }
     const { bridge, session, calls } = modelBridge([{
       tool: { reason: 'projected', nodes: [{
-        ref: 'locomo', name: 'LoCoMo', type: 'project', tags: ['benchmark', 'evaluation'], sourceEventIds: [event.id],
+        ref: 'locomo', name: 'LoCoMo', type: 'project', tags: ['benchmark', 'evaluation'],
+        metadataProvenance: {
+          name: [event.id],
+          tags: [
+            { value: 'benchmark', sourceEventIds: [event.id] },
+            { value: 'evaluation', sourceEventIds: [event.id] },
+          ],
+        },
+        sourceEventIds: [event.id],
       }], edges: [] },
     }])
 
@@ -286,6 +294,7 @@ describe('DeepSeek Harness model JSON retries', () => {
     }))
 
     expect(result.nodes[0]?.tags).toEqual(['benchmark', 'evaluation'])
+    expect(result.nodes[0]?.metadataProvenance?.name).toEqual([event.id])
     expect(calls.mock.calls[0]?.[0].tools?.[0]?.name).toBe('stratagate_project_knowledge_graph')
     expect(calls.mock.calls[0]?.[0].tools?.[0]?.parameters?.properties?.nodes?.items?.required).toContain('tags')
     expect(calls.mock.calls[0]?.[0].system).toContain('tags describe the node')
