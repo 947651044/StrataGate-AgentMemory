@@ -50,12 +50,16 @@ function exposedSources(
 
 function metadataEntries(
   entries: readonly GraphMetadataProvenanceEntry[] | undefined,
+  allowedValues: readonly string[],
   eventById: ReadonlyMap<string, EventCard>,
 ): GraphMetadataProvenanceEntry[] {
+  const allowed = new Set(allowedValues.map((value) => normalizeSearchText(value)));
   return (entries ?? []).flatMap((entry) => {
     const value = typeof entry.value === 'string' ? entry.value.trim() : '';
     const sourceEventIds = exposedSources(entry.sourceEventIds, eventById);
-    return value && sourceEventIds.length > 0 ? [{ value, sourceEventIds }] : [];
+    return value && allowed.has(normalizeSearchText(value)) && sourceEventIds.length > 0
+      ? [{ value, sourceEventIds }]
+      : [];
   });
 }
 
@@ -73,8 +77,8 @@ function effectiveMetadata(
   }
 
   const nameSources = exposedSources(node.metadataProvenance.name, eventById);
-  const aliases = metadataEntries(node.metadataProvenance.aliases, eventById);
-  const tags = metadataEntries(node.metadataProvenance.tags, eventById);
+  const aliases = metadataEntries(node.metadataProvenance.aliases, node.aliases, eventById);
+  const tags = metadataEntries(node.metadataProvenance.tags, node.tags ?? [], eventById);
   const metadataProvenance: GraphNodeMetadataProvenance = {
     ...(nameSources.length > 0 ? { name: nameSources } : {}),
     ...(aliases.length > 0 ? { aliases } : {}),
@@ -158,6 +162,7 @@ export function effectiveGraphNodeView(
 export function boundEffectiveGraphNodeView(
   view: EffectiveGraphNodeView,
   eventIds: ReadonlySet<string>,
+  options: { preserveLegacyMetadata?: boolean } = {},
 ): EffectiveGraphNodeView {
   const boundRecord = <T extends GraphFact | GraphEdge>(record: T): T | null => {
     const sourceEventIds = record.sourceEventIds.filter((id) => eventIds.has(id));
@@ -189,7 +194,8 @@ export function boundEffectiveGraphNodeView(
         },
       };
     })()
-    : (view.node.sourceEventIds.length > 0 && view.node.sourceEventIds.every((id) => eventIds.has(id))
+    : ((view.node.sourceEventIds.length > 0 && view.node.sourceEventIds.every((id) => eventIds.has(id))
+      || options.preserveLegacyMetadata)
       ? { name: view.node.name, aliases: [...view.node.aliases], ...(view.node.tags ? { tags: [...view.node.tags] } : {}) }
       : { name: '', aliases: [] });
   const currentNodeEventIds = view.currentNodeEventIds.filter((id) => eventIds.has(id));
@@ -244,11 +250,20 @@ function chronology(events: readonly EventCard[], ids: readonly string[], fallba
     .sort().at(-1) ?? fallback;
 }
 
-function sameEntity(node: GraphNode, proposal: GraphNodeProjection): boolean {
-  if (node.type !== proposal.type) return false;
+type EntityMatchKind = 'canonical-name' | 'alias' | null;
+
+function entityMatchKind(
+  node: GraphNode,
+  proposal: Pick<GraphNodeProjection, 'name' | 'aliases' | 'type'>,
+  eventById: ReadonlyMap<string, EventCard>,
+): EntityMatchKind {
+  if (node.type !== proposal.type) return null;
   const key = (value: string): string => normalizeSearchText(value).replace(/[\s_-]+/g, '');
-  const names = new Set([proposal.name, ...(proposal.aliases ?? [])].map(key));
-  return [node.name, ...node.aliases].some((name) => names.has(key(name)));
+  const metadata = effectiveMetadata(node, eventById);
+  const proposalNames = new Set([proposal.name, ...(proposal.aliases ?? [])].map(key));
+  if (proposalNames.has(key(metadata.name))) return 'canonical-name';
+  if (metadata.aliases.some((value) => proposalNames.has(key(value)))) return 'alias';
+  return null;
 }
 
 export interface ApplyGraphProjectionOptions {
@@ -273,13 +288,12 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
   const metadataEntriesFromProjection = (
     entries: readonly GraphMetadataProvenanceEntry[] | undefined,
     fallbackValues: readonly string[],
-    fallbackSources: readonly string[],
   ): GraphMetadataProvenanceEntry[] => {
     const byValue = new Map((entries ?? []).map((entry) => [normalizeSearchText(entry.value), entry]));
-    return fallbackValues.map((value) => {
-      const requested = byValue.get(normalizeSearchText(value))?.sourceEventIds;
-      const sourceEventIds = validSources(requested) ?? [];
-      return { value, sourceEventIds: sourceEventIds.length > 0 ? sourceEventIds : [...fallbackSources] };
+    return fallbackValues.flatMap((value) => {
+      const entry = byValue.get(normalizeSearchText(value));
+      const sourceEventIds = validSources(entry?.sourceEventIds);
+      return sourceEventIds.length > 0 ? [{ value, sourceEventIds }] : [];
     });
   };
 
@@ -291,12 +305,14 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
     const aliases = strings(proposal.aliases, 20).filter((alias) => normalizeSearchText(alias) !== normalizeSearchText(name));
     const tags = strings(proposal.tags, 12);
     const projectedNameSources = validSources(proposal.metadataProvenance?.name);
+    if (projectedNameSources.length === 0) continue;
     const projectedMetadata = {
-      name: projectedNameSources.length > 0 ? projectedNameSources : [...sources],
-      aliases: metadataEntriesFromProjection(proposal.metadataProvenance?.aliases, aliases, sources),
-      tags: metadataEntriesFromProjection(proposal.metadataProvenance?.tags, tags, sources),
+      name: projectedNameSources,
+      aliases: metadataEntriesFromProjection(proposal.metadataProvenance?.aliases, aliases),
+      tags: metadataEntriesFromProjection(proposal.metadataProvenance?.tags, tags),
     };
-    let node = options.nodes.find((candidate) => sameEntity(candidate, { ...proposal, name, aliases }));
+    const eventById = new Map(options.events.map((event) => [event.id, event]));
+    let node = options.nodes.find((candidate) => entityMatchKind(candidate, { name, aliases, type: proposal.type }, eventById));
     if (!node) {
       node = {
         id: options.idFactory('node'), name, type: proposal.type, aliases: [], currentState: '', facts: [],
@@ -305,11 +321,27 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
       };
       options.nodes.push(node);
     }
-    node.aliases = [...new Set([...node.aliases, ...aliases])];
-    if (tags.length > 0) node.tags = [...new Set([...(node.tags ?? []), ...tags])].slice(0, 12);
+    const canonicalKey = normalizeSearchText(node.name);
+    const canonicalNameSources = [
+      ...(normalizeSearchText(name) === canonicalKey ? projectedMetadata.name : []),
+      ...projectedMetadata.aliases
+        .filter(({ value }) => normalizeSearchText(value) === canonicalKey)
+        .flatMap(({ sourceEventIds }) => sourceEventIds),
+      ...(node.metadataProvenance?.name ?? []),
+    ];
+    const projectedAliasEntries = [
+      ...projectedMetadata.aliases.filter(({ value }) => normalizeSearchText(value) !== canonicalKey),
+      ...(normalizeSearchText(name) !== canonicalKey ? [{ value: name, sourceEventIds: projectedMetadata.name }] : []),
+      ...aliases.filter((alias) => normalizeSearchText(alias) !== canonicalKey
+        && !projectedMetadata.aliases.some((entry) => normalizeSearchText(entry.value) === normalizeSearchText(alias)))
+        .map((value) => ({ value, sourceEventIds: projectedMetadata.aliases.find((entry) => normalizeSearchText(entry.value) === normalizeSearchText(value))?.sourceEventIds ?? [] }))
+        .filter(({ sourceEventIds }) => sourceEventIds.length > 0),
+    ];
+    node.aliases = [...new Set([...node.aliases, ...projectedAliasEntries.map(({ value }) => value)])];
+    if (tags.length > 0) node.tags = [...new Set([...(node.tags ?? []), ...projectedMetadata.tags.map(({ value }) => value)])].slice(0, 12);
     const previousMetadata = node.metadataProvenance;
     const aliasEntries = [...(previousMetadata?.aliases ?? [])];
-    for (const entry of projectedMetadata.aliases) {
+    for (const entry of projectedAliasEntries) {
       const existing = aliasEntries.find((candidate) => normalizeSearchText(candidate.value) === normalizeSearchText(entry.value));
       if (existing) existing.sourceEventIds = [...new Set([...existing.sourceEventIds, ...entry.sourceEventIds])];
       else aliasEntries.push(entry);
@@ -321,8 +353,8 @@ export function applyGraphProjection(options: ApplyGraphProjectionOptions): { no
       else tagEntries.push(entry);
     }
     node.metadataProvenance = {
-      ...(projectedMetadata.name.length > 0
-        ? { name: [...new Set([...(previousMetadata?.name ?? []), ...projectedMetadata.name])] }
+      ...(canonicalNameSources.length > 0
+        ? { name: [...new Set(canonicalNameSources)] }
         : previousMetadata?.name ? { name: [...previousMetadata.name] } : {}),
       ...(aliasEntries.length > 0 ? { aliases: aliasEntries } : {}),
       ...(tagEntries.length > 0 ? { tags: tagEntries } : {}),

@@ -1684,7 +1684,10 @@ export class StrataGateRuntime {
       ...view.currentNodeEventIds,
       ...view.historicalNodeEventIds,
     ])].slice(0, GRAPH_PROVENANCE_LIMIT)
-    const boundedView = boundEffectiveGraphNodeView(view, new Set(provenanceEventIds))
+    const legacyMetadataOverflow = !view.node.metadataProvenance && view.node.sourceEventIds.length > GRAPH_PROVENANCE_LIMIT
+    const boundedView = boundEffectiveGraphNodeView(view, new Set(provenanceEventIds), {
+      preserveLegacyMetadata: legacyMetadataOverflow,
+    })
     const currentFacts = boundedView.currentFacts
     const historicalFacts = boundedView.historicalFacts
     const currentEdges = boundedView.currentEdges
@@ -1694,7 +1697,7 @@ export class StrataGateRuntime {
       target: {
         eventIds: provenanceEventIds,
         elementIds: [],
-        citation: citation('graph', node.id, node.name, `graph-node:${node.id}:expanded`, 'nodeId', { expanded: true }),
+        citation: citation('graph', node.id, boundedView.node.name, `graph-node:${node.id}:expanded`, 'nodeId', { expanded: true }),
       },
     }], {
       node: boundedView.node,
@@ -1704,6 +1707,7 @@ export class StrataGateRuntime {
       currentEdges,
       historicalEdges,
       provenanceEventIds,
+      ...(legacyMetadataOverflow ? { metadataEvidenceStatus: 'not_expanded' as const } : {}),
       timeline: graphTimeline(provenanceEventIds, memory.listEvents()),
     })
   }
@@ -2099,6 +2103,7 @@ function compactGraphNode(result: GraphNodeSearchResult): Record<string, unknown
     rankScore: score,
     ...(matchedFields ? { matchedFields } : {}),
     ...(matchReason ? { matchReason } : {}),
+    ...(result.metadataEvidenceStatus ? { metadataEvidenceStatus: result.metadataEvidenceStatus } : {}),
     scoreMeaning: 'Ranking-only BM25/RRF score; not confidence, probability, or factual accuracy.',
     ...(result.matchType ? { matchType: result.matchType } : {}),
     ...(result.currentFacts ? { currentMatches: result.currentFacts } : {}),
@@ -2238,6 +2243,7 @@ function renderActivatedMemory(events: readonly EventCard[], graphResults: reado
       aliases: node.aliases,
       tags: node.tags,
       status: node.status,
+      metadataEvidenceStatus: result.metadataEvidenceStatus,
       matchType: result.matchType,
       currentState: node.currentState,
       facts: node.facts.map(({ key, value, status, validFrom, validTo }) => ({ key, value, status, validFrom, validTo })),

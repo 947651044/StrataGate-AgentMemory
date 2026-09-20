@@ -575,9 +575,13 @@ describe('DSH runtime ingestion', () => {
       await memory.completeGraphProjection(projection!.jobId, {
         reason: 'graph',
         nodes: [
-          { ref: 'project', name: 'StrataGate', type: 'project', tags: ['memory plugin'], state: 'released', sourceEventIds: [event.id] },
-          { ref: 'tool', name: 'MCP tool', type: 'tool', sourceEventIds: [event.id] },
-          { ref: 'tool-name', name: 'StrataGate', type: 'tool', tags: ['cli'], sourceEventIds: [event.id] },
+          { ref: 'project', name: 'StrataGate', type: 'project', tags: ['memory plugin'], metadataProvenance: {
+            name: [event.id], tags: [{ value: 'memory plugin', sourceEventIds: [event.id] }],
+          }, state: 'released', sourceEventIds: [event.id] },
+          { ref: 'tool', name: 'MCP tool', type: 'tool', metadataProvenance: { name: [event.id] }, sourceEventIds: [event.id] },
+          { ref: 'tool-name', name: 'StrataGate', type: 'tool', tags: ['cli'], metadataProvenance: {
+            name: [event.id], tags: [{ value: 'cli', sourceEventIds: [event.id] }],
+          }, sourceEventIds: [event.id] },
         ],
         edges: [{ fromRef: 'project', toRef: 'tool', relation: 'memory plugin', sourceEventIds: [event.id] }],
       })
@@ -851,6 +855,7 @@ describe('DSH runtime ingestion', () => {
         reason: 'project tool',
         nodes: [{
           ref: 'stratagate', name: 'StrataGate', type: 'project', state: 'packageManager: pnpm',
+          metadataProvenance: { name: [relevant.id] },
           facts: [{ key: 'packageManager', value: 'pnpm', sourceEventIds: [relevant.id] }],
           sourceEventIds: [relevant.id],
         }],
@@ -1600,6 +1605,7 @@ describe('DSH runtime ingestion', () => {
           ref: 'pnpm',
           name: 'pnpm',
           type: 'tool',
+          metadataProvenance: { name: [event.id] },
           state: 'selected package manager',
           facts: [{ key: 'role', value: 'project package manager', sourceEventIds: [event.id] }],
           sourceEventIds: [event.id],

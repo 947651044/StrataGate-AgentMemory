@@ -511,6 +511,8 @@ export interface GraphNodeSearchResult {
   historicalEdges?: GraphEdge[];
   /** Bounded Event evidence selected for this specific result. */
   provenanceEventIds?: string[];
+  /** Legacy metadata was trusted but could not be fully expanded within the evidence budget. */
+  metadataEvidenceStatus?: 'not_expanded';
   timeline?: GraphTimelineEvent[];
 }
 

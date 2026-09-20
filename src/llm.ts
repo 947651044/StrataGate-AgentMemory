@@ -164,7 +164,7 @@ const GRAPH_METADATA_ENTRY: ValueSchemaSpec = {
 const GRAPH_METADATA_PROVENANCE: ValueSchemaSpec = {
   type: 'object', additionalProperties: false,
   properties: {
-    name: STRING_ARRAY,
+    name: { ...STRING_ARRAY, required: true },
     aliases: { type: 'array', items: GRAPH_METADATA_ENTRY },
     tags: { type: 'array', items: GRAPH_METADATA_ENTRY },
   },
@@ -175,7 +175,7 @@ const GRAPH_NODE: ValueSchemaSpec = {
   properties: {
     ref: { type: 'string', required: true }, name: { type: 'string', required: true },
     type: { type: 'string', enum: ['person', 'project', 'organization', 'tool', 'place'], required: true },
-    aliases: STRING_ARRAY, tags: { ...STRING_ARRAY, required: true }, metadataProvenance: GRAPH_METADATA_PROVENANCE,
+    aliases: STRING_ARRAY, tags: { ...STRING_ARRAY, required: true }, metadataProvenance: { ...GRAPH_METADATA_PROVENANCE, required: true },
     state: { type: 'string' }, facts: { type: 'array', items: GRAPH_FACT },
     status: { type: 'string', enum: ['active', 'superseded', 'disputed', 'archived'] },
     validFrom: { type: 'string' }, validTo: { type: 'string' }, confidence: { type: 'number' },
@@ -461,6 +461,7 @@ export class DshModelBridge {
         return value && sourceEventIds.length > 0 ? [{ value, sourceEventIds }] : []
       })
       const metadataName = strings(rawMetadata.name).filter((id) => eventIds.has(id))
+      if (metadataName.length === 0) return []
       const metadataAliases = metadataEntries(rawMetadata.aliases)
       const metadataTags = metadataEntries(rawMetadata.tags)
       const metadataProvenance = {

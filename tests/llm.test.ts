@@ -297,6 +297,8 @@ describe('DeepSeek Harness model JSON retries', () => {
     expect(result.nodes[0]?.metadataProvenance?.name).toEqual([event.id])
     expect(calls.mock.calls[0]?.[0].tools?.[0]?.name).toBe('stratagate_project_knowledge_graph')
     expect(calls.mock.calls[0]?.[0].tools?.[0]?.parameters?.properties?.nodes?.items?.required).toContain('tags')
+    expect(calls.mock.calls[0]?.[0].tools?.[0]?.parameters?.properties?.nodes?.items?.required).toContain('metadataProvenance')
+    expect(calls.mock.calls[0]?.[0].tools?.[0]?.parameters?.properties?.nodes?.items?.properties?.metadataProvenance?.required).toContain('name')
     expect(calls.mock.calls[0]?.[0].system).toContain('tags describe the node')
   })
 
@@ -327,10 +329,10 @@ describe('DeepSeek Harness model JSON retries', () => {
     const context = { jobId: 'gproj_compact', projectorVersion: 1, events: [event], existingNodes, existingEdges }
     const proposedNodes = [
       ...Array.from({ length: 6 }, (_, index) => ({
-        ref: `invalid_${index}`, name: `Invalid ${index}`, type: 'project', tags: [], sourceEventIds: ['evt_unknown'],
+        ref: `invalid_${index}`, name: `Invalid ${index}`, type: 'project', tags: [], metadataProvenance: { name: ['evt_unknown'] }, sourceEventIds: ['evt_unknown'],
       })),
       ...Array.from({ length: 30 }, (_, index) => ({
-        ref: `proposal_${index}`, name: `Proposal ${index}`, type: 'project', tags: [], sourceEventIds: [event.id],
+        ref: `proposal_${index}`, name: `Proposal ${index}`, type: 'project', tags: [], metadataProvenance: { name: [event.id] }, sourceEventIds: [event.id],
       })),
     ]
     const proposedEdges = [
