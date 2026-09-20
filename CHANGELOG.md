@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.75 - 2026-09-20
+
+- Keep feedback reports local until the user explicitly pastes them, with stronger credential redaction, privacy-safe Issue URLs, and reliable clipboard, popup, and draft-save failure handling.
+- Make feedback draft updates patch-oriented while treating an explicitly saved Markdown body as authoritative, so stale structured fields cannot reappear.
+- Patch only real top-level canonical feedback sections while preserving custom sections, inline lookalikes, indented code, and correctly matched fenced code blocks.
+
 ## 0.2.74 - 2026-09-19
 
 - Separate short-term memory compression, long-term memory extraction, and knowledge graph update status in the UI.
