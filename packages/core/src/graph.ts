@@ -7,10 +7,123 @@ import type {
   GraphNodeProjection,
   GraphProjectionResult,
   GraphRecordStatus,
+  GraphTimelineEvent,
 } from './types.js';
 
 const NODE_TYPES = new Set(['person', 'project', 'organization', 'tool', 'place']);
 const STATUSES = new Set<GraphRecordStatus>(['active', 'superseded', 'disputed', 'archived']);
+
+export const GRAPH_PROVENANCE_LIMIT = 6;
+
+export interface EffectiveGraphNodeView {
+  node: GraphNode;
+  currentFacts: GraphFact[];
+  historicalFacts: GraphFact[];
+  currentEdges: GraphEdge[];
+  historicalEdges: GraphEdge[];
+  currentNodeEventIds: string[];
+  historicalNodeEventIds: string[];
+}
+
+function unique<T>(values: readonly T[]): T[] {
+  return [...new Set(values)];
+}
+
+function factText(fact: Pick<GraphFact, 'key' | 'value'>): string {
+  return `${fact.key}: ${Array.isArray(fact.value) ? fact.value.join('、') : fact.value}`;
+}
+
+function renderCurrentState(facts: readonly GraphFact[]): string {
+  return facts.map((fact) => `${factText(fact)}${fact.status === 'disputed' ? ' [disputed]' : ''}`).join('\n');
+}
+
+/**
+ * Builds the single Event-authoritative Graph view used by search, expansion,
+ * and automatic context. Hidden Event provenance never reaches the returned
+ * records, and a current record requires at least one active source Event.
+ */
+export function effectiveGraphNodeView(
+  node: GraphNode,
+  edges: readonly GraphEdge[],
+  events: readonly EventCard[],
+): EffectiveGraphNodeView | null {
+  if (node.status !== 'active' && node.status !== 'disputed') return null;
+  const eventById = new Map(events.map((event) => [event.id, event]));
+  const sources = (ids: readonly string[] | undefined, statuses: ReadonlySet<EventCard['status']>): string[] =>
+    unique((ids ?? []).filter((id) => {
+      const event = eventById.get(id);
+      return event !== undefined && statuses.has(event.status);
+    }));
+  const activeStatuses = new Set<EventCard['status']>(['active']);
+  const visibleStatuses = new Set<EventCard['status']>(['active', 'superseded']);
+  const splitRecord = <T extends GraphFact | GraphEdge>(record: T): { current?: T; historical?: T } => {
+    if (record.status === 'archived') return {};
+    const activeSources = sources(record.sourceEventIds, activeStatuses);
+    const visibleSources = sources(record.sourceEventIds, visibleStatuses);
+    if ((record.status === 'active' || record.status === 'disputed') && activeSources.length > 0) {
+      return { current: { ...record, sourceEventIds: activeSources } };
+    }
+    if (visibleSources.length > 0 && record.status === 'superseded') {
+      return { historical: { ...record, sourceEventIds: visibleSources } };
+    }
+    return {};
+  };
+
+  const currentFacts: GraphFact[] = [];
+  const historicalFacts: GraphFact[] = [];
+  for (const fact of node.facts ?? []) {
+    const split = splitRecord(fact);
+    if (split.current) currentFacts.push(split.current);
+    if (split.historical) historicalFacts.push(split.historical);
+  }
+  const currentEdges: GraphEdge[] = [];
+  const historicalEdges: GraphEdge[] = [];
+  for (const edge of edges.filter(({ fromNodeId, toNodeId }) => fromNodeId === node.id || toNodeId === node.id)) {
+    const split = splitRecord(edge);
+    if (split.current) currentEdges.push(split.current);
+    if (split.historical) historicalEdges.push(split.historical);
+  }
+  const currentNodeEventIds = sources(node.sourceEventIds, activeStatuses);
+  const historicalNodeEventIds = sources(node.sourceEventIds, new Set<EventCard['status']>(['superseded']));
+  if (currentFacts.length === 0 && historicalFacts.length === 0
+    && currentEdges.length === 0 && historicalEdges.length === 0
+    && currentNodeEventIds.length === 0 && historicalNodeEventIds.length === 0) return null;
+
+  const visibleNodeSources = unique([...currentNodeEventIds, ...historicalNodeEventIds]);
+  return {
+    node: {
+      ...node,
+      currentState: renderCurrentState(currentFacts),
+      facts: currentFacts,
+      sourceEventIds: visibleNodeSources,
+    },
+    currentFacts,
+    historicalFacts,
+    currentEdges,
+    historicalEdges,
+    currentNodeEventIds,
+    historicalNodeEventIds,
+  };
+}
+
+export function graphTimeline(
+  eventIds: readonly string[],
+  events: readonly EventCard[],
+  limit = GRAPH_PROVENANCE_LIMIT,
+): GraphTimelineEvent[] {
+  const order = new Map(eventIds.map((id, index) => [id, index]));
+  return events.filter((event) => order.has(event.id)
+      && event.status !== 'forgotten' && event.status !== 'archived')
+    .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0))
+    .slice(0, Math.max(0, limit))
+    .map((event) => ({
+      id: event.id,
+      title: event.title,
+      summary: event.summary,
+      status: event.status,
+      ...(event.temporal.happenedStart ? { time: event.temporal.happenedStart } : {}),
+    }));
+}
 
 function text(value: unknown, limit = 240): string {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, limit) : '';

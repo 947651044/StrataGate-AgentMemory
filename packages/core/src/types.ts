@@ -487,6 +487,24 @@ export interface GraphNodeSearchResult {
   matchedFields?: string[];
   /** Human-readable explanation of why this node passed the lexical filter. */
   matchReason?: string;
+  /** Whether the query meaningfully matched current evidence, historical evidence, or both. */
+  matchType?: 'current' | 'historical' | 'both';
+  /** Query-matched effective records. The node itself still carries the complete effective current state. */
+  currentFacts?: GraphFact[];
+  historicalFacts?: GraphFact[];
+  currentEdges?: GraphEdge[];
+  historicalEdges?: GraphEdge[];
+  /** Bounded Event evidence selected for this specific result. */
+  provenanceEventIds?: string[];
+  timeline?: GraphTimelineEvent[];
+}
+
+export interface GraphTimelineEvent {
+  id: string;
+  title: string;
+  summary: string;
+  status: MemoryStatus;
+  time?: string;
 }
 
 export interface RawSearchHit {

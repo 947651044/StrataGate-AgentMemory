@@ -1,9 +1,122 @@
 import { describe, expect, it } from 'vitest';
-import { StrataGate, type PersistentStrataGateOptions } from '../src/index.js';
+import {
+  GRAPH_PROVENANCE_LIMIT,
+  StrataGate,
+  type GraphEdge,
+  type GraphNode,
+  type PersistentStrataGateOptions,
+} from '../src/index.js';
 import { SqliteStorage } from '../src/sqlite.js';
 import { normalizeSnapshot } from '../src/storage.js';
 
 describe('Event-backed knowledge graph', () => {
+  it('uses one Event-authoritative current/historical view for facts, edge endpoints, and bounded provenance', async () => {
+    const memory = StrataGate.inMemory({
+      blockTurnSize: 1,
+      summarizer: async () => ({ l0Title: 'graph', l0Tags: [], l1Summary: 'graph', l2Keypoints: [], shouldExtract: false }),
+    });
+    await memory.appendTurn({ user: 'seed graph evidence', assistant: 'stored' });
+    const block = memory.listBlocks()[0]!;
+    const add = async (id: string, summary = id) => memory.addEvent({
+      id, title: id, summary, sourceBlockId: block.id, sourceMessageIds: [block.l5Raw[0]!.id],
+    });
+    const currentA = await add('evt_current_a', '黄方目前在 A公司。');
+    const historicalB = await add('evt_historical_b', '黄方曾经在 B公司。');
+    historicalB.status = 'superseded';
+    const secondSource = await add('evt_second_source', '另一个有效来源确认 pnpm。');
+    const forgottenSource = await add('evt_forgotten', '这个来源已被遗忘。');
+    await memory.forgetEvent(forgottenSource.id);
+    const archivedSource = await add('evt_archived', '这个来源已归档。');
+    archivedSource.status = 'archived';
+    const disputedSource = await add('evt_disputed', '职位信息仍有争议。');
+    const unrelated = await Promise.all(Array.from({ length: 8 }, (_, index) => add(`evt_unrelated_${index}`)));
+    const now = '2026-09-20T00:00:00.000Z';
+    const fact = (
+      id: string, key: string, value: string, status: GraphNode['facts'][number]['status'], sourceEventIds: string[],
+    ): GraphNode['facts'][number] => ({
+      id, key, value, status, confidence: 0.9, sourceEventIds, createdAt: now, updatedAt: now,
+    });
+    const nodes = memory.listGraphNodes() as GraphNode[];
+    nodes.push({
+      id: 'node_person', name: '黄方', type: 'person', aliases: ['HF'], tags: ['developer'],
+      currentState: 'company: B公司 (stale cache)', status: 'active', confidence: 0.9,
+      sourceEventIds: [currentA.id, historicalB.id, forgottenSource.id, archivedSource.id, ...unrelated.map(({ id }) => id)],
+      facts: [
+        fact('fact_company_a', 'company', 'A', 'active', [currentA.id]),
+        fact('fact_company_b', 'company', 'B', 'superseded', [historicalB.id]),
+        fact('fact_cn_a', '公司', 'A公司', 'active', [currentA.id]),
+        fact('fact_cn_b', '公司', 'B公司', 'superseded', [historicalB.id]),
+        fact('fact_tool', 'packageManager', 'pnpm', 'active', [forgottenSource.id, secondSource.id]),
+        fact('fact_hidden', 'secret', 'forgotten-only', 'active', [forgottenSource.id]),
+        fact('fact_archived', 'secret', 'archived-only', 'active', [archivedSource.id]),
+        fact('fact_disputed', 'role', 'architect', 'disputed', [disputedSource.id]),
+      ],
+      createdAt: now, updatedAt: now,
+    }, {
+      id: 'node_a', name: 'A公司', type: 'organization', aliases: ['AlphaCorp'], currentState: '', facts: [],
+      status: 'active', confidence: 0.9, sourceEventIds: [currentA.id], createdAt: now, updatedAt: now,
+    }, {
+      id: 'node_b', name: 'B公司', type: 'organization', aliases: ['BetaCorp'], currentState: '', facts: [],
+      status: 'active', confidence: 0.9, sourceEventIds: [historicalB.id], createdAt: now, updatedAt: now,
+    }, {
+      id: 'node_hidden', name: 'Hidden Entity', type: 'project', aliases: [], currentState: 'secret',
+      facts: [fact('fact_hidden_node', 'state', 'secret', 'active', [forgottenSource.id])],
+      status: 'active', confidence: 0.9, sourceEventIds: [forgottenSource.id], createdAt: now, updatedAt: now,
+    }, {
+      id: 'node_archived', name: 'Archived Entity', type: 'project', aliases: [], currentState: 'secret',
+      facts: [fact('fact_archived_node', 'state', 'secret', 'active', [archivedSource.id])],
+      status: 'active', confidence: 0.9, sourceEventIds: [archivedSource.id], createdAt: now, updatedAt: now,
+    });
+    const edges = memory.listGraphEdges() as GraphEdge[];
+    edges.push({
+      id: 'edge_a', fromNodeId: 'node_person', toNodeId: 'node_a', relation: 'works_at', status: 'active',
+      confidence: 0.9, sourceEventIds: [currentA.id], createdAt: now, updatedAt: now,
+    }, {
+      id: 'edge_b', fromNodeId: 'node_person', toNodeId: 'node_b', relation: 'works_at', status: 'superseded',
+      confidence: 0.9, sourceEventIds: [historicalB.id], createdAt: now, updatedAt: now,
+    });
+
+    const person = (results: Awaited<ReturnType<typeof memory.searchGraphNodes>>) =>
+      results.find(({ node }) => node.id === 'node_person');
+    const current = person(await memory.searchGraphNodes('A公司'))!;
+    expect(current).toMatchObject({ matchType: 'current' });
+    expect(current.currentFacts).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'fact_company_a' })]));
+    expect(current.currentEdges).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'edge_a' })]));
+    expect(current.node.currentState).toContain('company: A');
+    expect(current.node.currentState).not.toContain('stale cache');
+
+    const historical = person(await memory.searchGraphNodes('B公司'))!;
+    expect(historical).toMatchObject({ matchType: 'historical' });
+    expect(historical.historicalFacts).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'fact_company_b' })]));
+    expect(historical.historicalEdges).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'edge_b' })]));
+    expect(historical.node.currentState).toContain('company: A');
+    expect(historical.provenanceEventIds?.[0]).toBe(historicalB.id);
+    expect(historical.provenanceEventIds).toContain(currentA.id);
+    expect(historical.provenanceEventIds!.length).toBeLessThanOrEqual(GRAPH_PROVENANCE_LIMIT);
+    expect(historical.timeline!.length).toBeLessThanOrEqual(GRAPH_PROVENANCE_LIMIT);
+    expect(historical.timeline?.[0]?.id).toBe(historicalB.id);
+
+    expect(person(await memory.searchGraphNodes('A公司 B公司'))?.matchType).toBe('both');
+    expect(person(await memory.searchGraphNodes('company B'))?.matchType).toBe('historical');
+    expect(person(await memory.searchGraphNodes('B公司'))?.matchType).toBe('historical');
+    expect(person(await memory.searchGraphNodes('AlphaCorp'))?.matchType).toBe('current');
+    expect(person(await memory.searchGraphNodes('BetaCorp'))?.matchType).toBe('historical');
+    expect(person(await memory.searchGraphNodes('works_at'))).toBeUndefined();
+
+    const multiSource = person(await memory.searchGraphNodes('pnpm'))!;
+    expect(multiSource.matchType).toBe('current');
+    expect(multiSource.currentFacts?.[0]?.sourceEventIds).toEqual([secondSource.id]);
+    expect(multiSource.node.currentState).toContain('packageManager: pnpm');
+    expect(multiSource.node.currentState).not.toContain('forgotten-only');
+    expect(multiSource.node.currentState).not.toContain('archived-only');
+    const disputed = person(await memory.searchGraphNodes('architect'))!;
+    expect(disputed.matchType).toBe('current');
+    expect(disputed.currentFacts?.[0]).toMatchObject({ status: 'disputed' });
+    expect(disputed.node.currentState).toContain('[disputed]');
+    expect(await memory.searchGraphNodes('Hidden Entity')).toEqual([]);
+    expect(await memory.searchGraphNodes('Archived Entity')).toEqual([]);
+  });
+
   it('projects stable nodes and directed edges while keeping Event as source of truth', async () => {
     let sequence = 0;
     const memory = StrataGate.inMemory({
