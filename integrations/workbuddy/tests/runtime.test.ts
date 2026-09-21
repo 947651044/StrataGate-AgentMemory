@@ -148,7 +148,7 @@ describe('WorkBuddyRuntime', () => {
               narrative: 'The user selected Singapore as the deployment target.',
               tags: ['deployment', 'singapore'],
               quotes: ['Our deployment target is Singapore.'],
-              sourceMessageIds: [payload.target.l5Raw[0].id],
+              sourceMessageIds: [payload.target.messages[0].id],
               temporal: { eventType: 'decision' },
               scope: 'project',
               criticality: 'routine',
@@ -219,7 +219,7 @@ if (system.startsWith('You compress')) {
     reason: 'durable decision',
     events: [{
       title: 'Deployment target selected', summary: 'Singapore selected.', narrative: 'Singapore is the target.',
-      tags: ['deployment'], quotes: ['Singapore'], sourceMessageIds: [payload.target.l5Raw[0].id],
+      tags: ['deployment'], quotes: ['Singapore'], sourceMessageIds: [payload.target.messages[0].id],
       temporal: { eventType: 'decision' }, scope: 'project', criticality: 'routine', confidence: 0.99
     }]
   }

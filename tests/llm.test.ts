@@ -186,12 +186,42 @@ describe('DeepSeek Harness model JSON retries', () => {
     expect(calls.mock.calls[0]?.[0]).not.toHaveProperty('reasoningEffort')
   })
 
+  it('summarizes from compact derivation messages instead of raw tool traces', async () => {
+    const code = 'const expensiveTrace = run();\n'.repeat(300)
+    const result = `BEGIN\n${'raw payload line\n'.repeat(500)}FINAL=success`
+    const messages = [{
+      id: 'msg_summary', role: 'assistant' as const, content: 'Verification completed successfully.',
+      createdAt: '2026-09-21T08:00:00.000Z',
+      toolCalls: [{ name: 'run_code', arguments: { code, cwd: '/workspace' }, result }],
+    }]
+    const { bridge, session, calls } = modelBridge([{
+      tool: { l0Title: 'verified', l0Tags: [], l1Summary: 'Verification passed.', l2Keypoints: [], shouldExtract: true },
+    }])
+
+    await bridge.run(session, () => bridge.summarizer(messages))
+
+    const payload = JSON.parse(String(calls.mock.calls[0]?.[0].messages?.[0]?.content?.[0]?.text)) as Record<string, any>
+    expect(payload.messages[0]).toMatchObject({ id: 'msg_summary', content: 'Verification completed successfully.' })
+    expect(payload.messages[0].toolCalls[0].name).toBe('run_code')
+    expect(payload.messages[0].toolCalls[0].arguments.cwd).toBe('/workspace')
+    expect(JSON.stringify(payload)).toContain('FINAL=success')
+    expect(JSON.stringify(payload)).not.toContain('expensiveTrace')
+    expect(JSON.stringify(payload).length).toBeLessThan(JSON.stringify({ messages }).length * 0.3)
+  })
+
   it('marks the target as the only source and limits neighbors to L2 context', async () => {
     const target = {
       id: 'blk_target', sequence: 2, startTurn: 3, endTurn: 4,
       l0Title: 'target', l0Tags: [], l1Summary: 'target summary', l2Keypoints: ['target point'],
       l3Condensed: 'target condensed', l4Readable: 'target readable',
-      l5Raw: [{ id: 'msg_target', role: 'user', content: 'target message', createdAt: '2026-01-01T00:00:00.000Z' }],
+      l5Raw: [{
+        id: 'msg_target', role: 'assistant', content: 'target message', createdAt: '2026-01-01T00:00:00.000Z',
+        toolCalls: [{
+          name: 'run_code',
+          arguments: { code: 'const rawSource = true;\n'.repeat(300), path: '/workspace/result.json' },
+          result: `decision evidence\n${'raw log\n'.repeat(500)}completed=true`,
+        }],
+      }],
       shouldExtract: true, processingStatus: 'ready', pointerCurrentLevel: 5, pointerAnchorLevel: 5,
       pointerAnchorBlockPosition: 1, lastLiftedAt: null, lastLiftedBy: null, createdAt: '2026-01-01T00:00:00.000Z',
     } as MemoryBlock
@@ -212,7 +242,13 @@ describe('DeepSeek Harness model JSON retries', () => {
     expect(result.shouldExtract).toBe(true)
     expect(result.events[0]?.sourceMessageIds).toEqual(['msg_target'])
     expect(payload.allowedSourceMessageIds).toEqual(['msg_target'])
-    expect(payload.target.l5Raw[0].id).toBe('msg_target')
+    expect(payload.target.messages[0].id).toBe('msg_target')
+    expect(payload.target.messages[0].toolCalls[0].name).toBe('run_code')
+    expect(payload.target.messages[0].toolCalls[0].arguments.path).toBe('/workspace/result.json')
+    expect(JSON.stringify(payload.target)).toContain('completed=true')
+    expect(JSON.stringify(payload.target)).not.toContain('rawSource')
+    expect(payload.target).not.toHaveProperty('l5Raw')
+    expect(payload.target).not.toHaveProperty('l4Readable')
     expect(payload.neighbors.next.l2Keypoints).toEqual(['next point'])
     expect(payload.neighbors.next.l5Raw).toBeUndefined()
   })

@@ -13,6 +13,7 @@ import type {
   MemoryBlock,
   RawMessage,
 } from '@diqier/stratagate'
+import { buildMemoryDerivationMessages } from '@diqier/stratagate'
 import type { ModelConfig, WorkBuddyModelConfig } from './config.js'
 
 const ELEMENT_TYPES = new Set<MemoryElementType>(['person', 'project', 'organization', 'tool', 'place'])
@@ -78,7 +79,14 @@ function l2Neighbor(block: MemoryBlock | null): Record<string, unknown> | null {
 
 function extractorPayload(context: ExtractionContext): Record<string, unknown> {
   return {
-    target: context.target,
+    target: {
+      blockId: context.target.id,
+      sequence: context.target.sequence,
+      startTurn: context.target.startTurn,
+      endTurn: context.target.endTurn,
+      createdAt: context.target.createdAt,
+      messages: buildMemoryDerivationMessages(context.target.l5Raw),
+    },
     neighbors: {
       previous: l2Neighbor(context.previous),
       next: l2Neighbor(context.next),
@@ -127,8 +135,8 @@ export interface ModelCallbacks {
 abstract class StructuredModelBridge {
   readonly summarizer: BlockSummarizer = async (messages) => {
     const raw = object(await this.callJson(
-      'You compress agent conversations into durable memory blocks. Return JSON only with l0Title, l0Tags, l1Summary, l2Keypoints, shouldExtract. Preserve decisions, constraints, preferences, outcomes, and unresolved work. shouldExtract is true only when durable events or facts exist.',
-      { messages },
+      'You compress agent conversations into durable memory blocks. Read the supplied provenance-preserving derivation messages. Return JSON only with l0Title, l0Tags, l1Summary, l2Keypoints, shouldExtract. Preserve decisions, constraints, preferences, outcomes, and unresolved work. Tool code and oversized tool payloads may be marked compacted; use the retained tool names, evidence summaries, and excerpts without inventing omitted details. shouldExtract is true only when durable events or facts exist.',
+      { messages: buildMemoryDerivationMessages(messages) },
       SUMMARY_SCHEMA,
     ))
     return {
@@ -143,7 +151,7 @@ abstract class StructuredModelBridge {
   readonly extractor: EventExtractor = async (context: ExtractionContext) => {
     const validMessageIds = new Set(context.target.l5Raw.map((message) => message.id))
     const raw = object(await this.callJson(
-      'Extract only durable, evidence-backed events from target.l5Raw. The target block is the only legal source of new facts, quotations, and sourceMessageIds. neighbors.previous and neighbors.next are context-only L2 summaries; never extract from them. Every sourceMessageIds entry must exactly match allowedSourceMessageIds. If a fact appears only in a neighbor, do not extract it in this call. Return JSON only: {shouldExtract:boolean,reason:string,events:[{title,summary,narrative,tags,quotes,sourceMessageIds,temporal,scope,criticality,confidence}]}. Events must be understandable later without the original chat. Use project scope for repository decisions, user scope for stable preferences/identity, and session scope for temporary task state. Use ISO-8601 timestamps with the explicit +08:00 offset in temporal fields. Do not turn an assistant statement that merely recalls older memory into a new event; require new human input or a new observable task/tool outcome from target.l5Raw.',
+      'Extract only durable, evidence-backed events from target.messages. target.messages is a provenance-preserving derivation view of the target block: message ids and conversational text are retained, while tool code and oversized tool payloads may be marked compacted. Use the retained tool names, evidence summaries, and excerpts without inventing omitted details. The target block is the only legal source of new facts, quotations, and sourceMessageIds. neighbors.previous and neighbors.next are context-only L2 summaries; never extract from them. Every sourceMessageIds entry must exactly match allowedSourceMessageIds. If a fact appears only in a neighbor, do not extract it in this call. Return JSON only: {shouldExtract:boolean,reason:string,events:[{title,summary,narrative,tags,quotes,sourceMessageIds,temporal,scope,criticality,confidence}]}. Events must be understandable later without the original chat. Use project scope for repository decisions, user scope for stable preferences/identity, and session scope for temporary task state. Use ISO-8601 timestamps with the explicit +08:00 offset in temporal fields. Do not turn an assistant statement that merely recalls older memory into a new event; require new human input or a new observable task/tool outcome from target.messages.',
       extractorPayload(context),
       EXTRACTION_SCHEMA,
     ))

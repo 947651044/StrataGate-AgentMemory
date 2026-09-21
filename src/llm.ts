@@ -25,7 +25,7 @@ import type {
   SuccessfulModelResponse,
   SuccessfulModelResponseKind,
 } from '@diqier/stratagate'
-import { EXTERNAL_MEMORY_DECIDER_PROMPT_ZH_CN, nowUtc8, parseExternalMemoryExport } from '@diqier/stratagate'
+import { buildMemoryDerivationMessages, EXTERNAL_MEMORY_DECIDER_PROMPT_ZH_CN, nowUtc8, parseExternalMemoryExport } from '@diqier/stratagate'
 import type { ResolvedConfig, StructuredReasoningEffortMode } from './config.js'
 import { ModelJsonResponseError, parseJsonResponse } from './json-response.js'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
@@ -59,7 +59,14 @@ function l2Neighbor(block: MemoryBlock | null): Record<string, unknown> | null {
 
 function extractorPayload(context: ExtractionContext): Record<string, unknown> {
   return {
-    target: context.target,
+    target: {
+      blockId: context.target.id,
+      sequence: context.target.sequence,
+      startTurn: context.target.startTurn,
+      endTurn: context.target.endTurn,
+      createdAt: context.target.createdAt,
+      messages: buildMemoryDerivationMessages(context.target.l5Raw),
+    },
     neighbors: {
       previous: l2Neighbor(context.previous),
       next: l2Neighbor(context.next),
@@ -354,8 +361,8 @@ export class DshModelBridge {
 
   readonly summarizer: BlockSummarizer = async (messages) => {
     const raw = object(await this.callStructured('summarizer',
-      `You compress agent conversations into durable memory blocks. Read the supplied messages and call ${STRUCTURED_TOOLS.summarizer.name} exactly once with l0Title, l0Tags, l1Summary, l2Keypoints, and shouldExtract. Preserve decisions, constraints, preferences, outcomes, and unresolved work. shouldExtract is true only when durable events or facts exist. Do not return the summary as text.`,
-      { messages },
+      `You compress agent conversations into durable memory blocks. Read the supplied provenance-preserving derivation messages and call ${STRUCTURED_TOOLS.summarizer.name} exactly once with l0Title, l0Tags, l1Summary, l2Keypoints, and shouldExtract. Preserve decisions, constraints, preferences, outcomes, and unresolved work. Tool code and oversized tool payloads may be marked compacted; use the retained tool names, evidence summaries, and excerpts without inventing omitted details. shouldExtract is true only when durable events or facts exist. Do not return the summary as text.`,
+      { messages: buildMemoryDerivationMessages(messages) },
     ))
     return {
       l0Title: text(raw.l0Title).slice(0, 120),
@@ -369,7 +376,7 @@ export class DshModelBridge {
   readonly extractor: EventExtractor = async (context: ExtractionContext) => {
     const validMessageIds = new Set(context.target.l5Raw.map((message) => message.id))
     const raw = object(await this.callStructured('extractor',
-      `Extract only durable, evidence-backed events from target.l5Raw, then call ${STRUCTURED_TOOLS.extractor.name} exactly once. The target block is the only legal source of new facts, quotations, and sourceMessageIds. neighbors.previous and neighbors.next are context-only L2 summaries; never extract from them. Every sourceMessageIds entry must exactly match allowedSourceMessageIds. If a fact appears only in a neighbor, do not extract it in this call. Events must be understandable later without the original chat. Use project scope for repository decisions, user scope for stable preferences/identity, and session scope for temporary task state. temporal.eventType must use exactly one stable value: decision, release, task_completed, plan, change, cancellation, incident, meeting, collaboration, migration, or other. temporal.participants contains canonical entity names. Use ISO-8601 timestamps with the explicit +08:00 offset in temporal fields. Keep happened time separate from mentionedAt; when happened time is unknown omit it and set precision/basis to unknown. Do not turn an assistant statement that merely recalls older memory into a new event; require new human input or a new observable task/tool outcome from target.l5Raw. Do not return the result as text.`,
+      `Extract only durable, evidence-backed events from target.messages, then call ${STRUCTURED_TOOLS.extractor.name} exactly once. target.messages is a provenance-preserving derivation view of the target block: message ids and conversational text are retained, while tool code and oversized tool payloads may be marked compacted. Use the retained tool names, evidence summaries, and excerpts without inventing omitted details. The target block is the only legal source of new facts, quotations, and sourceMessageIds. neighbors.previous and neighbors.next are context-only L2 summaries; never extract from them. Every sourceMessageIds entry must exactly match allowedSourceMessageIds. If a fact appears only in a neighbor, do not extract it in this call. Events must be understandable later without the original chat. Use project scope for repository decisions, user scope for stable preferences/identity, and session scope for temporary task state. temporal.eventType must use exactly one stable value: decision, release, task_completed, plan, change, cancellation, incident, meeting, collaboration, migration, or other. temporal.participants contains canonical entity names. Use ISO-8601 timestamps with the explicit +08:00 offset in temporal fields. Keep happened time separate from mentionedAt; when happened time is unknown omit it and set precision/basis to unknown. Do not turn an assistant statement that merely recalls older memory into a new event; require new human input or a new observable task/tool outcome from target.messages. Do not return the result as text.`,
       extractorPayload(context),
     ))
     const events = (Array.isArray(raw.events) ? raw.events : []).map((candidate): EventCardInput | null => {

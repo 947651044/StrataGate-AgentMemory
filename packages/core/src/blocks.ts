@@ -12,6 +12,11 @@ const FILLER_ONLY = new Set([
 
 const REPEATED_PASTE_MIN_CHARS = 80;
 const REPEATED_PASTE_MARKER = '[repeated paste omitted; original remains in L5]';
+const DERIVATION_SOURCE_FIELD_MIN_CHARS = 240;
+const DERIVATION_ARGUMENT_MAX_CHARS = 1_200;
+const DERIVATION_RESULT_MAX_CHARS = 2_400;
+const DERIVATION_TOOL_MESSAGE_MAX_CHARS = 2_400;
+const DERIVATION_SOURCE_FIELD = /^(?:code|command|program|script|source|sourcecode)$/u;
 
 function asBlockLevel(value: number): BlockLevel {
   return Math.max(0, Math.min(BLOCK_MAX_LEVEL, Math.round(value))) as BlockLevel;
@@ -104,6 +109,90 @@ function resultSummary(value: unknown): string {
   if (record.ok === true) return 'completed';
   if (record.ok === false) return 'not completed';
   return 'structured result returned';
+}
+
+function serializedValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function sourceFieldName(value: string): boolean {
+  return DERIVATION_SOURCE_FIELD.test(value.replace(/[\s_-]+/gu, '').toLocaleLowerCase());
+}
+
+function omitLargeSourceFields(value: unknown, key = '', seen = new WeakSet<object>()): unknown {
+  if (typeof value === 'string') {
+    if (!sourceFieldName(key) || value.length <= DERIVATION_SOURCE_FIELD_MIN_CHARS) return value;
+    return `[${key || 'source'} omitted: ${value.length} chars; full value remains in L5]`;
+  }
+  if (!value || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[circular value omitted; full value remains in L5]';
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => omitLargeSourceFields(item, key, seen));
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .map(([nestedKey, nestedValue]) => [nestedKey, omitLargeSourceFields(nestedValue, nestedKey, seen)]));
+}
+
+function compactDerivationValue(value: unknown, maxChars: number, label: string): unknown {
+  const rendered = serializedValue(value);
+  if (rendered.length <= maxChars) return value;
+  const summary = resultSummary(value);
+  const headChars = Math.max(160, Math.floor(maxChars * 0.48));
+  const tailChars = Math.max(80, Math.floor(maxChars * 0.2));
+  const omittedChars = Math.max(0, rendered.length - headChars - tailChars);
+  return {
+    _stratagate: `${label} compacted; full value remains in L5`,
+    originalChars: rendered.length,
+    ...(summary ? { summary } : {}),
+    head: rendered.slice(0, headChars),
+    tail: rendered.slice(-tailChars),
+    omittedChars,
+  };
+}
+
+function compactDerivationText(value: string, maxChars: number, label: string): string {
+  if (value.length <= maxChars) return value;
+  const headChars = Math.max(160, Math.floor(maxChars * 0.6));
+  const tailChars = Math.max(80, Math.floor(maxChars * 0.2));
+  const omittedChars = Math.max(0, value.length - headChars - tailChars);
+  return `${value.slice(0, headChars)}\n[${label} compacted: ${omittedChars} chars omitted; full value remains in L5]\n${value.slice(-tailChars)}`;
+}
+
+/**
+ * Builds the structured, provenance-preserving transcript used by memory
+ * derivation model calls. It never mutates or replaces the stored L5 layer.
+ */
+export function buildMemoryDerivationMessages(messages: readonly RawMessage[]): RawMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    content: message.role === 'tool'
+      ? compactDerivationText(message.content, DERIVATION_TOOL_MESSAGE_MAX_CHARS, 'tool message content')
+      : message.content,
+    ...(message.toolCalls
+      ? {
+          toolCalls: message.toolCalls.map((trace) => {
+            const argumentsValue = trace.arguments === undefined
+              ? undefined
+              : compactDerivationValue(
+                  omitLargeSourceFields(trace.arguments),
+                  DERIVATION_ARGUMENT_MAX_CHARS,
+                  'tool arguments',
+                ) as Record<string, unknown>;
+            return {
+              name: trace.name,
+              ...(argumentsValue === undefined ? {} : { arguments: argumentsValue }),
+              ...(trace.result === undefined
+                ? {}
+                : { result: compactDerivationValue(trace.result, DERIVATION_RESULT_MAX_CHARS, 'tool result') }),
+            };
+          }),
+        }
+      : {}),
+  }));
 }
 
 function summarizeToolTrace(trace: ToolTrace): string {
