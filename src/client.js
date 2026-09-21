@@ -1373,10 +1373,12 @@ window.__ModuleLoader__.load({
 
     function graphMigrationState(overview, status) {
       const migration = overview?.graphMigration || {}
-      if (migration.state) return migration.state
-      if (migration.complete) return 'complete'
       if (status.graphProjection.processing > 0) return 'processing'
       if (status.graphProjection.terminalFailed > 0) return 'failed'
+      const total = Number(migration.total ?? overview?.events)
+      if (Number.isFinite(total) && total === 0) return 'empty'
+      if (migration.state) return migration.state
+      if (migration.complete) return 'complete'
       return 'incomplete'
     }
 
