@@ -1506,6 +1506,14 @@ describe('StrataGate Web client contract', () => {
       .toContain('知识图谱更新未完成 · 64/136 Events')
     expect(MemoryStatusAlert({ overview: overview(), onOpen: () => {} })).toBeNull()
 
+    const emptyOverview = {
+      events: 0,
+      taskStatus: { blockSummary: empty, eventExtraction: empty, graphProjection: empty },
+      graphMigration: { projected: 0, total: 0, state: 'incomplete', complete: false },
+    }
+    expect(MemoryStatusAlert({ overview: emptyOverview, onOpen: () => {} })).toBeNull()
+    expect(MemoryStatusAlert({ overview: { ...emptyOverview, graphMigration: undefined }, onOpen: () => {} })).toBeNull()
+
     const issueStatus = {
       blockSummary: empty,
       eventExtraction: { ...empty, terminalFailed: 1 },

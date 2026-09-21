@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.77 - 2026-09-21
+
+- Treat an empty Event store as a normal idle state so a new workspace no longer reports an unfinished 0/0 knowledge graph update.
+
 ## 0.2.76 - 2026-09-20
 
 - Track exact Event provenance for Graph node names, aliases, and tags without changing the SQLite schema, while keeping legacy metadata visible only when every potential source remains exposable.
