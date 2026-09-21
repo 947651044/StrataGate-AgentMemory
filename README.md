@@ -553,6 +553,12 @@ Contributions are welcome—whether you are fixing a bug, improving documentatio
 
 To get started, read [`CONTRIBUTING.md`](CONTRIBUTING.md). It explains how to set up the monorepo, run checks and tests, choose a useful area to work on, and prepare a focused pull request. If you are unsure whether an idea fits the project, [open an issue](https://github.com/diqierjia/StrataGate-AgentMemory/issues) before investing in a large change.
 
+## Contributors
+
+<a href="https://github.com/diqierjia/StrataGate-AgentMemory/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=diqierjia/StrataGate-AgentMemory" alt="StrataGate contributors" />
+</a>
+
 ## License
 
 StrataGate is available under the [MIT License](LICENSE).

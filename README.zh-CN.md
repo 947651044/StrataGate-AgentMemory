@@ -563,6 +563,12 @@ benchmarks/             机器可读实验结果
 
 请先阅读 [`CONTRIBUTING.zh-CN.md`](CONTRIBUTING.zh-CN.md)，其中包含 monorepo 开发环境、检查与测试命令、适合参与的方向，以及提交 Pull Request 的建议。如果还不确定一个想法是否适合项目，建议先[创建 Issue](https://github.com/diqierjia/StrataGate-AgentMemory/issues)，再投入较大的改动。
 
+## 贡献者
+
+<a href="https://github.com/diqierjia/StrataGate-AgentMemory/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=diqierjia/StrataGate-AgentMemory" alt="StrataGate 贡献者" />
+</a>
+
 ## 许可证
 
 StrataGate 使用 [MIT License](LICENSE)。
