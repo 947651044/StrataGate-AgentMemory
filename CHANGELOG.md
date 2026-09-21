@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.78 - 2026-09-21
+
+- Derive Block summaries and Events from a provenance-preserving compact view of L5 messages, omitting large code and bounding oversized tool payloads while keeping full raw evidence in L5.
+- Preserve message IDs and validate Event `sourceMessageIds` against the original L5 block so tool-trace compaction does not weaken evidence links.
+
 ## 0.2.77 - 2026-09-21
 
 - Treat an empty Event store as a normal idle state so a new workspace no longer reports an unfinished 0/0 knowledge graph update.

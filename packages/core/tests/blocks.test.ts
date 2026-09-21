@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildMemoryDerivationMessages,
   condenseTranscript,
   deterministicBlockLayers,
   estimateTokens,
@@ -57,6 +58,62 @@ describe('progressive conversation blocks', () => {
     expect(l5).toContain('"result":{"ok":true,"files":["package.json"]}');
     expect(estimateTokens(layers.l3Condensed)).toBeLessThanOrEqual(estimateTokens(layers.l4Readable));
     expect(estimateTokens(layers.l4Readable)).toBeLessThanOrEqual(estimateTokens(l5));
+  });
+
+  it('builds bounded derivation messages without weakening L5 provenance', () => {
+    const code = 'const secretImplementation = executeStep();\n'.repeat(300);
+    const log = `started\n${'repeated low-value log line\n'.repeat(400)}FINAL_STATUS=passed`;
+    const messages: RawMessage[] = [
+      {
+        id: 'u-derivation', role: 'user', content: 'Please verify the release and remember the outcome.',
+        createdAt: '2026-09-21T08:00:00Z', threadId: 'thread-1',
+      },
+      {
+        id: 'a-derivation', role: 'assistant', content: 'The release verification completed successfully.',
+        createdAt: '2026-09-21T08:00:01Z', threadId: 'thread-1',
+        toolCalls: [{
+          name: 'run_code',
+          arguments: { code, cwd: '/workspace/project', mode: 'verify' },
+          result: { ok: true, summary: 'Release verification passed.', log },
+        }],
+      },
+    ];
+
+    const derived = buildMemoryDerivationMessages(messages);
+    const layers = deterministicBlockLayers(messages);
+    const rendered = JSON.stringify(derived);
+
+    expect(derived.map(({ id, role, createdAt, threadId }) => ({ id, role, createdAt, threadId })))
+      .toEqual(messages.map(({ id, role, createdAt, threadId }) => ({ id, role, createdAt, threadId })));
+    expect(derived[0]?.content).toBe(messages[0]?.content);
+    expect(derived[1]?.content).toBe(messages[1]?.content);
+    expect(derived[1]?.toolCalls?.[0]?.name).toBe('run_code');
+    expect(derived[1]?.toolCalls?.[0]?.arguments).toMatchObject({ cwd: '/workspace/project', mode: 'verify' });
+    expect(String(derived[1]?.toolCalls?.[0]?.arguments?.code)).toContain('full value remains in L5');
+    expect(rendered).toContain('Release verification passed.');
+    expect(rendered).toContain('FINAL_STATUS=passed');
+    expect(rendered).not.toContain('secretImplementation');
+    expect(rendered.length).toBeLessThan(JSON.stringify(messages).length * 0.25);
+    expect(messages[1]?.toolCalls?.[0]?.arguments?.code).toBe(code);
+    expect((messages[1]?.toolCalls?.[0]?.result as { log: string }).log).toBe(log);
+    expect(layers.l5Raw[1]?.toolCalls?.[0]?.arguments?.code).toBe(code);
+    expect((layers.l5Raw[1]?.toolCalls?.[0]?.result as { log: string }).log).toBe(log);
+  });
+
+  it('bounds standalone tool messages while leaving conversational text unchanged', () => {
+    const toolOutput = `begin\n${'payload\n'.repeat(1_000)}end`;
+    const messages: RawMessage[] = [
+      { id: 'u1', role: 'user', content: toolOutput, createdAt: '2026-09-21T08:00:00Z' },
+      { id: 't1', role: 'tool', content: toolOutput, createdAt: '2026-09-21T08:00:01Z' },
+    ];
+
+    const derived = buildMemoryDerivationMessages(messages);
+
+    expect(derived[0]?.content).toBe(toolOutput);
+    expect(derived[1]?.content).toContain('tool message content compacted');
+    expect(derived[1]?.content).toContain('begin');
+    expect(derived[1]?.content).toContain('end');
+    expect(derived[1]!.content.length).toBeLessThan(toolOutput.length * 0.5);
   });
 
   it('decays through six levels and expands only to the requested level', () => {
