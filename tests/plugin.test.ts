@@ -127,11 +127,16 @@ describe('DSH plugin composition', () => {
         'memory_expand_block',
         'memory_assess',
         'memory_record_use',
+        'memory_remember',
       ]))
       const prompt = await ctx.systemPrompt.assemble()
       expect(prompt.sections).toContainEqual(expect.objectContaining({
         name: 'tool:stratagate-memory',
         text: expect.stringMatching(/StrataGate provides durable, evidence-gated memory[\s\S]*independent batch[\s\S]*batch_id/),
+      }))
+      expect(prompt.sections).toContainEqual(expect.objectContaining({
+        name: 'tool:stratagate-memory',
+        text: expect.stringMatching(/memory_remember[\s\S]*session-scoped[\s\S]*archive threshold/),
       }))
       expect(prompt.sections).toContainEqual(expect.objectContaining({
         name: 'tool:stratagate-feedback',
@@ -161,9 +166,30 @@ describe('DSH plugin composition', () => {
       const search = ctx.tools.get('memory_search_events')
       const feedbackPrepare = ctx.tools.get('feedback_prepare')
       const recordUse = ctx.tools.get('memory_record_use')
+      const remember = ctx.tools.get('memory_remember')
       expect(search).toBeDefined()
       expect(feedbackPrepare).toBeDefined()
       expect(recordUse).toBeDefined()
+      expect(remember).toBeDefined()
+      expect(remember!.description).toMatch(/session-scoped[\s\S]*decay over time/)
+      const remembered = await remember!.execute({
+        content: '用户偏好 pnpm 作为包管理器。',
+        category: 'preference',
+      }, {
+        agent,
+        callId: 'remember-call',
+      } as never) as unknown as Record<string, unknown>
+      expect(remembered).toMatchObject({
+        recorded: true,
+        sessionId: 'auto-context-session',
+        status: 'active',
+        activeCount: 1,
+      })
+      const autoPrompt = await ctx.systemPrompt.assemble({ agent })
+      expect(autoPrompt.contexts).toContainEqual(expect.objectContaining({
+        name: 'stratagate:auto-memory',
+        text: expect.stringMatching(/SessionAgentMemory:[\s\S]*用户偏好 pnpm 作为包管理器。/),
+      }))
       expect(feedbackPrepare!.description).toMatch(/directly requests it[\s\S]*explicitly agrees/)
       expect(feedbackPrepare!.description).toMatch(/Never submit anything to GitHub[\s\S]*feedbackUrl/)
       const feedback = await feedbackPrepare!.execute({

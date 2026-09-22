@@ -11,4 +11,8 @@
         blockTurnSize: 6
         blockDecayLambda: 0.3
         ingestSubagents: false
+        agentMemoryEnabled: true
+        agentMemoryDecayPerHour: 0.7
+        agentMemoryArchiveThreshold: 0.05
+        agentMemoryMaxActive: 64
         maxOutputTokens: 10000

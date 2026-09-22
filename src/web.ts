@@ -1469,6 +1469,13 @@ export async function handleAdminRequest(runtime: StrataGateRuntime, req: WebReq
     else if (path === '/api/stratagate/memories') sendJson(res, 200, await memories(runtime, url))
     else if (path === '/api/stratagate/sources') sendJson(res, 200, await sources(runtime, url))
     else if (path === '/api/stratagate/audit') sendJson(res, 200, await audit(runtime, url))
+    else if (path === '/api/stratagate/agent-memories') {
+      const sessionId = url.searchParams.get('session')?.trim() ?? ''
+      sendJson(res, 200, runtime.adminAgentMemories({
+        ...(sessionId ? { sessionId } : {}),
+        ...(url.searchParams.get('includeArchived') === 'true' ? { includeArchived: true } : {}),
+      }))
+    }
     else throw new AdminHttpError(404, 'Unknown StrataGate admin route')
   } catch (error) {
     const status = error instanceof AdminHttpError ? error.status : 500

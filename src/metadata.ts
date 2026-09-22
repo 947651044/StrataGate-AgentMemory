@@ -1,5 +1,16 @@
 import { DatabaseSync } from 'node:sqlite'
 
+export interface AgentMemoryRow {
+  id: string
+  sessionId: string
+  content: string
+  category: string | null
+  createdAtMs: number
+  lastReinforcedAtMs: number
+  status: string
+  archivedAtMs: number | null
+}
+
 const METADATA_SCHEMA = `
 CREATE TABLE IF NOT EXISTS stratagate_dsh_settings (
   key TEXT PRIMARY KEY,
@@ -18,6 +29,21 @@ CREATE TABLE IF NOT EXISTS stratagate_dsh_feedback_drafts (
   draft_json TEXT NOT NULL,
   updated_at TEXT NOT NULL
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS stratagate_dsh_agent_memories (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  category TEXT,
+  created_at_ms INTEGER NOT NULL,
+  last_reinforced_at_ms INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  archived_at_ms INTEGER,
+  updated_at TEXT NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS stratagate_dsh_agent_memories_session
+  ON stratagate_dsh_agent_memories (session_id, status);
 `
 
 export class DshMetadataStore {
@@ -111,6 +137,66 @@ export class DshMetadataStore {
       VALUES (?, ?, ?)
       ON CONFLICT (namespace) DO UPDATE SET draft_json = excluded.draft_json, updated_at = excluded.updated_at
     `).run(namespace, JSON.stringify(draft), new Date().toISOString())
+  }
+
+  agentMemories(sessionId: string): AgentMemoryRow[] {
+    const rows = this.database.prepare(`
+      SELECT id, session_id, content, category, created_at_ms, last_reinforced_at_ms, status, archived_at_ms
+      FROM stratagate_dsh_agent_memories
+      WHERE session_id = ?
+      ORDER BY created_at_ms DESC, id DESC
+    `).all(sessionId) as Array<Record<string, unknown>>
+    return rows.map((row) => ({
+      id: String(row.id),
+      sessionId: String(row.session_id),
+      content: String(row.content),
+      category: row.category === null || row.category === undefined ? null : String(row.category),
+      createdAtMs: Number(row.created_at_ms),
+      lastReinforcedAtMs: Number(row.last_reinforced_at_ms),
+      status: String(row.status),
+      archivedAtMs: row.archived_at_ms === null || row.archived_at_ms === undefined ? null : Number(row.archived_at_ms),
+    }))
+  }
+
+  agentMemorySessionIds(): string[] {
+    const rows = this.database
+      .prepare('SELECT DISTINCT session_id FROM stratagate_dsh_agent_memories')
+      .all() as Array<Record<string, unknown>>
+    return rows.map((row) => String(row.session_id))
+  }
+
+  insertAgentMemory(row: AgentMemoryRow): void {
+    this.database.prepare(`
+      INSERT INTO stratagate_dsh_agent_memories (
+        id, session_id, content, category, created_at_ms, last_reinforced_at_ms, status, archived_at_ms, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id,
+      row.sessionId,
+      row.content,
+      row.category,
+      row.createdAtMs,
+      row.lastReinforcedAtMs,
+      row.status,
+      row.archivedAtMs,
+      new Date().toISOString(),
+    )
+  }
+
+  updateAgentMemoryStatus(id: string, status: string, archivedAtMs: number | null): void {
+    this.database.prepare(`
+      UPDATE stratagate_dsh_agent_memories
+      SET status = ?, archived_at_ms = ?, updated_at = ?
+      WHERE id = ?
+    `).run(status, archivedAtMs, new Date().toISOString(), id)
+  }
+
+  updateAgentMemoryReinforcement(id: string, lastReinforcedAtMs: number): void {
+    this.database.prepare(`
+      UPDATE stratagate_dsh_agent_memories
+      SET last_reinforced_at_ms = ?, updated_at = ?
+      WHERE id = ?
+    `).run(lastReinforcedAtMs, new Date().toISOString(), id)
   }
 
   close(): void {

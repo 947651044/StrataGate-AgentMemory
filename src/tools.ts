@@ -184,4 +184,17 @@ export function registerMemoryTools(ctx: Context, runtime: StrataGateRuntime): v
       args.batch_id,
     ) as never,
   }))
+
+  if (runtime.agentMemoryEnabled) {
+    ctx.tools.register(defineTool({
+      name: 'memory_remember',
+      description: 'Record one memorable fact from the current conversation as a session-scoped StrataGate note: explicit user preferences or corrections, decisions the user makes, durable project facts, or anything the user asks you to remember. Use it during the session when the fact will matter in later turns. Notes belong to this DSH session only, are never shared across sessions, decay over time, and stop being surfaced automatically once they decay below the archive threshold. Keep each call to one self-contained sentence; never record secrets, credentials, or anything the user asked not to store.',
+      parameters: {
+        content: { type: 'string', required: true, description: 'The fact to remember, stated as one self-contained sentence.' },
+        category: { type: 'string', enum: ['preference', 'decision', 'correction', 'fact'] as const },
+      },
+      output: jsonOutput,
+      execute: async (args, exec) => runtime.recordAgentMemory(sessionOf(exec), args.content, args.category) as never,
+    }))
+  }
 }

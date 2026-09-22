@@ -7,6 +7,7 @@ import { Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { StrataGate, type GraphNode } from '@diqier/stratagate'
 import { SqliteStorage } from '@diqier/stratagate/sqlite'
 import { describe, expect, it, vi } from 'vitest'
+import type { ResolvedConfig } from '../src/config.js'
 import type { DshModelBridge } from '../src/llm.js'
 import { feedbackDraftUrl, StrataGateRuntime } from '../src/runtime.js'
 
@@ -1772,6 +1773,182 @@ describe('DSH runtime ingestion', () => {
       })
       await runtime.recordUse(activeSession, 'sequential-compatible', sequential.evidenceRefs)
       expect(runtime.needsRecordUse(activeSession)).toBe(false)
+    } finally {
+      await runtime.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+})
+
+function agentRuntimeConfig(database: string, extra: Partial<ResolvedConfig> = {}): ResolvedConfig {
+  return {
+    database,
+    namespaceMode: 'project',
+    namespacePrefix: 'dsh',
+    globalNamespace: 'global',
+    blockTurnSize: 6,
+    blockDecayLambda: 0.3,
+    ingestSubagents: false,
+    maxOutputTokens: 2048,
+    ...extra,
+  }
+}
+
+function sessionWithId(id: string): Session {
+  return {
+    id,
+    header: { id, version: 0, createdAt: 0, cwd: 'C:\\work\\project' },
+    snapshotEvents: () => [],
+    eventAt: () => undefined,
+  } as unknown as Session
+}
+
+describe('DSH runtime agent memory', () => {
+  it('records a session memory, merges it into searchEvents, and reinforces it on use', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-agent-runtime-'))
+    const runtime = new StrataGateRuntime(agentRuntimeConfig(join(directory, 'memory.db')), fakeModels)
+    try {
+      const recorded = await runtime.recordAgentMemory(session, '用户偏好 pnpm 作为包管理器。', 'preference') as Record<string, unknown>
+      expect(recorded).toMatchObject({
+        recorded: true,
+        sessionId: 'session-runtime',
+        status: 'active',
+        activeCount: 1,
+        decayPerHour: 0.7,
+        archiveThreshold: 0.05,
+      })
+
+      const batch = await runtime.searchEvents(session, 'pnpm 包管理器') as {
+        batchId: string
+        evidenceRefs: string[]
+        results: Array<Record<string, unknown>>
+      }
+      const agentRef = batch.evidenceRefs.find((ref) => ref.startsWith('agentmem:'))
+      expect(agentRef).toBe(`agentmem:${String(recorded.id)}`)
+      expect(batch.results).toContainEqual(expect.objectContaining({
+        agentMemoryId: recorded.id,
+        kind: 'agent_memory',
+        category: 'preference',
+        status: 'active',
+      }))
+
+      await runtime.assess(session, {
+        verdict: 'sufficient',
+        evidence_refs: batch.evidenceRefs,
+        fit: 'The note records the package-manager preference.',
+        missing: '',
+        next_strategy: 'answer',
+      })
+      const recordedUse = await runtime.recordUse(session, 'agent-use-1', [agentRef!]) as Record<string, unknown>
+      expect(recordedUse).toMatchObject({
+        reinforcedAgentMemoryCount: 1,
+        agentMemories: [{ id: recorded.id, reinforced: true, weight: 1 }],
+      })
+      expect(recordedUse.citations).not.toContainEqual(expect.objectContaining({ kind: 'agent_memory' }))
+
+      const dashboard = runtime.adminAgentMemories({ sessionId: 'session-runtime', includeArchived: true }) as {
+        items: Array<Record<string, unknown>>
+      }
+      const item = dashboard.items.find(({ id }) => id === recorded.id)
+      expect(item).toMatchObject({ status: 'active' })
+      expect(item?.lastReinforcedAt).not.toBe(item?.createdAt)
+    } finally {
+      await runtime.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('surfaces active notes in automatic context under SessionAgentMemory', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-agent-autocontext-'))
+    const runtime = new StrataGateRuntime(agentRuntimeConfig(join(directory, 'memory.db')), fakeModels)
+    try {
+      await runtime.recordAgentMemory(session, '用户偏好 pnpm 作为包管理器。', 'preference')
+      const context = await runtime.buildAutoContext(session)
+      expect(context).toContain('[Activated long-term memory]')
+      expect(context).toContain('SessionAgentMemory:')
+      expect(context).toContain('- {"agentMemoryId":')
+      expect(context).toContain('用户偏好 pnpm 作为包管理器。')
+      expect(context).not.toContain('session-runtime')
+    } finally {
+      await runtime.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('archives decayed notes out of search and auto context while keeping them visible', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-agent-decay-'))
+    const runtime = new StrataGateRuntime(agentRuntimeConfig(join(directory, 'memory.db')), fakeModels)
+    try {
+      const recorded = await runtime.recordAgentMemory(session, '用户偏好 pnpm。', 'preference') as Record<string, unknown>
+      const id = String(recorded.id)
+      // Fake the wall clock 100 hours into the future; record() already ran at real time.
+      vi.useFakeTimers({ now: Date.now() + 100 * 3_600_000 })
+      try {
+        const batch = await runtime.searchEvents(session, 'pnpm') as { evidenceRefs: string[] }
+        expect(batch.evidenceRefs.every((ref) => !ref.startsWith('agentmem:'))).toBe(true)
+        const context = await runtime.buildAutoContext(session)
+        expect(context).not.toContain('用户偏好 pnpm。')
+        expect(context).toContain('(no activated memory)')
+        const dashboard = runtime.adminAgentMemories({ sessionId: 'session-runtime', includeArchived: true }) as {
+          items: Array<Record<string, unknown>>
+        }
+        expect(dashboard.items).toHaveLength(1)
+        expect(dashboard.items[0]).toMatchObject({ id, status: 'archived' })
+        // Without the archive flag the note is invisible.
+        const activeOnly = runtime.adminAgentMemories({ sessionId: 'session-runtime' }) as {
+          items: Array<Record<string, unknown>>
+        }
+        expect(activeOnly.items).toHaveLength(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    } finally {
+      await runtime.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps notes restart-safe, session-scoped, and derivation-free', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-agent-persist-'))
+    const database = join(directory, 'memory.db')
+    const runDetached = vi.fn(async (_sessionId: string, operation: () => Promise<unknown>) => operation())
+    const models = { ...fakeModels, runDetached } as unknown as DshModelBridge
+    const first = new StrataGateRuntime(agentRuntimeConfig(database, { namespaceMode: 'global' }), models)
+    try {
+      await first.recordAgentMemory(session, '用户偏好 pnpm。', 'preference')
+      expect(runDetached).not.toHaveBeenCalled()
+    } finally {
+      await first.close()
+    }
+
+    const second = new StrataGateRuntime(agentRuntimeConfig(database, { namespaceMode: 'global' }), fakeModels)
+    try {
+      // Same session id sees the note after a restart, even with global namespaces.
+      const batch = await second.searchEvents(session, 'pnpm') as { evidenceRefs: string[] }
+      expect(batch.evidenceRefs.some((ref) => ref.startsWith('agentmem:'))).toBe(true)
+      // Another session never sees it.
+      const otherBatch = await second.searchEvents(sessionWithId('session-other'), 'pnpm') as { evidenceRefs: string[] }
+      expect(otherBatch.evidenceRefs.some((ref) => ref.startsWith('agentmem:'))).toBe(false)
+      const dashboard = second.adminAgentMemories({ includeArchived: false }) as {
+        items: Array<Record<string, unknown>>
+      }
+      expect(dashboard.items.map(({ sessionId }) => sessionId)).toEqual(['session-runtime'])
+    } finally {
+      await second.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects recording and surfacing when the feature is disabled', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-agent-disabled-'))
+    const runtime = new StrataGateRuntime(agentRuntimeConfig(join(directory, 'memory.db'), { agentMemoryEnabled: false }), fakeModels)
+    try {
+      expect(runtime.agentMemoryEnabled).toBe(false)
+      await expect(runtime.recordAgentMemory(session, '用户偏好 pnpm。')).rejects.toThrow('agentMemoryEnabled=false')
+      const context = await runtime.buildAutoContext(session)
+      expect(context).not.toContain('SessionAgentMemory:')
+      const dashboard = runtime.adminAgentMemories({ includeArchived: true }) as { items: unknown[] }
+      expect(dashboard.items).toEqual([])
     } finally {
       await runtime.close()
       await rm(directory, { recursive: true, force: true })
