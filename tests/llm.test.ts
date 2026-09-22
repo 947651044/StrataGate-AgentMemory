@@ -104,6 +104,52 @@ function modelBridge(responses: Array<{ text?: string; tool?: unknown; toolName?
 }
 
 describe('DeepSeek Harness model JSON retries', () => {
+  it('retries NO_ADAPTER once without spending a structured-response retry', async () => {
+    const calls = vi.fn()
+    const ctx = {
+      llm: { stream: (options: { tools: Array<{ name: string }> }) => {
+        calls(options)
+        if (calls.mock.calls.length === 1) {
+          throw Object.assign(new Error('no adapter registered'), { code: 'NO_ADAPTER' })
+        }
+        return (async function* () {
+          yield {
+            type: 'tool-call-delta' as const,
+            index: 0,
+            id: 'call' as never,
+            name: options.tools[0]!.name,
+            argumentsDelta: JSON.stringify({ l0Title: 'ready', l0Tags: [], l1Summary: 'ready', l2Keypoints: [], shouldExtract: false }),
+          }
+          yield { type: 'finish' as const, reason: { kind: 'stop' as const } }
+        })()
+      } },
+      logger: { warn: vi.fn() },
+    } as unknown as Context
+    const bridge = new DshModelBridge(ctx, {
+      database: ':memory:', namespaceMode: 'session', namespacePrefix: 'test', globalNamespace: 'global',
+      blockTurnSize: 1, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 256,
+    })
+    const session = { id: 'adapter-race', requestHeader: () => ({ config: { provider: 'test', model: 'test' } }) } as unknown as Session
+
+    await expect(bridge.run(session, () => bridge.summarizer([]))).resolves.toMatchObject({ l0Title: 'ready' })
+    expect(calls).toHaveBeenCalledTimes(2)
+  })
+
+  it('limits the NO_ADAPTER fallback to one retry', async () => {
+    const calls = vi.fn(() => {
+      throw Object.assign(new Error('no adapter registered'), { code: 'NO_ADAPTER' })
+    })
+    const ctx = { llm: { stream: calls }, logger: { warn: vi.fn() } } as unknown as Context
+    const bridge = new DshModelBridge(ctx, {
+      database: ':memory:', namespaceMode: 'session', namespacePrefix: 'test', globalNamespace: 'global',
+      blockTurnSize: 1, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 256,
+    })
+    const session = { id: 'adapter-missing', requestHeader: () => ({ config: { provider: 'test', model: 'test' } }) } as unknown as Session
+
+    await expect(bridge.run(session, () => bridge.summarizer([]))).rejects.toMatchObject({ code: 'NO_ADAPTER' })
+    expect(calls).toHaveBeenCalledTimes(2)
+  })
+
   it('returns an external-memory action with bounded confidence', async () => {
     const { bridge, session, calls } = modelBridge([{ tool: {
       action: 'SUPERSEDE', existingEventIds: ['evt_old'], reason: '同一事实的新状态', confidence: 1.4,
@@ -441,6 +487,44 @@ describe('DeepSeek Harness model JSON retries', () => {
       jobId: 'gproj_truncated', projectorVersion: 1, events: [event], existingNodes: [], existingEdges: [],
     }))).rejects.toThrow('after 1 attempt')
     expect(calls).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('DeepSeek Harness adapter readiness', () => {
+  it('tracks the exact route and publishes adapter-registry updates', () => {
+    let providers: Array<{ id: string; name: string }> = []
+    let adapterUpdated = () => {}
+    const ctx = {
+      llm: {
+        listProviders: () => providers,
+        stream: vi.fn(),
+      },
+      agentDefaultModel: { currentSelection: () => ({ provider: 'default-provider', model: 'default-model' }) },
+      on: (_event: string, listener: () => void) => { adapterUpdated = listener },
+      logger: { warn: vi.fn() },
+    } as unknown as Context
+    const bridge = new DshModelBridge(ctx, {
+      database: ':memory:', namespaceMode: 'session', namespacePrefix: 'test', globalNamespace: 'global',
+      blockTurnSize: 1, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 256,
+    })
+    const session = { id: 'adapter-ready', requestHeader: () => ({ config: { provider: 'session-provider', model: 'session-model' } }) } as unknown as Session
+    const listener = vi.fn()
+    const dispose = bridge.onAdaptersUpdated(listener)
+
+    expect(bridge.isReady(session)).toBe(false)
+    expect(bridge.isReady()).toBe(false)
+    providers = [
+      { id: 'session-provider', name: 'Session Provider' },
+      { id: 'default-provider', name: 'Default Provider' },
+    ]
+    adapterUpdated()
+    expect(bridge.isReady(session)).toBe(true)
+    expect(bridge.isReady()).toBe(true)
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    dispose()
+    adapterUpdated()
+    expect(listener).toHaveBeenCalledTimes(1)
   })
 })
 
