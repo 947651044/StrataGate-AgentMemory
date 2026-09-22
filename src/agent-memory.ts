@@ -111,7 +111,7 @@ export class SessionAgentMemoryStore {
         if (normalizeSearchText(entry.content) !== normalized) continue
         const refreshed: AgentMemoryEntry = { ...entry, lastReinforcedAtMs: nowMs }
         entries.set(entry.id, refreshed)
-        this.persist(() => this.openMetadata()?.updateAgentMemoryReinforcement(entry.id, nowMs))
+        this.persist((metadata) => metadata.updateAgentMemoryReinforcement(entry.id, nowMs))
         return {
           entry: { ...refreshed, weight: 1 },
           duplicateOf: entry.id,
@@ -128,7 +128,7 @@ export class SessionAgentMemoryStore {
       status: 'active',
     }
     entries.set(entry.id, entry)
-    this.persist(() => this.openMetadata()?.insertAgentMemory(rowFromEntry(entry)))
+    this.persist((metadata) => metadata.insertAgentMemory(rowFromEntry(entry)))
     this.enforceMaxActive(key, entries, nowMs)
     return { entry: { ...entry, weight: 1 } }
   }
@@ -145,7 +145,7 @@ export class SessionAgentMemoryStore {
       if (agentMemoryIsStale(weight, this.options.archiveThreshold)) {
         const archived: AgentMemoryEntry = { ...entry, status: 'archived', archivedAtMs: nowMs }
         entries.set(entry.id, archived)
-        this.persist(() => this.openMetadata()?.updateAgentMemoryStatus(entry.id, 'archived', nowMs))
+        this.persist((metadata) => metadata.updateAgentMemoryStatus(entry.id, 'archived', nowMs))
         continue
       }
       actives.push({ ...entry, weight })
@@ -172,7 +172,7 @@ export class SessionAgentMemoryStore {
       }
       const refreshed: AgentMemoryEntry = { ...entry, lastReinforcedAtMs: nowMs }
       entries.set(id, refreshed)
-      this.persist(() => this.openMetadata()?.updateAgentMemoryReinforcement(id, nowMs))
+      this.persist((metadata) => metadata.updateAgentMemoryReinforcement(id, nowMs))
       reinforced.push({ ...refreshed, weight: agentMemoryWeight(nowMs, nowMs, this.options.lambdaPerHour) })
     }
     return { reinforced, skipped }
@@ -191,7 +191,7 @@ export class SessionAgentMemoryStore {
           if (agentMemoryIsStale(weight, this.options.archiveThreshold)) {
             const archived: AgentMemoryEntry = { ...entry, status: 'archived', archivedAtMs: nowMs }
             entries.set(entry.id, archived)
-            this.persist(() => this.openMetadata()?.updateAgentMemoryStatus(entry.id, 'archived', nowMs))
+            this.persist((metadata) => metadata.updateAgentMemoryStatus(entry.id, 'archived', nowMs))
             if (options.includeArchived !== true) continue
             items.push({ ...archived, weight })
             continue
@@ -237,7 +237,7 @@ export class SessionAgentMemoryStore {
       .slice(0, excess)
     for (const { entry } of evicted) {
       entries.set(entry.id, { ...entry, status: 'archived', archivedAtMs: nowMs })
-      this.persist(() => this.openMetadata()?.updateAgentMemoryStatus(entry.id, 'archived', nowMs))
+      this.persist((metadata) => metadata.updateAgentMemoryStatus(entry.id, 'archived', nowMs))
     }
   }
 
@@ -281,17 +281,16 @@ export class SessionAgentMemoryStore {
     return entries
   }
 
-  private openMetadata(): DshMetadataStore | undefined {
-    if (this.databasePath === ':memory:') return undefined
-    return new DshMetadataStore(this.databasePath)
-  }
-
-  private persist(operation: () => void): void {
+  private persist(operation: (metadata: DshMetadataStore) => void): void {
     if (this.databasePath === ':memory:') return
+    let metadata: DshMetadataStore | undefined
     try {
-      operation()
+      metadata = new DshMetadataStore(this.databasePath)
+      operation(metadata)
     } catch (error) {
       this.onError(error)
+    } finally {
+      metadata?.close()
     }
   }
 }

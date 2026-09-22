@@ -2067,7 +2067,7 @@ describe('DSH runtime agent memory', () => {
     const runtime = new StrataGateRuntime(agentRuntimeConfig(join(directory, 'memory.db'), { agentMemoryEnabled: false }), fakeModels)
     try {
       expect(runtime.agentMemoryEnabled).toBe(false)
-      await expect(runtime.recordAgentMemory(session, '用户偏好 pnpm。')).rejects.toThrow('agentMemoryEnabled=false')
+      expect(() => runtime.recordAgentMemory(session, '用户偏好 pnpm。')).toThrow('agentMemoryEnabled=false')
       const context = await runtime.buildAutoContext(session)
       expect(context).not.toContain('SessionAgentMemory:')
       const dashboard = runtime.adminAgentMemories({ includeArchived: true }) as { items: unknown[] }
