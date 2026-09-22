@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { StrataGate, type GraphNode } from '@diqier/stratagate'
+import { StrataGate, type ExtractionContext, type GraphNode } from '@diqier/stratagate'
 import { SqliteStorage } from '@diqier/stratagate/sqlite'
 import { describe, expect, it, vi } from 'vitest'
 import type { DshModelBridge } from '../src/llm.js'
@@ -13,6 +13,8 @@ import { feedbackDraftUrl, StrataGateRuntime } from '../src/runtime.js'
 const fakeModels = {
   run: async <T>(_session: Session, operation: () => Promise<T>): Promise<T> => operation(),
   runDetached: async <T>(_sessionId: string, operation: () => Promise<T>): Promise<T> => operation(),
+  isReady: () => true,
+  onAdaptersUpdated: () => () => {},
   summarizer: async () => ({
     l0Title: 'turns', l0Tags: [], l1Summary: 'turns', l2Keypoints: [], shouldExtract: false,
   }),
@@ -115,6 +117,127 @@ describe('DSH runtime ingestion', () => {
       }
     } finally {
       await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps model jobs unclaimed until an adapter update wakes the worker', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-adapter-ready-'))
+    const database = join(directory, 'memory.db')
+    const namespace = 'dsh:project:adapter-ready'
+    let ready = false
+    let adapterUpdated = () => {}
+    const disposeAdaptersUpdated = vi.fn()
+    const summaryCalls = vi.fn()
+    const extractionCalls = vi.fn()
+    const graphCalls = vi.fn()
+    const runDetached = vi.fn(async <T>(_sessionId: string, operation: () => Promise<T>): Promise<T> => operation())
+    try {
+      const seed = await StrataGate.open({ database, namespace, blockTurnSize: 1 })
+      await seed.appendTurn(
+        { user: 'remember the adapter startup race', assistant: 'saved', threadId: 'seed-session' },
+        { deferDerivation: true },
+      )
+      const blockId = seed.listBlocks()[0]!.id
+      await seed.close()
+
+      const runtime = new StrataGateRuntime({
+        database, namespaceMode: 'project', namespacePrefix: 'dsh', globalNamespace: 'global',
+        blockTurnSize: 1, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048,
+      }, {
+        ...fakeModels,
+        isReady: () => ready,
+        onAdaptersUpdated: (listener: () => void) => {
+          adapterUpdated = listener
+          return disposeAdaptersUpdated
+        },
+        runDetached,
+        summarizer: async () => {
+          summaryCalls()
+          return { l0Title: 'ready', l0Tags: [], l1Summary: 'ready', l2Keypoints: [], shouldExtract: true }
+        },
+        extractor: async ({ target }: ExtractionContext) => {
+          extractionCalls()
+          return {
+            shouldExtract: true,
+            reason: 'durable event',
+            events: [{
+              title: 'Adapter became ready', summary: 'Pending work resumed automatically.',
+              sourceMessageIds: [target.l5Raw[0]!.id],
+            }],
+          }
+        },
+        graphProjector: async () => {
+          graphCalls()
+          return { reason: 'projected', nodes: [], edges: [] }
+        },
+      } as unknown as DshModelBridge)
+      try {
+        await (runtime as unknown as { runBackgroundNamespace: (value: string) => Promise<void> })
+          .runBackgroundNamespace(namespace)
+        await new Promise((resolve) => setTimeout(resolve, 350))
+        const waiting = await runtime.adminSnapshot(namespace)
+        expect(waiting?.summaryJobs).toEqual([
+          expect.objectContaining({ blockId, status: 'pending', attempts: 0 }),
+        ])
+        expect(waiting?.extractionJobs).toEqual([])
+        expect(waiting?.graphProjectionJobs).toEqual([])
+        expect(runDetached).not.toHaveBeenCalled()
+        expect(summaryCalls).not.toHaveBeenCalled()
+
+        ready = true
+        adapterUpdated()
+        await vi.waitFor(async () => {
+          const resumed = await runtime.adminSnapshot(namespace)
+          expect(resumed?.summaryJobs).toEqual([
+            expect.objectContaining({ status: 'succeeded', attempts: 1 }),
+          ])
+          expect(resumed?.extractionJobs).toEqual([
+            expect.objectContaining({ status: 'succeeded', attempts: 1 }),
+          ])
+          expect(resumed?.graphProjectionJobs).toEqual([
+            expect.objectContaining({ status: 'completed', attempts: 1 }),
+          ])
+        }, { timeout: 2_000, interval: 25 })
+        expect(runDetached).toHaveBeenCalledTimes(1)
+        expect(summaryCalls).toHaveBeenCalledTimes(1)
+        expect(extractionCalls).toHaveBeenCalledTimes(1)
+        expect(graphCalls).toHaveBeenCalledTimes(1)
+
+        adapterUpdated()
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        expect(runDetached).toHaveBeenCalledTimes(1)
+      } finally {
+        await runtime.close()
+      }
+      expect(disposeAdaptersUpdated).toHaveBeenCalledTimes(1)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps genuine model failures on the existing three-attempt Core budget', async () => {
+    const summaryCalls = vi.fn(async () => {
+      throw new Error('provider request failed')
+    })
+    const runtime = new StrataGateRuntime({
+      database: ':memory:', namespaceMode: 'session', namespacePrefix: 'dsh', globalNamespace: 'global',
+      blockTurnSize: 1, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048,
+    }, { ...fakeModels, summarizer: summaryCalls } as unknown as DshModelBridge)
+    try {
+      const memory = await (runtime as unknown as { space: (value: Session) => Promise<StrataGate> }).space(session)
+      await memory.appendTurn(
+        { user: 'this is a real model failure', assistant: 'saved', threadId: String(session.id) },
+        { deferDerivation: true },
+      )
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        await memory.resumePendingWork({ retryFailed: true, threadId: String(session.id) })
+      }
+      expect(summaryCalls).toHaveBeenCalledTimes(3)
+      expect(memory.listSummaryJobs()).toEqual([
+        expect.objectContaining({ status: 'failed', attempts: 3, nextRetryAt: null }),
+      ])
+    } finally {
+      await runtime.close()
     }
   })
 
