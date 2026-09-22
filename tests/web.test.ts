@@ -208,6 +208,31 @@ describe('StrataGate admin routes', () => {
     } }])
   })
 
+  it('lists agent-recorded session memories through a read-only route', async () => {
+    const calls: Array<unknown> = []
+    const agentRuntime = {
+      adminAgentMemories: (options: unknown) => {
+        calls.push(options)
+        return {
+          items: [{ id: 'agentmem_1', sessionId: 's1', content: '用户偏好 pnpm。', status: 'active', weight: 1 }],
+          total: 1,
+          decayPerHour: 0.7,
+          archiveThreshold: 0.05,
+        }
+      },
+    } as unknown as StrataGateRuntime
+    const result = await request('/api/stratagate/agent-memories?session=s1&includeArchived=true', 'GET', agentRuntime)
+    expect(result).toMatchObject({ status: 200, body: { total: 1, items: [{ id: 'agentmem_1', status: 'active' }] } })
+    const filtered = await request('/api/stratagate/agent-memories', 'GET', agentRuntime)
+    expect(filtered.status).toBe(200)
+    expect(calls[0]).toEqual({ sessionId: 's1', includeArchived: true })
+    expect(calls[1]).toEqual({})
+    const rejected = await request('/api/stratagate/agent-memories', 'POST', agentRuntime, { sessionId: 's1' })
+    expect(rejected.status).toBe(405)
+    const unknown = await request('/api/stratagate/agent-memories-extra', 'GET', agentRuntime)
+    expect(unknown.status).toBe(404)
+  })
+
   it('supports preview, commit, and undo through the import route', async () => {
     const received: unknown[] = []
     const importRuntime = {

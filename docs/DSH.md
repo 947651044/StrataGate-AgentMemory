@@ -89,6 +89,19 @@ Automatic context contains only compact Event and fact fields from other convers
 
 Every explicit retrieval creates an independent batch. The model passes its `batch_id` to `memory_assess`, then closes that same batch with `memory_record_use`. It passes the exact `evidence_refs` from that batch used in its answer, or `[]` when it used none. Selected Event evidence is reinforced once; an empty list writes a zero-increment receipt with the real batch ID.
 
+### Agent-recorded session memory
+
+`memory_remember` lets the agent record facts proactively: explicit user preferences or
+corrections, decisions, durable project facts, or anything the user asks to remember. These
+notes are deliberately separate from the derived memory above:
+
+- **Session-scoped only.** Notes are keyed by the DSH session id regardless of `namespaceMode`; they never appear in other sessions and are not promoted into Blocks, Events, or the Knowledge Graph.
+- **Proportional time decay.** A note's weight is `exp(-λ · hours since its last reinforcement)`, computed lazily at read time — no timers. `agentMemoryDecayPerHour` defaults to `0.7` (half-life ≈ 1 hour). Recording the same fact again refreshes the note's anchor instead of duplicating it.
+- **Rehearsal through use.** Citing a note via the normal `memory_assess` → `memory_record_use` flow resets its decay anchor. Search results include notes with `agentmem:` evidence refs in the same batch as Event results; `memory_record_use` reports them under `agentMemories`.
+- **Archive, not delete.** When the weight falls below `agentMemoryArchiveThreshold` (default `0.05`), the note is marked `archived`: it no longer appears in `memory_search_events`, automatic context, or explicit recall, but it stays in the database and remains visible under `/api/stratagate/agent-memories` (query parameter `includeArchived=true`).
+- **Automatic surfacing.** Up to four active notes (≈240-token sub-budget) are appended to the automatic context section as `SessionAgentMemory:` lines so recorded facts resurface in later turns.
+- **Bounded.** A session keeps at most `agentMemoryMaxActive` (default `64`) active notes; further recordings archive the lowest-weight entries first. The feature can be disabled entirely with `agentMemoryEnabled: false`, which also unregisters the tool.
+
 The plugin registers these tools:
 
 ```text
@@ -96,7 +109,7 @@ memory_search_events   memory_expand_event
 memory_search_graph    memory_expand_graph_node
 memory_search_raw      memory_get_blocks
 memory_expand_block    memory_assess
-memory_record_use
+memory_record_use      memory_remember
 ```
 
 `memory_get_blocks` accepts `scope=session` (the default, preserving the historical
@@ -146,6 +159,10 @@ config:
   blockTurnSize: 6
   blockDecayLambda: 0.3
   ingestSubagents: false
+  agentMemoryEnabled: true
+  agentMemoryDecayPerHour: 0.7
+  agentMemoryArchiveThreshold: 0.05
+  agentMemoryMaxActive: 64
   maxOutputTokens: 10000
   structuredTaskTimeoutMs: 120000
   structuredReasoningEffort: auto # auto | force-off
@@ -161,6 +178,8 @@ config:
 `blockTurnSize` controls how many completed DSH turns are sealed into each Block; one turn is one user request plus the completed AI response. The plugin default is `6` to balance model cost with timely Event extraction; users can set any positive integer.
 
 `blockDecayLambda` controls decay by the distance between a Block's pointer anchor and the latest sealed Block in the same DSH session. It defaults to `0.3`. Smaller values decay more slowly; values above `0.4` are not recommended. Turns in the open tail do not increase Block age.
+
+The `agentMemory*` keys configure agent-recorded session memory (see above): `agentMemoryEnabled` (default `true`), `agentMemoryDecayPerHour` (default `0.7`, the λ in the notes' per-hour exponential decay), `agentMemoryArchiveThreshold` (default `0.05`), and `agentMemoryMaxActive` (default `64`). Notes are stored in the same SQLite database as the rest of StrataGate data.
 
 If `provider` and `model` are omitted, memory processing uses the session's latest request route, then the DSH default model as fallback. They must be configured as a pair.
 

@@ -89,6 +89,17 @@ DSH_HOME/stratagate/memory.db
 
 每次主动检索都会创建独立批次。模型先把该批次的 `batch_id` 传给 `memory_assess`，再用 `memory_record_use` 结算同一批次。模型需要传入回答中实际使用且属于该批次的 `evidence_refs`；若一条也没有使用，则传入 `[]`。被选中的 Event 证据会强化一次，空数组会写入一条包含真实批次 ID 的零强化回执。
 
+### Agent 主动记忆
+
+`memory_remember` 让 agent 主动记录值得记忆的事实：用户明确的偏好或纠正、决定、持久的项目事实，以及用户要求记住的内容。这类笔记与上文的派生记忆相互独立：
+
+- **仅当前会话。** 笔记按 DSH 会话 ID 键控，与 `namespaceMode` 无关；不会出现在其他会话中，也不会晋升为 Block、Event 或 Knowledge Graph 节点。
+- **按时间的比例衰减。** 笔记权重为 `exp(-λ × 距上次强化的小时数)`，读取时惰性计算，没有定时器。`agentMemoryDecayPerHour` 默认 `0.7`（半衰期约 1 小时）。重复记录同一事实会刷新原笔记的锚点，而不是新增一条。
+- **通过使用实现复述。** 走正常的 `memory_assess` → `memory_record_use` 流程引用一条笔记，会重置其衰减锚点。搜索结果会把笔记以 `agentmem:` 前缀的 evidence ref 并入同一批次；`memory_record_use` 会在 `agentMemories` 字段中回报这些笔记。
+- **归档而非删除。** 权重低于 `agentMemoryArchiveThreshold`（默认 `0.05`）时，笔记被标记为 `archived`：不再出现在 `memory_search_events`、自动上下文和主动检索中，但仍保留在数据库里，并可通过 `/api/stratagate/agent-memories`（查询参数 `includeArchived=true`）查看。
+- **自动浮现。** 每次自动上下文会附加最多 4 条活跃笔记（约 240 token 子预算），以 `SessionAgentMemory:` 段落呈现，让已记录的事实在此后的轮次中重新可见。
+- **有界。** 每个会话最多保留 `agentMemoryMaxActive`（默认 `64`）条活跃笔记；超出后优先归档权重最低的条目。可用 `agentMemoryEnabled: false` 整体关闭该功能，同时注销对应工具。
+
 插件注册以下工具：
 
 ```text
@@ -96,7 +107,7 @@ memory_search_events   memory_expand_event
 memory_search_graph    memory_expand_graph_node
 memory_search_raw      memory_get_blocks
 memory_expand_block    memory_assess
-memory_record_use
+memory_record_use      memory_remember
 ```
 
 `memory_get_blocks` 支持 `scope=session`（默认值，保留历史上的当前会话隔离语义）和
@@ -143,6 +154,10 @@ config:
   blockTurnSize: 6
   blockDecayLambda: 0.3
   ingestSubagents: false
+  agentMemoryEnabled: true
+  agentMemoryDecayPerHour: 0.7
+  agentMemoryArchiveThreshold: 0.05
+  agentMemoryMaxActive: 64
   maxOutputTokens: 10000
   structuredTaskTimeoutMs: 120000
   structuredReasoningEffort: auto # auto | force-off
@@ -158,6 +173,8 @@ config:
 `blockTurnSize` 控制每个 Block 封存多少个已完成的 DSH 轮次；一轮是一次用户提问和 AI 完整回复。插件默认值为 `6`，用于平衡模型调用成本与 Event 提取及时性；用户可以配置任意正整数。
 
 `blockDecayLambda` 按当前 Block 锚点与同一 DSH 会话中最新已封存 Block 的距离控制衰减。默认值为 `0.3`；数字越小衰减越慢，不建议大于 `0.4`。open tail 中尚未封存的轮次不会增加 Block age。
+
+`agentMemory*` 配置项控制 Agent 主动记忆（见上文）：`agentMemoryEnabled`（默认 `true`）、`agentMemoryDecayPerHour`（默认 `0.7`，笔记每小时指数衰减的 λ）、`agentMemoryArchiveThreshold`（默认 `0.05`）和 `agentMemoryMaxActive`（默认 `64`）。笔记与其他 StrataGate 数据一样保存在同一个 SQLite 数据库中。
 
 如果省略 `provider` 和 `model`，记忆处理会优先使用会话最近一次请求的路由，并以 DSH 默认模型作为后备。这两个配置项必须同时设置。
 
