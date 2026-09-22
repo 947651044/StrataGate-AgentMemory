@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.79 - 2026-09-22
+
+- Keep background Block summary, Event extraction, and Graph projection jobs pending without consuming attempts until the selected DSH model adapter is registered, then resume them immediately after adapter updates.
+- Retry a raced `NO_ADAPTER` model call once outside Core's existing three-attempt task budget, while preserving the normal terminal behavior for genuine model failures.
+
 ## 0.2.78 - 2026-09-21
 
 - Derive Block summaries and Events from a provenance-preserving compact view of L5 messages, omitting large code and bounding oversized tool payloads while keeping full raw evidence in L5.
