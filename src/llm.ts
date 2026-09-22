@@ -333,13 +333,31 @@ export class DshModelBridge {
   private readonly successfulResponses: SuccessfulModelResponse[] = []
   private readonly offCapabilities = new Map<string, 'supported' | 'unsupported'>()
   private readonly warnedOffFallbackRoutes = new Set<string>()
+  private readonly adaptersUpdatedListeners = new Set<() => void>()
   private structuredReasoningEffort: StructuredReasoningEffortMode
 
   constructor(private readonly ctx: Context, private readonly config: ResolvedConfig) {
     this.structuredReasoningEffort = config.structuredReasoningEffort ?? 'auto'
     this.ctx.on?.('llm/adapters-updated', () => {
       this.offCapabilities.clear()
+      for (const listener of this.adaptersUpdatedListeners) listener()
     })
+  }
+
+  /** True only when the exact provider route has a registered DSH adapter. */
+  isReady(session?: Session): boolean {
+    try {
+      const { provider } = this.resolveRoute(session)
+      return this.ctx.llm.listProviders().some(({ id }) => id === provider)
+    } catch {
+      return false
+    }
+  }
+
+  /** Wake durable workers when DSH changes the adapter registry. */
+  onAdaptersUpdated(listener: () => void): () => void {
+    this.adaptersUpdatedListeners.add(listener)
+    return () => { this.adaptersUpdatedListeners.delete(listener) }
   }
 
   setStructuredReasoningEffort(mode: StructuredReasoningEffortMode): void {
@@ -552,6 +570,7 @@ export class DshModelBridge {
     let lastError: ModelJsonResponseError | undefined
     let lastResponse = ''
     let attemptsUsed = 0
+    let noAdapterRetried = false
     for (let attempt = 1; attempt <= JSON_RESPONSE_ATTEMPTS; attempt += 1) {
       attemptsUsed = attempt
       const message = createUserMessage({
@@ -580,6 +599,11 @@ export class DshModelBridge {
       try {
         await this.consumeStructuredStream(request, assembler)
       } catch (error) {
+        if (!noAdapterRetried && isNoAdapter(error)) {
+          noAdapterRetried = true
+          attempt -= 1
+          continue
+        }
         if (useOff && isOffRejection(error)) {
           this.offCapabilities.set(routeKey, 'unsupported')
           useOff = false
@@ -592,6 +616,11 @@ export class DshModelBridge {
       const finish = assembler.finish
       if (finish.kind === 'error' || finish.kind === 'aborted') {
         const failure = new Error(`StrataGate model call failed [${finish.failure.code}]: ${finish.failure.message}`)
+        if (!noAdapterRetried && isNoAdapter(finish.failure)) {
+          noAdapterRetried = true
+          attempt -= 1
+          continue
+        }
         if (useOff && isOffRejection(finish.failure)) {
           this.offCapabilities.set(routeKey, 'unsupported')
           useOff = false
@@ -767,6 +796,18 @@ export class DshModelBridge {
     const fallback = this.ctx.agentDefaultModel.currentSelection()
     return { provider: fallback.provider, model: fallback.model }
   }
+}
+
+function isNoAdapter(error: unknown): boolean {
+  const seen = new Set<object>()
+  let current = error
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current)
+    const candidate = current as { code?: unknown; cause?: unknown }
+    if (candidate.code === 'NO_ADAPTER') return true
+    current = candidate.cause
+  }
+  return false
 }
 
 function isOffRejection(error: unknown): boolean {

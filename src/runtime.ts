@@ -253,6 +253,7 @@ export class StrataGateRuntime {
   private readonly latestBatchIds = new Map<string, string>()
   private readonly workspaceNames = new Map<string, string>()
   private readonly migrationTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private readonly migrationRuns = new Map<string, Promise<void>>()
   private readonly derivationTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private readonly derivationRuns = new Map<string, Promise<void>>()
   private readonly knownSessions = new Map<string, WeakRef<Session>>()
@@ -271,6 +272,8 @@ export class StrataGateRuntime {
   private readonly backgroundNamespaceRuns = new Map<string, Promise<void>>()
   private backgroundWorkerTimer: ReturnType<typeof setTimeout> | undefined
   private backgroundWorkerRun: Promise<void> | undefined
+  private backgroundWorkerWakePending = false
+  private readonly disposeAdaptersUpdated: () => void
   private settingsTail: Promise<void> = Promise.resolve()
   private batchSequence = 0
   private closed = false
@@ -289,6 +292,7 @@ export class StrataGateRuntime {
   ) {
     this.blockTurnSize = config.blockTurnSize
     this.blockDecayLambda = config.blockDecayLambda
+    this.disposeAdaptersUpdated = this.models.onAdaptersUpdated(() => this.wakeModelWorkers())
     this.agentMemories = new SessionAgentMemoryStore(config.database, {
       lambdaPerHour: config.agentMemoryDecayPerHour ?? 0.7,
       archiveThreshold: config.agentMemoryArchiveThreshold ?? 0.05,
@@ -310,14 +314,16 @@ export class StrataGateRuntime {
       this.backgroundWorkerRun = run
       void run.finally(() => {
         if (this.backgroundWorkerRun === run) this.backgroundWorkerRun = undefined
-        this.scheduleBackgroundWorker(BACKGROUND_WORKER_INTERVAL_MS)
+        const delay = this.backgroundWorkerWakePending ? 0 : BACKGROUND_WORKER_INTERVAL_MS
+        this.backgroundWorkerWakePending = false
+        this.scheduleBackgroundWorker(delay)
       })
     }, delayMs)
     this.backgroundWorkerTimer.unref?.()
   }
 
   private async runBackgroundWorker(): Promise<void> {
-    if (this.closed) return
+    if (this.closed || !this.models.isReady()) return
     let namespaces: string[]
     try {
       namespaces = await this.adminNamespaces()
@@ -336,6 +342,7 @@ export class StrataGateRuntime {
   }
 
   private async runBackgroundNamespace(namespace: string): Promise<void> {
+    if (this.closed || !this.models.isReady()) return
     const existing = this.backgroundNamespaceRuns.get(namespace)
     if (existing) return existing
     const run = (async () => {
@@ -357,9 +364,11 @@ export class StrataGateRuntime {
           ...this.derivationTimers.keys(),
           ...this.derivationRuns.keys(),
           ...this.migrationTimers.keys(),
+          ...this.migrationRuns.keys(),
         ]
           .some((key) => key.startsWith(`${namespace}\u0000`) || key === namespace)
         if (hasActiveSessionWork) return
+        if (!this.models.isReady()) return
         const resumed = await this.models.runDetached(
           `stratagate-worker:${namespace}`,
           () => memory.resumePendingWork(),
@@ -385,6 +394,35 @@ export class StrataGateRuntime {
       await run
     } finally {
       if (this.backgroundNamespaceRuns.get(namespace) === run) this.backgroundNamespaceRuns.delete(namespace)
+    }
+  }
+
+  private wakeBackgroundWorker(): void {
+    if (this.closed) return
+    if (this.backgroundWorkerTimer) {
+      clearTimeout(this.backgroundWorkerTimer)
+      this.backgroundWorkerTimer = undefined
+    }
+    if (this.backgroundWorkerRun) {
+      this.backgroundWorkerWakePending = true
+      return
+    }
+    this.scheduleBackgroundWorker(0)
+  }
+
+  private wakeModelWorkers(): void {
+    if (this.closed) return
+    this.wakeBackgroundWorker()
+    for (const reference of this.knownSessions.values()) {
+      const session = reference.deref()
+      if (!session || !this.models.isReady(session)) continue
+      const opening = this.spaces.get(this.namespaceFor(session))
+      if (!opening) continue
+      void opening.then((memory) => {
+        if (this.closed || !this.models.isReady(session)) return
+        this.scheduleGraphMigration(session, memory)
+        this.scheduleBlockDerivation(session, memory)
+      }).catch((error: unknown) => this.onIngestError(error))
     }
   }
 
@@ -974,6 +1012,7 @@ export class StrataGateRuntime {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.disposeAdaptersUpdated()
     if (this.backgroundWorkerTimer) clearTimeout(this.backgroundWorkerTimer)
     this.backgroundWorkerTimer = undefined
     for (const timer of this.migrationTimers.values()) clearTimeout(timer)
@@ -991,6 +1030,7 @@ export class StrataGateRuntime {
     const settled = await Promise.allSettled(this.spaces.values())
     await Promise.allSettled(this.backgroundNamespaceRuns.values())
     if (this.backgroundWorkerRun) await Promise.allSettled([this.backgroundWorkerRun])
+    await Promise.allSettled(this.migrationRuns.values())
     await Promise.allSettled(this.derivationRuns.values())
     await Promise.allSettled(this.externalImportRuns.values())
     await Promise.all(settled.flatMap((result) => result.status === 'fulfilled' ? [result.value.close()] : []))
@@ -1619,6 +1659,9 @@ export class StrataGateRuntime {
           if (kind === 'event-extraction') return memory.retryEventExtraction(jobId)
           return memory.retryGraphProjection(jobId)
         }
+        if (!this.models.isReady(session)) {
+          throw new Error('StrataGate model adapter is not ready; retry after DSH finishes registering adapters')
+        }
         const result = session && this.namespaceFor(session) === key
           ? await this.models.run(session, retry)
           : await this.models.runDetached(threadId, retry)
@@ -1830,7 +1873,7 @@ export class StrataGateRuntime {
   private scheduleBlockDerivation(session: Session, memory: StrataGate): void {
     const threadId = String(session.id)
     const key = `${this.namespaceFor(session)}\u0000${threadId}`
-    if (this.closed || this.derivationTimers.has(key) || this.derivationRuns.has(key)) return
+    if (this.closed || !this.models.isReady(session) || this.derivationTimers.has(key) || this.derivationRuns.has(key)) return
     const pendingBlockIds = new Set(memory.listBlocks()
       .filter((block) => block.threadId === threadId && block.processingStatus === 'pending')
       .map((block) => block.id))
@@ -1846,7 +1889,7 @@ export class StrataGateRuntime {
     const delay = Math.max(0, Math.min(...retryTimes) - Date.now())
     const timer = setTimeout(() => {
       this.derivationTimers.delete(key)
-      if (this.closed) return
+      if (this.closed || !this.models.isReady(session)) return
       const failedBefore = this.failedCoreJobs(memory)
       const run = this.models.run(session, () => memory.resumePendingWork({ threadId }))
         .then(async (resumed) => {
@@ -1878,26 +1921,31 @@ export class StrataGateRuntime {
 
   private scheduleGraphMigration(session: Session, memory: StrataGate): void {
     const namespace = this.namespaceFor(session)
-    if (this.closed || this.migrationTimers.has(namespace)) return
+    if (this.closed || !this.models.isReady(session) || this.migrationTimers.has(namespace) || this.migrationRuns.has(namespace)) return
     if (typeof memory.listGraphProjectionJobs !== 'function') return
     const pending = memory.listGraphProjectionJobs().some((job) => graphProjectionCanRun(job))
     if (!pending) return
     const timer = setTimeout(() => {
       this.migrationTimers.delete(namespace)
-      if (this.closed) return
+      if (this.closed || !this.models.isReady(session)) return
       const failedBefore = this.failedCoreJobs(memory)
       const completedBefore = memory.listGraphProjectionJobs().filter(({ status }) => status === 'completed').length
-      void this.models.run(session, () => memory.resumePendingWork()).then(async () => {
+      let madeProgress = false
+      const run = this.models.run(session, () => memory.resumePendingWork()).then(async () => {
         await this.persistSuccessfulResponses(memory)
         this.noteNewCoreJobFailures(session, failedBefore, memory)
         const completedAfter = memory.listGraphProjectionJobs().filter(({ status }) => status === 'completed').length
-        // Continue only after durable progress. A failed batch waits for the
-        // next normal plugin wake-up instead of causing a retry/token storm.
-        if (completedAfter > completedBefore) this.scheduleGraphMigration(session, memory)
+        madeProgress = completedAfter > completedBefore
       }).catch((error: unknown) => {
         this.notePluginError(session, error)
         this.onIngestError(error)
+      }).finally(() => {
+        if (this.migrationRuns.get(namespace) === run) this.migrationRuns.delete(namespace)
+        // Continue only after durable progress. A failed batch waits for the
+        // next normal plugin wake-up instead of causing a retry/token storm.
+        if (madeProgress) this.scheduleGraphMigration(session, memory)
       })
+      this.migrationRuns.set(namespace, run)
     }, 1_500)
     timer.unref?.()
     this.migrationTimers.set(namespace, timer)

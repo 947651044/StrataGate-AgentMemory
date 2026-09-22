@@ -9,6 +9,11 @@ on:
         description: Exact package version committed on main
         required: true
         type: string
+      allow_unavailable_dsh_0_1_5:
+        description: Explicitly skip the unavailable DSH 0.1.5 smoke and verify 0.1.2 only
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -82,7 +87,12 @@ jobs:
           node scripts/verify-package.mjs
       - name: Pack release assets from the checked-out source
         shell: bash
+        env:
+          DSH_VERSION: ${{ inputs.allow_unavailable_dsh_0_1_5 && '0.1.2-rc.1' || '' }}
         run: |
+          if [ -n "$DSH_VERSION" ]; then
+            echo "::warning::DSH 0.1.5 smoke was explicitly waived; verifying $DSH_VERSION only"
+          fi
           versioned="stratagate-dsh-${VERSION}.tgz"
           source_asset="stratagate-dsh-${VERSION}-source.tar.gz"
           npm pack --silent
