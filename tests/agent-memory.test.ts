@@ -130,7 +130,9 @@ describe('SessionAgentMemoryStore', () => {
 
   it('keeps :memory: databases cache-only and reports persistence errors without throwing', async () => {
     const errors: unknown[] = []
-    const store = new SessionAgentMemoryStore('Z:\\definitely\\missing\\directory\\memory.db', OPTIONS, (error) => errors.push(error))
+    // A parent directory that never exists: DatabaseSync cannot open it on any platform.
+    const unwritable = join(tmpdir(), 'stratagate-agent-missing-parent', 'nested', 'memory.db')
+    const store = new SessionAgentMemoryStore(unwritable, OPTIONS, (error) => errors.push(error))
     try {
       const { entry } = store.record('s1', '事实。', 'fact')
       expect(entry.status).toBe('active')
