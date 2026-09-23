@@ -2063,12 +2063,12 @@ const PROFILE_FIELD_LABELS: Record<ProfileField, string> = {
 }
 
 function proposalAuthorizesProfileChange(proposal: string, field: string, value: string): boolean {
-  if (!(field in PROFILE_FIELDS) || !proposal.includes('同意')) return false
+  if (!(field in PROFILE_FIELDS) || !/请回复\s*[“"]?同意[”"]?/u.test(proposal)) return false
   const namedFields = (Object.keys(PROFILE_FIELDS) as ProfileField[])
     .filter((candidate) => proposal.includes(candidate) || proposal.includes(PROFILE_FIELD_LABELS[candidate]))
   if (namedFields.length !== 1 || namedFields[0] !== field) return false
-  const proposedValues = [...proposal.matchAll(/(?:改为|设为|设置为|更新为|新值\s*[:：])\s*[“"]([^”"]*)[”"]/g)]
-  return proposedValues.length === 1 && proposedValues[0]![1] === value
+  const questions = [...proposal.matchAll(/(?:^|[。！？\n])\s*(?:要|是否|请问)?\s*(?:将|把)\s*[^。！？\n]*?(?:改为|修改为|设为|设置为|更新为)\s*[“"]([^”"]*)[”"]\s*吗[？?]/gu)]
+  return questions.length === 1 && questions[0]![1] === value
 }
 
 function directUserProfileRequest(userText: string, field: string, value: string): boolean {
@@ -2097,11 +2097,15 @@ function directUserProfileRequest(userText: string, field: string, value: string
   // Require a positive, field-specific instruction with the complete requested
   // value. A keyword occurring in a denial or unrelated fact is insufficient.
   const natural: Partial<Record<ProfileField, RegExp[]>> = {
-    userPreferredName: [/^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:请)?(?:都)?(?:叫我|称呼我(?:为)?)(.+)$/u],
+    userPreferredName: [
+      /^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:请)?(?:都)?(?:叫我|称呼我(?:为)?)(.+)$/u,
+      /^你(?:以后|今后|从现在(?:起|开始))叫我(.+)$/u,
+      /^我希望你(?:以后|今后|从现在(?:起|开始))叫我(.+)$/u,
+    ],
     assistantPreferredName: [
-      /^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:请)?(?:你叫|叫你|称呼你(?:为)?)(.+)$/u,
-      /^我希望你(?:以后|今后|从现在(?:起|开始))叫(.+)$/u,
-      /^你(?:以后|今后|从现在(?:起|开始))叫(.+)$/u,
+      /^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:请)?(?:你叫(?!我)|叫你|称呼你(?:为)?)(.+)$/u,
+      /^我希望你(?:以后|今后|从现在(?:起|开始))叫(?!我)(.+)$/u,
+      /^你(?:以后|今后|从现在(?:起|开始))叫(?!我)(.+)$/u,
     ],
     preferredLanguage: [
       /^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:请)?(?:默认)?(?:都)?(?:用|说|使用)(.+?)(?:回复|回答|交流)?$/u,
