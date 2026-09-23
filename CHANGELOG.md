@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Let the agent record durable long-term memories through `memory_remember`: each recording is written into a new isolated `agent_events` pool (schema v12) that mirrors the Event model, gets a synthetic `agent-memory:` provenance block, and projects into the Knowledge Graph.
+- Resolve duplicates and conflicts before writing: exact and near duplicates reinforce the existing card, ambiguous overlap gets one synchronous model adjudication reusing the external-memory decision contract (add/merge/supersede/conflict/ignore with a non-destructive low-confidence downgrade), and clear-new facts write without a model call.
+- Merge agent-recorded Events into the same BM25/RRF retrieval ranking as conversation-derived Events with `source: 'agent-recorded'` cards, persist them across sessions, and expose them via `/api/stratagate/agent-memories`; `agentMemoryEnabled: false` disables and unregisters the feature.
+
 ## 0.2.79 - 2026-09-22
 
 - Keep background Block summary, Event extraction, and Graph projection jobs pending without consuming attempts until the selected DSH model adapter is registered, then resume them immediately after adapter updates.

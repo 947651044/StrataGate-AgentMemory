@@ -89,18 +89,33 @@ Automatic context contains only compact Event and fact fields from other convers
 
 Every explicit retrieval creates an independent batch. The model passes its `batch_id` to `memory_assess`, then closes that same batch with `memory_record_use`. It passes the exact `evidence_refs` from that batch used in its answer, or `[]` when it used none. Selected Event evidence is reinforced once; an empty list writes a zero-increment receipt with the real batch ID.
 
-### Agent-recorded session memory
+### Agent-recorded memory
 
 `memory_remember` lets the agent record facts proactively: explicit user preferences or
-corrections, decisions, durable project facts, or anything the user asks to remember. These
-notes are deliberately separate from the derived memory above:
+corrections, decisions, durable project facts, or anything the user asks to remember.
+Recordings enter the same long-term Event pipeline as conversation-derived memory, with
+two differences:
 
-- **Session-scoped only.** Notes are keyed by the DSH session id regardless of `namespaceMode`; they never appear in other sessions and are not promoted into Blocks, Events, or the Knowledge Graph.
-- **Proportional time decay.** A note's weight is `exp(-λ · hours since its last reinforcement)`, computed lazily at read time — no timers. `agentMemoryDecayPerHour` defaults to `0.7` (half-life ≈ 1 hour). Recording the same fact again refreshes the note's anchor instead of duplicating it.
-- **Rehearsal through use.** Citing a note via the normal `memory_assess` → `memory_record_use` flow resets its decay anchor. Search results include notes with `agentmem:` evidence refs in the same batch as Event results; `memory_record_use` reports them under `agentMemories`.
-- **Archive, not delete.** When the weight falls below `agentMemoryArchiveThreshold` (default `0.05`), the note is marked `archived`: it no longer appears in `memory_search_events`, automatic context, or explicit recall, but it stays in the database and remains visible under `/api/stratagate/agent-memories` (query parameter `includeArchived=true`).
-- **Automatic surfacing.** Up to four active notes (≈240-token sub-budget) are appended to the automatic context section as `SessionAgentMemory:` lines so recorded facts resurface in later turns.
-- **Bounded.** A session keeps at most `agentMemoryMaxActive` (default `64`) active notes; further recordings archive the lowest-weight entries first. The feature can be disabled entirely with `agentMemoryEnabled: false`, which also unregisters the tool.
+- **Isolated storage.** Agent-recorded Events live in dedicated `agent_events` tables that
+  mirror the Event model but are physically separate from the passive conversation tables.
+  Each recording gets a synthetic `agent-memory:` provenance Block whose raw content is the
+  recorded sentence, marked `shouldExtract: false` so derivation never re-processes it.
+- **Pre-write resolution.** Before writing, StrataGate searches existing memory (both pools)
+  for duplicates and conflicts. Exact and near duplicates reinforce the existing card instead
+  of writing a new one. Ambiguous lexical overlap triggers one synchronous model adjudication
+  reusing the external-memory decision contract: `ADD`, `MERGE`, `SUPERSEDE` (high confidence
+  only — low-confidence merge/supersede is downgraded to a non-destructive conflict mark),
+  `CONFLICT` (symmetric back-links), or `IGNORE`. The tool result reports `action`, `gate`,
+  and `reason`. Facts with no meaningful overlap write directly without a model call.
+
+Everything else is ordinary Event behavior: agent recordings project into the Knowledge
+Graph, merge with passive Events in the same BM25/RRF retrieval ranking (cards carry
+`source: 'agent-recorded'`), persist across sessions, decay and reinforce through the same
+turn-based lifecycle (`memory_assess` → `memory_record_use`), and can be forgotten through
+that lifecycle. The memory dashboard lists them under
+`/api/stratagate/agent-memories` (query parameters `session` and `includeArchived=true`).
+The feature can be disabled entirely with `agentMemoryEnabled: false`, which also
+unregisters the tool.
 
 The plugin registers these tools:
 
@@ -160,9 +175,6 @@ config:
   blockDecayLambda: 0.3
   ingestSubagents: false
   agentMemoryEnabled: true
-  agentMemoryDecayPerHour: 0.7
-  agentMemoryArchiveThreshold: 0.05
-  agentMemoryMaxActive: 64
   maxOutputTokens: 10000
   structuredTaskTimeoutMs: 120000
   structuredReasoningEffort: auto # auto | force-off
@@ -179,7 +191,7 @@ config:
 
 `blockDecayLambda` controls decay by the distance between a Block's pointer anchor and the latest sealed Block in the same DSH session. It defaults to `0.3`. Smaller values decay more slowly; values above `0.4` are not recommended. Turns in the open tail do not increase Block age.
 
-The `agentMemory*` keys configure agent-recorded session memory (see above): `agentMemoryEnabled` (default `true`), `agentMemoryDecayPerHour` (default `0.7`, the λ in the notes' per-hour exponential decay), `agentMemoryArchiveThreshold` (default `0.05`), and `agentMemoryMaxActive` (default `64`). Notes are stored in the same SQLite database as the rest of StrataGate data.
+`agentMemoryEnabled` (default `true`) controls agent-recorded memory (see above); disabling it also unregisters `memory_remember`. Recordings are stored in the same SQLite database as the rest of StrataGate data.
 
 If `provider` and `model` are omitted, memory processing uses the session's latest request route, then the DSH default model as fallback. They must be configured as a pair.
 

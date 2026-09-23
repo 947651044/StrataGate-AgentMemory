@@ -136,7 +136,7 @@ describe('DSH plugin composition', () => {
       }))
       expect(prompt.sections).toContainEqual(expect.objectContaining({
         name: 'tool:stratagate-memory',
-        text: expect.stringMatching(/memory_remember[\s\S]*session-scoped[\s\S]*archive threshold/),
+        text: expect.stringMatching(/memory_remember[\s\S]*long-term memory[\s\S]*conflict-marked/),
       }))
       expect(prompt.sections).toContainEqual(expect.objectContaining({
         name: 'tool:stratagate-feedback',
@@ -171,7 +171,7 @@ describe('DSH plugin composition', () => {
       expect(feedbackPrepare).toBeDefined()
       expect(recordUse).toBeDefined()
       expect(remember).toBeDefined()
-      expect(remember!.description).toMatch(/session-scoped[\s\S]*decay over time/)
+      expect(remember!.description).toMatch(/durable long-term StrataGate memory[\s\S]*conflict-marked/)
       const remembered = await remember!.execute({
         content: '用户偏好 pnpm 作为包管理器。',
         category: 'preference',
@@ -181,14 +181,14 @@ describe('DSH plugin composition', () => {
       } as never) as unknown as Record<string, unknown>
       expect(remembered).toMatchObject({
         recorded: true,
-        sessionId: 'auto-context-session',
-        status: 'active',
-        activeCount: 1,
+        action: 'ADDED',
+        gate: 'clear-new',
+        namespace: expect.stringContaining('dsh:project:'),
       })
       const autoPrompt = await ctx.systemPrompt.assemble({ agent })
       expect(autoPrompt.contexts).toContainEqual(expect.objectContaining({
         name: 'stratagate:auto-memory',
-        text: expect.stringMatching(/SessionAgentMemory:[\s\S]*用户偏好 pnpm 作为包管理器。/),
+        text: expect.stringContaining('[Activated long-term memory]'),
       }))
       expect(feedbackPrepare!.description).toMatch(/directly requests it[\s\S]*explicitly agrees/)
       expect(feedbackPrepare!.description).toMatch(/Never submit anything to GitHub[\s\S]*feedbackUrl/)
@@ -232,6 +232,26 @@ describe('DSH plugin composition', () => {
         signal: new AbortController().signal,
       })
       expect(steered).toHaveLength(1)
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('unregisters memory_remember when agent memory is disabled', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-dsh-agent-disabled-'))
+    const ctx = new Context()
+    try {
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(SystemPrompt, {})
+      await ctx.plugin(ToolRuntime, { mode: 'native' })
+      await ctx.plugin(AgentDefaultModelConfig, { provider: 'test', model: 'test' })
+      ctx.provide('webServer', { host: '127.0.0.1', port: 10260, register: () => () => {} })
+      await ctx.plugin(plugin, { database: join(directory, 'memory.db'), agentMemoryEnabled: false })
+
+      const names = ctx.tools.schemas().map(({ name }) => name)
+      expect(names).not.toContain('memory_remember')
+      expect(ctx.tools.get('memory_remember')).toBeUndefined()
     } finally {
       await ctx.fiber.dispose()
       await rm(directory, { recursive: true, force: true })

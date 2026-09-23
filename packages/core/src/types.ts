@@ -295,6 +295,61 @@ export interface ExternalMemoryUndoResult {
   restoredEventIds: string[];
 }
 
+/** Taxonomy the agent picks from when recording a memory through memory_remember. */
+export type AgentMemoryCategory = 'preference' | 'decision' | 'correction' | 'fact';
+
+/** How the pre-write gate reached its verdict. */
+export type AgentEventGatePath =
+  | 'exact-duplicate'
+  | 'near-duplicate'
+  | 'clear-new'
+  | 'decider'
+  | 'heuristic-conflict'
+  | 'decider-error';
+
+/** Outcome of the gate; agent events are ordinary Events once recorded. */
+export type AgentEventGateAction =
+  | 'ADDED'
+  | 'REINFORCED'
+  | 'MERGED'
+  | 'SUPERSEDED'
+  | 'CONFLICT_MARKED'
+  | 'IGNORED';
+
+export interface AgentEventRecordOptions {
+  content: string;
+  category?: AgentMemoryCategory;
+  /**
+   * Optional synchronous adjudicator reusing the external-memory decision
+   * contract. Omitted → deterministic/heuristic policy only.
+   */
+  decider?: ExternalMemoryDecider;
+  /** Top-K search width for the pre-write lookup. Default 5, clamped 1..20. */
+  topK?: number;
+  /** Recording session id, stored as temporal.threadId for dashboard grouping. */
+  threadId?: string;
+  importedAt?: string;
+}
+
+export interface AgentEventRecordResult {
+  action: AgentEventGateAction;
+  gate: AgentEventGatePath;
+  recorded: boolean;
+  /** Created event (ADDED/MERGED/SUPERSEDED/CONFLICT_MARKED). */
+  eventId?: string;
+  /** Existing event reinforced instead of writing (REINFORCED). */
+  reinforcedEventId?: string;
+  existingEventIds: string[];
+  matchedEventIds: string[];
+  /** Gate confidence; not the stored event confidence. */
+  confidence?: number;
+  downgradedFrom?: 'MERGE' | 'SUPERSEDE';
+  reason?: string;
+  sourceBlockId?: string;
+  /** memoryWeightAt(event, currentTurn) at write time. */
+  weight?: number;
+}
+
 export type MemoryElementType = 'person' | 'project' | 'organization' | 'tool' | 'place';
 export type ElementFactMode = 'state' | 'set' | 'relation';
 export type ElementFactStatus = 'active' | 'superseded' | 'disputed';

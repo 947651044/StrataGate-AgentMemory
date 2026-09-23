@@ -13,9 +13,6 @@ export interface Config {
   blockDecayLambda?: number
   ingestSubagents?: boolean
   agentMemoryEnabled?: boolean
-  agentMemoryDecayPerHour?: number
-  agentMemoryArchiveThreshold?: number
-  agentMemoryMaxActive?: number
   provider?: string
   model?: string
   maxOutputTokens?: number
@@ -36,9 +33,6 @@ export interface ResolvedConfig {
   blockDecayLambda: number
   ingestSubagents: boolean
   agentMemoryEnabled?: boolean
-  agentMemoryDecayPerHour?: number
-  agentMemoryArchiveThreshold?: number
-  agentMemoryMaxActive?: number
   provider?: string
   model?: string
   maxOutputTokens: number
@@ -84,16 +78,7 @@ export const Config: z<Config> = z.object({
   ingestSubagents: z.boolean().default(false),
   agentMemoryEnabled: z.boolean().default(true)
     .description('启用 agent 主动记忆（memory_remember）')
-    .comment('开启后 agent 可以在会话中主动记录值得记忆的事实；仅当前会话有效，不跨会话共享。'),
-  agentMemoryDecayPerHour: z.number().step(0.05).min(0).default(0.7)
-    .description('主动记忆衰减系数 λ（每小时）')
-    .comment('权重 = exp(-λ × 距上次强化的小时数)；默认 0.7（半衰期约 1 小时）。数字越小遗忘越慢。'),
-  agentMemoryArchiveThreshold: z.number().step(0.05).min(0).max(1).default(0.05)
-    .description('主动记忆归档阈值')
-    .comment('权重低于该值时标记为 archived：不再参与检索与自动注入，但可在管理面板查看，不会被删除。'),
-  agentMemoryMaxActive: z.natural().min(1).default(64)
-    .description('每个会话的主动记忆上限')
-    .comment('活跃条数达到上限后，新记录会归档权重最低的旧条目。'),
+    .comment('开启后 agent 可以把值得记忆的事实写入长期记忆 Event 管线：进入数据库、参与知识图谱、跨会话共享；写入前会自动检测并消解重复与冲突。'),
   provider: z.string(),
   model: z.string(),
   maxOutputTokens: z.natural().min(256).default(2_048),
@@ -125,9 +110,6 @@ export function resolveConfig(config: Config): ResolvedConfig {
     blockDecayLambda: Math.max(0, config.blockDecayLambda ?? 0.3),
     ingestSubagents: config.ingestSubagents ?? false,
     agentMemoryEnabled: config.agentMemoryEnabled ?? true,
-    agentMemoryDecayPerHour: Math.max(0, config.agentMemoryDecayPerHour ?? 0.7),
-    agentMemoryArchiveThreshold: Math.min(1, Math.max(0, config.agentMemoryArchiveThreshold ?? 0.05)),
-    agentMemoryMaxActive: Math.max(1, Math.floor(config.agentMemoryMaxActive ?? 64)),
     ...(provider && model ? { provider, model } : {}),
     maxOutputTokens: Math.max(256, Math.floor(config.maxOutputTokens ?? 2_048)),
     structuredTaskTimeoutMs: Math.max(1_000, Math.floor(config.structuredTaskTimeoutMs ?? 120_000)),

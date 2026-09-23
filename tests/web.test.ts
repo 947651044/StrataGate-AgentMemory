@@ -8,7 +8,7 @@ import { handleAdminRequest, type WebResponse } from '../src/web.js'
 const fullFailure = 'StrataGate model response was not valid JSON\nRaw response (full):\n' + 'x'.repeat(600)
 
 const snapshot: StrataGateSnapshot = {
-  schemaVersion: 11,
+  schemaVersion: 12,
   currentTurn: 8,
   blockTurnSize: 4,
   blockDecayLambda: 0.3,
@@ -61,6 +61,7 @@ const snapshot: StrataGateSnapshot = {
     createdAt: '2026-08-18T00:00:00.000Z',
     updatedAt: '2026-08-18T00:00:00.000Z',
   }],
+  agentEvents: [],
   graphNodes: [{
     id: 'node_1', name: 'pnpm', type: 'tool', aliases: [], currentState: '项目包管理器', facts: [],
     status: 'active', confidence: 0.95, sourceEventIds: ['evt_1'],
@@ -208,21 +209,19 @@ describe('StrataGate admin routes', () => {
     } }])
   })
 
-  it('lists agent-recorded session memories through a read-only route', async () => {
+  it('lists agent-recorded memories through a read-only route', async () => {
     const calls: Array<unknown> = []
     const agentRuntime = {
-      adminAgentMemories: (options: unknown) => {
+      adminAgentMemories: async (options: unknown) => {
         calls.push(options)
         return {
-          items: [{ id: 'agentmem_1', sessionId: 's1', content: '用户偏好 pnpm。', status: 'active', weight: 1 }],
+          items: [{ id: 'evt_1', sessionId: 's1', content: '用户偏好 pnpm。', status: 'active', weight: 1 }],
           total: 1,
-          decayPerHour: 0.7,
-          archiveThreshold: 0.05,
         }
       },
     } as unknown as StrataGateRuntime
     const result = await request('/api/stratagate/agent-memories?session=s1&includeArchived=true', 'GET', agentRuntime)
-    expect(result).toMatchObject({ status: 200, body: { total: 1, items: [{ id: 'agentmem_1', status: 'active' }] } })
+    expect(result).toMatchObject({ status: 200, body: { total: 1, items: [{ id: 'evt_1', status: 'active' }] } })
     const filtered = await request('/api/stratagate/agent-memories', 'GET', agentRuntime)
     expect(filtered.status).toBe(200)
     expect(calls[0]).toEqual({ sessionId: 's1', includeArchived: true })

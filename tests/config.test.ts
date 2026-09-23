@@ -12,9 +12,6 @@ describe('DeepSeek Harness plugin config', () => {
       blockDecayLambda: 0.3,
       ingestSubagents: false,
       agentMemoryEnabled: true,
-      agentMemoryDecayPerHour: 0.7,
-      agentMemoryArchiveThreshold: 0.05,
-      agentMemoryMaxActive: 64,
       maxOutputTokens: 2048,
       structuredTaskTimeoutMs: 120000,
       structuredReasoningEffort: 'auto',
@@ -41,29 +38,10 @@ describe('DeepSeek Harness plugin config', () => {
     expect(resolveConfig({ database: 'memory.db', blockDecayLambda: 0.15 }).blockDecayLambda).toBe(0.15)
   })
 
-  it('exposes agent memory knobs with safe defaults and clamps', () => {
+  it('exposes the agent memory switch with a safe default', () => {
     expect(Config.dict?.agentMemoryEnabled?.meta).toMatchObject({ default: true })
-    expect(Config.dict?.agentMemoryDecayPerHour?.meta).toMatchObject({ default: 0.7, min: 0 })
-    expect(Config.dict?.agentMemoryArchiveThreshold?.meta).toMatchObject({ default: 0.05, min: 0, max: 1 })
-    expect(Config.dict?.agentMemoryMaxActive?.meta).toMatchObject({ default: 64, min: 1 })
-    expect(resolveConfig({ database: 'memory.db' })).toMatchObject({
-      agentMemoryEnabled: true,
-      agentMemoryDecayPerHour: 0.7,
-      agentMemoryArchiveThreshold: 0.05,
-      agentMemoryMaxActive: 64,
-    })
-    expect(resolveConfig({
-      database: 'memory.db',
-      agentMemoryEnabled: false,
-      agentMemoryDecayPerHour: -2,
-      agentMemoryArchiveThreshold: 7,
-      agentMemoryMaxActive: 0.4,
-    })).toMatchObject({
-      agentMemoryEnabled: false,
-      agentMemoryDecayPerHour: 0,
-      agentMemoryArchiveThreshold: 1,
-      agentMemoryMaxActive: 1,
-    })
+    expect(resolveConfig({ database: 'memory.db' })).toMatchObject({ agentMemoryEnabled: true })
+    expect(resolveConfig({ database: 'memory.db', agentMemoryEnabled: false }).agentMemoryEnabled).toBe(false)
   })
 
   it('resolves the structured reasoning effort policy with a safe default', () => {

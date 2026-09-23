@@ -1471,7 +1471,7 @@ export async function handleAdminRequest(runtime: StrataGateRuntime, req: WebReq
     else if (path === '/api/stratagate/audit') sendJson(res, 200, await audit(runtime, url))
     else if (path === '/api/stratagate/agent-memories') {
       const sessionId = url.searchParams.get('session')?.trim() ?? ''
-      sendJson(res, 200, runtime.adminAgentMemories({
+      sendJson(res, 200, await runtime.adminAgentMemories({
         ...(sessionId ? { sessionId } : {}),
         ...(url.searchParams.get('includeArchived') === 'true' ? { includeArchived: true } : {}),
       }))
