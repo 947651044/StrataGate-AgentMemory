@@ -246,6 +246,13 @@ try {
     // the bootstrap resolver must force StrataGate onto the host-owned tree.
     run(process.execPath, [cli, 'plugin', '--profile', 'web', 'add', tarball], root, dshEnv)
     assert(existsSync(stale), `${version}: upgrade unexpectedly deleted the seeded legacy package`)
+    // The clean CLI web templates can enable live user-patch watching without
+    // mounting HMR. This smoke starts a fresh process for every patch check,
+    // so startup loading exercises the installed plugin without that host bug.
+    const manifestPath = join(profile, 'package.json')
+    const installedManifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    installedManifest.dsh.profile.patchReload = 'startup'
+    writeFileSync(manifestPath, JSON.stringify(installedManifest, null, 2))
     const repair = run(process.execPath, [cli, 'plugin', '--profile', 'web', 'exec', 'stratagate-dsh-repair'], root, dshEnv)
     assert(repair.includes('Quarantined'), `${version}: profile repair did not report a quarantine`)
     assert(!existsSync(stale), `${version}: profile repair left the stale DSH package active`)
