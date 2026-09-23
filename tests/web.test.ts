@@ -1246,6 +1246,12 @@ describe('StrataGate admin routes', () => {
       .toMatchObject({ status: 200, body: { field: 'preferredLanguage', value: '中文', modified: true } })
     expect(calls).toEqual([{ field: 'preferredLanguage', value: '中文', source: 'settings' }])
     expect(await request('/api/stratagate/profile', 'GET', profileRuntime)).toMatchObject({ body: { preferredLanguage: '中文' } })
+    const literal = 'Use password: abc as an example; token=demo stays literal.'
+    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: literal }))
+      .toMatchObject({ body: { value: literal } })
+    expect(await request('/api/stratagate/profile', 'GET', profileRuntime)).toMatchObject({ body: { preferredLanguage: literal } })
+    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: `${literal} More.` }))
+      .toMatchObject({ body: { value: `${literal} More.` } })
     expect((await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: '中文', other: true })).status).toBe(400)
   })
 })

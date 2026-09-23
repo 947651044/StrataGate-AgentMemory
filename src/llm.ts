@@ -619,7 +619,9 @@ export class DshModelBridge {
           type: 'function',
           function: { name: STRUCTURED_TOOLS[kind].name },
         },
-        maxTokens: this.config.maxOutputTokens,
+        maxTokens: kind === 'profileMaintenance'
+          ? Math.max(this.config.maxOutputTokens, Math.min(12_000, 512 + 2 * Array.from(JSON.stringify(payload)).length))
+          : this.config.maxOutputTokens,
         sessionId: execution.sessionId,
         purpose: 'compaction',
       }

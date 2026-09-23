@@ -79,8 +79,13 @@ try {
     const hostManifest = JSON.parse(readFileSync(join(hostModules, '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))
     const dshPackages = Object.keys(hostManifest.dependencies ?? {}).filter((name) => name.startsWith('@deepseek-ai/'))
     for (const name of dshPackages) {
-      const installed = JSON.parse(readFileSync(join(hostModules, ...name.split('/'), 'package.json'), 'utf8'))
-      run(['install', `${name}@${installed.version}`, '--ignore-scripts', '--package-lock=false'], installRoot)
+      const hostPath = join(hostModules, ...name.split('/'), 'package.json')
+      // Some DSH prereleases declare a package that npm nests or omits from
+      // the top-level tree. Its declared version remains a valid install spec.
+      const version = existsSync(hostPath)
+        ? JSON.parse(readFileSync(hostPath, 'utf8')).version
+        : hostManifest.dependencies[name]
+      run(['install', `${name}@${version}`, '--ignore-scripts', '--package-lock=false'], installRoot)
     }
   }
   run(['install', tarball, '--ignore-scripts', '--package-lock=false', '--legacy-peer-deps'], installRoot)

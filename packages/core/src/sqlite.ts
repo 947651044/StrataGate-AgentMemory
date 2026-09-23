@@ -263,6 +263,13 @@ CREATE TABLE IF NOT EXISTS persistent_profile_maintenance (
   input_json TEXT NOT NULL
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS persistent_profile_maintenance_failures (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  input_json TEXT NOT NULL,
+  failure_count INTEGER NOT NULL,
+  next_retry_at TEXT NOT NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS memory_spaces (
   namespace TEXT PRIMARY KEY,
   schema_version INTEGER NOT NULL,
@@ -917,6 +924,15 @@ export class SqliteStorage implements StorageAdapter {
     return row ? { lastSucceededAt: row.last_succeeded_at, inputJson: row.input_json } : null;
   }
 
+  recordProfileMaintenanceFailure(profile: PersistentProfile, now = Date.now()): void {
+    this.assertOpen();
+    const inputJson = JSON.stringify(profile);
+    const previous = this.database.prepare('SELECT input_json, failure_count FROM persistent_profile_maintenance_failures WHERE id = 1').get() as { input_json: string; failure_count: number } | undefined;
+    const count = previous?.input_json === inputJson ? previous.failure_count + 1 : 1;
+    const nextRetryAt = new Date(now + Math.min(count * 5, 30) * 60 * 1000).toISOString();
+    this.database.prepare('INSERT INTO persistent_profile_maintenance_failures (id, input_json, failure_count, next_retry_at) VALUES (1, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET input_json = excluded.input_json, failure_count = excluded.failure_count, next_retry_at = excluded.next_retry_at').run(inputJson, count, nextRetryAt);
+  }
+
   updateProfileField(field: string, value: string, source: ProfileChangeSource, sourceMessageId?: string | null): { field: ProfileField; value: string; modified: boolean } {
     this.assertOpen();
     if (!isProfileField(field)) throw new TypeError(`Unknown Persistent Profile field: ${field}`);
@@ -946,12 +962,16 @@ export class SqliteStorage implements StorageAdapter {
         if (current[field] !== proposed[field]) this.writeProfileField(field, current[field], proposed[field], 'maintenance', null, now);
       }
       this.database.prepare('INSERT INTO persistent_profile_maintenance (id, last_succeeded_at, input_json) VALUES (1, ?, ?) ON CONFLICT (id) DO UPDATE SET last_succeeded_at = excluded.last_succeeded_at, input_json = excluded.input_json').run(now, JSON.stringify(proposed));
+      this.database.prepare('DELETE FROM persistent_profile_maintenance_failures WHERE id = 1').run();
       return true;
     });
   }
 
   profileMaintenanceDue(now = Date.now()): boolean {
     const profile = this.getPersistentProfile();
+    const failed = this.database.prepare('SELECT input_json, failure_count, next_retry_at FROM persistent_profile_maintenance_failures WHERE id = 1').get() as { input_json: string; failure_count: number; next_retry_at: string } | undefined;
+    if (failed?.input_json === JSON.stringify(profile)
+      && (failed.failure_count >= 3 || now < Date.parse(failed.next_retry_at))) return false;
     const state = this.getProfileMaintenanceState();
     if (!profileMaintenanceDue(profile, state?.lastSucceededAt ?? null, now)) return false;
     // A high-capacity profile that could not be compressed is retried after 24h,

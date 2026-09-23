@@ -138,11 +138,11 @@ export interface WebServerLike {
   }): () => void
 }
 
-function sendJson(res: WebResponse, status: number, body: unknown): void {
+function sendJson(res: WebResponse, status: number, body: unknown, preserveProfileText = false): void {
   res.statusCode = status
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
-  res.end(JSON.stringify(redactValue(body)))
+  res.end(JSON.stringify(preserveProfileText ? body : redactValue(body)))
 }
 
 function numeric(value: string | null, fallback: number, minimum: number, maximum: number): number {
@@ -1468,7 +1468,9 @@ export async function handleAdminRequest(runtime: StrataGateRuntime, req: WebReq
     if (path === '/api/stratagate/feedback') {
       sendJson(res, 200, await feedback(runtime, req, url))
     } else if (path === '/api/stratagate/profile') {
-      sendJson(res, 200, await persistentProfile(runtime, req))
+      // This is the authenticated Settings editor. Redacting its editable values
+      // would replace user data with placeholders on the next save.
+      sendJson(res, 200, await persistentProfile(runtime, req), true)
     } else if (path === '/api/stratagate/settings') {
       if (req.method !== 'PATCH') throw new AdminHttpError(405, 'StrataGate settings require PATCH')
       sendJson(res, 200, await updateSettings(runtime, url))

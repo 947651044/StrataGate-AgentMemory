@@ -71,6 +71,29 @@ describe('installation-wide Persistent Profile', () => {
       standingInstructions: 'x'.repeat(1000), persistentNotes: 'x'.repeat(1200), userPreferredName: 'x'.repeat(100) }, new Date().toISOString())).toBe(true);
   });
 
+  it('bounds failed maintenance attempts durably until Profile content changes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-retry-'));
+    const filename = join(directory, 'memory.db');
+    try {
+      const first = new SqliteStorage({ filename });
+      first.updateProfileField('responsePreferences', '中文'.repeat(500), 'settings');
+      const snapshot = first.getPersistentProfile();
+      const start = Date.parse('2026-09-23T00:00:00.000Z');
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        first.recordProfileMaintenanceFailure(snapshot, start + attempt * 60 * 60 * 1000);
+        expect(first.profileMaintenanceDue(start + attempt * 60 * 60 * 1000 + 1000)).toBe(false);
+      }
+      await first.close();
+      const reopened = new SqliteStorage({ filename });
+      expect(reopened.profileMaintenanceDue(start + 48 * 60 * 60 * 1000)).toBe(false);
+      reopened.updateProfileField('responsePreferences', '中文'.repeat(499), 'settings');
+      expect(reopened.profileMaintenanceDue(start + 48 * 60 * 60 * 1000)).toBe(true);
+      await reopened.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('upgrades a version 11 database without losing existing rows', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-migration-'));
     const filename = join(directory, 'memory.db');
