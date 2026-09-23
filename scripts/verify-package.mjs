@@ -85,7 +85,7 @@ try {
       const version = existsSync(hostPath)
         ? JSON.parse(readFileSync(hostPath, 'utf8')).version
         : hostManifest.dependencies[name]
-      run(['install', `${name}@${version}`, '--ignore-scripts', '--package-lock=false'], installRoot)
+      run(['install', `${name}@${version}`, '--ignore-scripts', '--package-lock=false', '--legacy-peer-deps'], installRoot)
     }
   }
   run(['install', tarball, '--ignore-scripts', '--package-lock=false', '--legacy-peer-deps'], installRoot)

@@ -927,9 +927,11 @@ export class SqliteStorage implements StorageAdapter {
   recordProfileMaintenanceFailure(profile: PersistentProfile, now = Date.now()): void {
     this.assertOpen();
     const inputJson = JSON.stringify(profile);
-    const previous = this.database.prepare('SELECT input_json, failure_count FROM persistent_profile_maintenance_failures WHERE id = 1').get() as { input_json: string; failure_count: number } | undefined;
-    const count = previous?.input_json === inputJson ? previous.failure_count + 1 : 1;
-    const nextRetryAt = new Date(now + Math.min(count * 5, 30) * 60 * 1000).toISOString();
+    const previous = this.database.prepare('SELECT input_json, failure_count, next_retry_at FROM persistent_profile_maintenance_failures WHERE id = 1').get() as { input_json: string; failure_count: number; next_retry_at: string } | undefined;
+    const sameWindow = previous?.input_json === inputJson
+      && !(previous.failure_count >= 3 && now >= Date.parse(previous.next_retry_at));
+    const count = sameWindow ? previous!.failure_count + 1 : 1;
+    const nextRetryAt = new Date(now + (count >= 3 ? 24 * 60 : count * 5) * 60 * 1000).toISOString();
     this.database.prepare('INSERT INTO persistent_profile_maintenance_failures (id, input_json, failure_count, next_retry_at) VALUES (1, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET input_json = excluded.input_json, failure_count = excluded.failure_count, next_retry_at = excluded.next_retry_at').run(inputJson, count, nextRetryAt);
   }
 
@@ -971,7 +973,7 @@ export class SqliteStorage implements StorageAdapter {
     const profile = this.getPersistentProfile();
     const failed = this.database.prepare('SELECT input_json, failure_count, next_retry_at FROM persistent_profile_maintenance_failures WHERE id = 1').get() as { input_json: string; failure_count: number; next_retry_at: string } | undefined;
     if (failed?.input_json === JSON.stringify(profile)
-      && (failed.failure_count >= 3 || now < Date.parse(failed.next_retry_at))) return false;
+      && now < Date.parse(failed.next_retry_at)) return false;
     const state = this.getProfileMaintenanceState();
     if (!profileMaintenanceDue(profile, state?.lastSucceededAt ?? null, now)) return false;
     // A high-capacity profile that could not be compressed is retried after 24h,

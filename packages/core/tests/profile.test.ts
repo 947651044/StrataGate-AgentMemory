@@ -85,7 +85,10 @@ describe('installation-wide Persistent Profile', () => {
       }
       await first.close();
       const reopened = new SqliteStorage({ filename });
-      expect(reopened.profileMaintenanceDue(start + 48 * 60 * 60 * 1000)).toBe(false);
+      expect(reopened.profileMaintenanceDue(start + 26 * 60 * 60 * 1000)).toBe(false);
+      expect(reopened.profileMaintenanceDue(start + 28 * 60 * 60 * 1000)).toBe(true);
+      reopened.recordProfileMaintenanceFailure(snapshot, start + 28 * 60 * 60 * 1000);
+      expect(reopened.profileMaintenanceDue(start + 28 * 60 * 60 * 1000 + 1000)).toBe(false);
       reopened.updateProfileField('responsePreferences', '中文'.repeat(499), 'settings');
       expect(reopened.profileMaintenanceDue(start + 48 * 60 * 60 * 1000)).toBe(true);
       await reopened.close();

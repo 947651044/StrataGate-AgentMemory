@@ -2072,29 +2072,44 @@ function proposalAuthorizesProfileChange(proposal: string, field: string, value:
 }
 
 function directUserProfileRequest(userText: string, field: string, value: string): boolean {
-  if (!(field in PROFILE_FIELDS) || /^(?:不同意|拒绝|好的?|嗯|可以|不行|没问题|谢谢)[。！!？?\s]*$/.test(userText)) return false
-  const fieldCues: Record<ProfileField, RegExp> = {
-    userPreferredName: /称呼我|叫我|我的名字|我的称呼|userPreferredName/,
-    assistantPreferredName: /你叫|你的名字|称呼你|叫你|assistantPreferredName/,
-    preferredLanguage: /语言|中文|英文|英语|汉语|preferredLanguage/,
-    responsePreferences: /回复|回答|表达|风格|responsePreferences/,
-    standingInstructions: /要求|指令|遵守|standingInstructions/,
-    userBackground: /背景|身份|职业|userBackground/,
-    longTermGoals: /目标|计划|longTermGoals/,
-    persistentNotes: /常驻|记住|长期保留|persistentNotes/,
+  if (!(field in PROFILE_FIELDS)) return false
+  const request = userText.trim().replace(/[。！!？?\s]+$/u, '')
+  const namedFields = (Object.keys(PROFILE_FIELDS) as ProfileField[])
+    .filter((candidate) => request.includes(candidate) || request.includes(PROFILE_FIELD_LABELS[candidate]))
+  if (namedFields.length > 1 || (namedFields.length === 1 && namedFields[0] !== field)) return false
+  const stripValue = (text: string) => text.trim().replace(/^[“"]|[”"]$/g, '').trim()
+  const named = namedFields.length === 1
+    ? request.match(/(?:改为|改成|设为|设置为|更新为)\s*(.+)$/u)?.[1]
+    : undefined
+  if (named !== undefined) return stripValue(named) === value
+  if (namedFields.length === 1 && !value && /清空|清除|删除|置空|设为空|设置为空/.test(request)) return true
+  if (!value) return false
+
+  // Require a positive, field-specific instruction with the complete requested
+  // value. A keyword occurring in a denial or unrelated fact is insufficient.
+  const natural: Partial<Record<ProfileField, RegExp[]>> = {
+    userPreferredName: [/^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:请)?(?:都)?(?:叫我|称呼我(?:为)?)(.+)$/u],
+    assistantPreferredName: [
+      /^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:你)?(?:叫|称呼)(?:你)?(?:为)?(.+)$/u,
+      /^我希望你(?:以后|今后|从现在(?:起|开始))叫(.+)$/u,
+    ],
+    preferredLanguage: [
+      /^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:请)?(?:默认)?(?:都)?(?:用|说|使用)(.+?)(?:回复|回答|交流)?$/u,
+      /^(?:请)?(?:把)?(?:默认语言|回复语言)(?:改为|改成|设为|设置为)(.+)$/u,
+    ],
+    responsePreferences: [/^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:都)?(?:回答|回复)(?:请)?(.+)$/u],
+    userBackground: [/^(?:请记住|以后请记住)(?:我的)?(?:职业|身份|背景)(?:是|为)(.+)$/u],
+    longTermGoals: [/^(?:请记住|以后请记住|我的)(?:长期目标|长远目标)(?:是|为)(.+)$/u],
   }
-  const hasFieldCue = fieldCues[field as ProfileField].test(userText)
-  const hasPersistentCue = /以后|今后|从现在|默认|长期|每次|始终|总是|一直|永久|记住|设为|设置|改为|改成|更新/.test(userText)
-  if (!hasFieldCue && !hasPersistentCue) return false
-  if (!value) return hasFieldCue && /清空|清除|删除|置空|设为空|设置为空/.test(userText)
-  const quoted = [...userText.matchAll(/[“"]([^”"]*)[”"]/g)].map((match) => match[1])
-  if (quoted.length) return quoted.length === 1 && quoted[0] === value
-  const normalized = userText.replace(/[。！!？?\s]+$/u, '')
-  if (normalized.endsWith(value)) return true
-  const occurrence = normalized.lastIndexOf(value)
-  if (occurrence < 0) return false
-  const suffix = normalized.slice(occurrence + value.length)
-  return /^(?:回复|回答|沟通|交流|称呼|叫我|吧|呀|哦|，请记住)$/u.test(suffix)
+  for (const pattern of natural[field as ProfileField] ?? []) {
+    const match = request.match(pattern)
+    if (match && stripValue(match[1]!) === value) return true
+  }
+  if (field === 'standingInstructions' && value === request
+    && /^(?:以后|今后|从现在起)/.test(request)
+    && /请|不要|别|务必|必须|每次|始终/.test(request)
+    && !/(?:用|说)(?:中文|英文|英语|汉语)|(?:不)?叫我/.test(request)) return true
+  return false
 }
 
 function renderContent(content: readonly ContentBlock[]): string {

@@ -77,7 +77,18 @@ async function smokeWeb(cli, root, env, version) {
       timer = setTimeout(() => rejectReady(new Error(`${version}: Web smoke timed out\n${output.join('')}`)), 120_000)
     })
     const origin = new URL(launchUrl).origin
-    const exchange = await fetch(launchUrl, { redirect: 'manual' })
+    // The CLI prints the launch URL just before the listener can accept
+    // connections. Retry only this startup race, with a firm time limit.
+    let exchange
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      try {
+        exchange = await fetch(launchUrl, { redirect: 'manual' })
+        break
+      } catch (error) {
+        if (child.exitCode !== null || attempt === 39) throw error
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+    }
     assert(exchange.status === 303, `${version}: launch-token exchange returned HTTP ${exchange.status}`)
     const cookie = exchange.headers.get('set-cookie')?.split(';', 1)[0]
     assert(cookie, `${version}: launch-token exchange did not mint a browser cookie`)
