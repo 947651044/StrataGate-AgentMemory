@@ -113,22 +113,26 @@ describe('DSH plugin composition', () => {
       ctx.provide('webServer', { host: '127.0.0.1', port: 10259, register: () => () => {} })
       await ctx.plugin(plugin, { database: join(directory, 'memory.db') })
 
-      const names = ctx.tools.schemas().map(({ name }) => name)
-      expect(names).toEqual(expect.arrayContaining([
+      const tools = ctx.tools.schemas()
+      const names = tools.map(({ name }) => name)
+      expect(names).toEqual([
         'feedback_prepare',
         'memory_search_events',
-        'memory_expand_event',
         'memory_search_graph',
         'memory_expand_graph_node',
         'memory_search_elements',
-        'memory_expand_element',
         'memory_search_raw',
         'memory_get_blocks',
         'memory_expand_block',
+        'memory_expand_event',
+        'memory_expand_element',
         'memory_assess',
         'memory_record_use',
         'memory_remember',
-      ]))
+      ])
+      for (const tool of tools) {
+        expect(tool.description, tool.name).toMatch(/^This tool is provided by the StrataGate plugin\./)
+      }
       const prompt = await ctx.systemPrompt.assemble()
       expect(prompt.sections).toContainEqual(expect.objectContaining({
         name: 'tool:stratagate-memory',
@@ -191,7 +195,10 @@ describe('DSH plugin composition', () => {
         text: expect.stringContaining('[Activated long-term memory]'),
       }))
       expect(feedbackPrepare!.description).toMatch(/directly requests it[\s\S]*explicitly agrees/)
-      expect(feedbackPrepare!.description).toMatch(/Never submit anything to GitHub[\s\S]*feedbackUrl/)
+      expect(feedbackPrepare!.description).toMatch(/current conversation[\s\S]*Never submit anything to GitHub/)
+      expect(feedbackPrepare!.description).toMatch(/draft is local and not submitted[\s\S]*feedbackUrl[\s\S]*打开反馈草稿/)
+      expect(feedbackPrepare!.description).toContain('要不要顺便让我尝试修复这个问题，并提交一个 PR？')
+      expect(feedbackPrepare!.description).toMatch(/ask exactly once[\s\S]*does not respond or declines, do not ask again/)
       const feedback = await feedbackPrepare!.execute({
         title: 'Local draft',
         description: 'A real failure from this conversation.',

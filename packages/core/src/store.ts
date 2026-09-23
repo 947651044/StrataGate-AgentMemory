@@ -2697,11 +2697,30 @@ export class StrataGate {
 
     let result: Awaited<ReturnType<EventExtractor>>;
     try {
+      const query = [target.l0Title, target.l1Summary, ...(target.l2Keypoints ?? [])]
+        .filter(Boolean).join(' ');
+      const relevant = query
+        ? (await this.searchEvents(query, { limit: 8, trackRetrieval: false })).map(({ event }) => event)
+        : [];
+      // formedTurn is thread-local; Block sequence preserves order across threads.
+      const sourceSequence = new Map(this.blocks.map((block) => [block.id, block.sequence]));
+      const recent = this.events
+        .filter((event) => event.status === 'active' || event.status === 'superseded')
+        .sort((left, right) => (sourceSequence.get(right.sourceBlockId) ?? -1)
+          - (sourceSequence.get(left.sourceBlockId) ?? -1)
+          || (right.formedTurn ?? -1) - (left.formedTurn ?? -1)
+          || right.createdAt.localeCompare(left.createdAt)
+          || right.id.localeCompare(left.id))
+        .slice(0, 4);
+      const timelineEvents = new Map(relevant.map((event) => [event.id, event]));
+      for (const event of recent) {
+        if (!timelineEvents.has(event.id)) timelineEvents.set(event.id, event);
+      }
       result = await this.extractor({
         previous: threadBlocks.slice(0, targetIndex).reverse().find((block) => block.l2Keypoints !== undefined) ?? null,
         target,
         next,
-        timeline: this.listAllEvents().map((event) => ({ id: event.id, title: event.title, temporal: event.temporal })),
+        timeline: [...timelineEvents.values()].map((event) => ({ id: event.id, title: event.title, temporal: event.temporal })),
       });
     } catch (error) {
       await this.commitMutation(() => {
