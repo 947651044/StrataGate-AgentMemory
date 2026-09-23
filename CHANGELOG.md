@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.81 - 2026-09-23
+
+- Bound Event extraction history to eight relevant and four recently formed Events, excluding forgotten and archived memory while keeping superseded history eligible.
+
 ## 0.2.79 - 2026-09-22
 
 - Keep background Block summary, Event extraction, and Graph projection jobs pending without consuming attempts until the selected DSH model adapter is registered, then resume them immediately after adapter updates.
