@@ -85,7 +85,9 @@ async function smokeWeb(cli, root, env, version) {
         exchange = await fetch(launchUrl, { redirect: 'manual' })
         break
       } catch (error) {
-        if (child.exitCode !== null || attempt === 39) throw error
+        if (child.exitCode !== null || attempt === 39) {
+          throw new Error(`${version}: Web launch URL never became reachable\n${output.join('')}`, { cause: error })
+        }
         await new Promise(resolve => setTimeout(resolve, 250))
       }
     }
@@ -195,8 +197,20 @@ try {
     const dshHome = join(root, 'dsh-home')
     seedSessions(dshHome)
     run(npm, ['init', '--yes'], root)
-    // Install the CLI as a whole. Its package.json intentionally resolves the
-    // internal 0.1.5 packages to rc.2; do not replace that tree package-by-package.
+    // The prerelease CLI uses caret ranges. Pin its complete internal tree to
+    // the version StrataGate actually supports, so a later rc cannot silently
+    // change the host under this compatibility check.
+    const hostManifest = JSON.parse(readFileSync(join(packageRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))
+    const internalVersion = version === '0.1.5-rc.1' ? '0.1.5-rc.2' : version
+    const overrides = Object.fromEntries(Object.keys(hostManifest.dependencies ?? {})
+      .filter(name => name.startsWith('@deepseek-ai/dsh-'))
+      .map(name => [name, internalVersion]))
+    overrides['@deepseek-ai/cordis'] = '4.0.2'
+    overrides['@deepseek-ai/schemastery'] = '3.18.2'
+    const freshManifestPath = join(root, 'package.json')
+    const freshManifest = JSON.parse(readFileSync(freshManifestPath, 'utf8'))
+    freshManifest.overrides = overrides
+    writeFileSync(freshManifestPath, JSON.stringify(freshManifest, null, 2))
     run(npm, ['install', '--no-save', '--package-lock=false', `@deepseek-ai/dsh@${version}`], root)
     const cli = join(root, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
     assert(existsSync(cli), `DSH CLI ${version} was not installed`)

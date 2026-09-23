@@ -2099,7 +2099,7 @@ function directUserProfileRequest(userText: string, field: string, value: string
   const natural: Partial<Record<ProfileField, RegExp[]>> = {
     userPreferredName: [/^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:请)?(?:都)?(?:叫我|称呼我(?:为)?)(.+)$/u],
     assistantPreferredName: [
-      /^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:你)?(?:叫|称呼)(?:你)?(?:为)?(.+)$/u,
+      /^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:请)?(?:你叫|叫你|称呼你(?:为)?)(.+)$/u,
       /^我希望你(?:以后|今后|从现在(?:起|开始))叫(.+)$/u,
       /^你(?:以后|今后|从现在(?:起|开始))叫(.+)$/u,
     ],

@@ -207,6 +207,10 @@ describe('DSH plugin composition', () => {
       await expect(profileUpdate!.execute({ field: 'userBackground', value: '工程师' }, { agent, callId: 'profile-fact' } as never))
         .rejects.toThrow(/explicit current user request/)
       conversationMessages.push({ id: 'profile-user-name', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '以后叫我橙子' }] })
+      for (const wrongField of ['assistantPreferredName', 'preferredLanguage', 'responsePreferences', 'standingInstructions', 'userBackground', 'longTermGoals', 'persistentNotes']) {
+        await expect(profileUpdate!.execute({ field: wrongField, value: wrongField === 'assistantPreferredName' ? '我橙子' : '橙子' }, { agent, callId: `profile-wrong-${wrongField}` } as never))
+          .rejects.toThrow(/explicit current user request/)
+      }
       expect(await profileUpdate!.execute({ field: 'userPreferredName', value: '橙子' }, { agent, callId: 'profile-name' } as never))
         .toMatchObject({ modified: true })
       conversationMessages.push({ id: 'profile-user-assistant-name', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '我希望你以后叫小橙' }] })
