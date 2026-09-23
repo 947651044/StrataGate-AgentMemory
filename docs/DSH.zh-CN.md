@@ -81,7 +81,7 @@ DSH_HOME/stratagate/memory.db
 - 每个 DSH 对话轮次都有持久化的写入回执，因此重放或重试不会导致重复保存。
 - StrataGate 会执行 Block 摘要、Event 提取、版本化 Knowledge Graph 投影、搜索、Evidence Gate（证据门控）以及仅在使用后触发的强化。
 - Block 到达边界时，StrataGate 先持久化真实的 L3–L5，不修改 DSH surface。只有 L0–L2 校验通过且 Event 处理完成、Block 进入可衰减状态后，插件才使用原生 surface `replace`；待处理或失败的 Block 始终保留原始会话消息。后续衰减、手动提升或 λ 调整也只更新已就绪 checkpoint。尚未封存的 open tail 与完整工具调用/结果链继续作为 DSH 原生消息保留。
-- 每次主模型调用前，动态系统上下文只注入最多 4 条项目级激活 Event 和 4 个 active Graph Node，不再序列化 Current conversation、open tail、已封 Block 或 tool calls。
+- 每次主模型调用前，独立的常驻画像上下文无需检索就注入非空的全局字段。动态记忆上下文另注入最多 4 条项目级激活 Event 和 4 个 active Graph Node，不会把当前对话、open tail、已封 Block 或工具调用序列化进该上下文。
 
 激活查询由当前人类消息和当前会话 open tail 的最近两个 turn 组成。现有 BM25 搜索继续作为词面相关性门槛，只有 pinned 和 safety 记忆可以例外进入候选；现有记忆权重提供第二路排序，再由 RRF 融合相关性与权重排序。激活区固定使用约 900 tokens 的预算，不会随数据库增大而增长。
 
@@ -97,6 +97,7 @@ memory_search_graph    memory_expand_graph_node
 memory_search_raw      memory_get_blocks
 memory_expand_block    memory_assess
 memory_record_use
+memory_profile_update
 ```
 
 `memory_get_blocks` 支持 `scope=session`（默认值，保留历史上的当前会话隔离语义）和
@@ -128,7 +129,9 @@ ID、`blockId`、角色、轮次和有界摘录。`narrative`、`quotes`、来�
 - 手动展开 Block，以及分两步导入其他 AI 的记忆；
 - Usage Audit（使用审计）链路：从已记录的回答轮次出发，经由 Evidence Gate 的判断与选中的记忆，追溯到来源消息。
 
-界面不允许直接编辑、删除或批准 Event、图谱事实和来源消息，但可以通过三种明确操作改变记忆状态：手动展开 Block、导入其他 AI 的记忆，以及在“高级设置”中修改每个 Block 包含的完整对话轮数或全局 Block 衰减系数 λ。修改轮数时，界面会解释两者关系并给出保持单位对话衰减速度的建议 λ，是否采用由用户决定。保存后设置立即应用到所有已有工作区，同时成为新工作区默认值，并在重启后保持；已封存 Block 不会重新切分。
+界面不允许直接编辑、删除或批准 Event、图谱事实和来源消息。用户可以手动展开 Block、导入其他 AI 的记忆，以及在“高级设置”中修改每个 Block 包含的完整对话轮数或全局 Block 衰减系数 λ。修改轮数时，界面会解释两者关系并给出保持单位对话衰减速度的建议 λ，是否采用由用户决定。保存后设置立即应用到所有已有工作区，同时成为新工作区默认值，并在重启后保持；已封存 Block 不会重新切分。
+
+“高级设置”还可编辑固定的八项常驻画像字段。Settings 与 `memory_profile_update` 修改同一份安装级画像，跨会话、跨命名空间生效；保存后下一次模型调用立即看到新值，空字段不注入。字段按 Unicode 码点计数，上限依次为 100、100、100、1000、1000、1500、1000、1200 字符，总预算 6000 字符。SQLite 会记录 Settings、工具及后台整理的每次变更、旧值和来源。后台整理在距上次成功满 24 小时或达到容量阈值后执行，只读取当前画像，只压缩表达，不新增事实。Event 提取和 Graph 投影都不会写入画像。
 
 当前界面会在写入前校验并预览粘贴的 `stratagate.external-memory.v2` JSON：不合格内容会进入模型兜底恢复，恢复候选全部需要人工确认。完全重复项会被确定性忽略，其余候选由当前模型结合 Top-K 本地 Event 判断新增、合并、取代、冲突或忽略。分析任务和逐条进度持久化到 SQLite，关闭并重新打开页面后会恢复进度；高置信度判断自动采用，低置信度项可由用户选择具体动作；提交后可按批次撤销。消息内容和结构化工具轨迹中的常见令牌及凭证格式，会在离开本地服务器前被脱敏。SQLite 数据库始终是唯一可信数据源。
 

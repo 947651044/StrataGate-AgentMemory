@@ -116,6 +116,7 @@ describe('DSH plugin composition', () => {
       const tools = ctx.tools.schemas()
       const names = tools.map(({ name }) => name)
       expect(names).toEqual([
+        'memory_profile_update',
         'feedback_prepare',
         'memory_search_events',
         'memory_search_graph',
@@ -142,12 +143,13 @@ describe('DSH plugin composition', () => {
         text: expect.stringMatching(/clear error signal[\s\S]*at most one proactive feedback suggestion[\s\S]*namespace plus its substantive characteristics[\s\S]*feedback_prepare itself/),
       }))
 
+      const conversationMessages: Array<{ id: string; role: 'user' | 'assistant'; content: Array<{ type: 'text'; text: string }>; source: { kind: 'user' | 'model' } }> = []
       const session = {
         id: 'auto-context-session',
         header: { id: 'auto-context-session', version: 0, createdAt: 0, cwd: directory },
         snapshotEvents: () => [],
         eventAt: () => undefined,
-        deriveMessages: () => [],
+        deriveMessages: () => conversationMessages,
       } as unknown as Session
       const steered: unknown[] = []
       const agent = {
@@ -161,11 +163,33 @@ describe('DSH plugin composition', () => {
         name: 'stratagate:auto-memory',
         text: expect.stringContaining('[Activated long-term memory]'),
       }))
+      expect(scopedPrompt.contexts.some((item) => item.name === 'stratagate:persistent-profile')).toBe(false)
 
       const search = ctx.tools.get('memory_search_events')
+      const profileUpdate = ctx.tools.get('memory_profile_update')
       const feedbackPrepare = ctx.tools.get('feedback_prepare')
       const recordUse = ctx.tools.get('memory_record_use')
       expect(search).toBeDefined()
+      expect(profileUpdate).toBeDefined()
+      expect(profileUpdate!.description).toContain('Only a directly subsequent "同意" authorizes that single proposed change')
+      conversationMessages.push({ id: 'profile-user-1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '以后默认都用中文回复。' }] })
+      expect(await profileUpdate!.execute({ field: 'preferredLanguage', value: '中文' }, { agent, callId: 'profile-call' } as never))
+        .toEqual({ field: 'preferredLanguage', value: '中文', modified: true })
+      expect(await profileUpdate!.execute({ field: 'preferredLanguage', value: '中文' }, { agent, callId: 'profile-call-2' } as never))
+        .toEqual({ field: 'preferredLanguage', value: '中文', modified: false })
+      const nextPrompt = await ctx.systemPrompt.assemble({ agent })
+      expect(nextPrompt.contexts).toContainEqual(expect.objectContaining({ name: 'stratagate:persistent-profile', text: expect.stringContaining('Preferred language: 中文') }))
+      expect(nextPrompt.contexts.find((item) => item.name === 'stratagate:persistent-profile')?.text).not.toContain('User background:')
+      conversationMessages.push({ id: 'profile-assistant-proposal', role: 'assistant', source: { kind: 'model' }, content: [{ type: 'text', text: '要将 responsePreferences（回复方式和风格偏好）改为“回答简洁”吗？如果同意，请回复“同意”。' }] })
+      conversationMessages.push({ id: 'profile-user-2', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '同意' }] })
+      expect(await profileUpdate!.execute({ field: 'responsePreferences', value: '回答简洁' }, { agent, callId: 'profile-call-3' } as never))
+        .toMatchObject({ modified: true })
+      await expect(profileUpdate!.execute({ field: 'standingInstructions', value: '回答简洁' }, { agent, callId: 'profile-call-4' } as never))
+        .rejects.toThrow(/already authorized/)
+      conversationMessages.push({ id: 'profile-assistant-proposal-2', role: 'assistant', source: { kind: 'model' }, content: [{ type: 'text', text: '要将 longTermGoals（长期目标）改为“学习中文”吗？如果同意，请回复“同意”。' }] })
+      conversationMessages.push({ id: 'profile-user-3', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '同意' }] })
+      await expect(profileUpdate!.execute({ field: 'standingInstructions', value: '学习中文' }, { agent, callId: 'profile-call-5' } as never))
+        .rejects.toThrow(/direct subsequent 同意/)
       expect(feedbackPrepare).toBeDefined()
       expect(recordUse).toBeDefined()
       expect(feedbackPrepare!.description).toMatch(/directly requests it[\s\S]*explicitly agrees/)

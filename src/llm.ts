@@ -26,6 +26,7 @@ import type {
   SuccessfulModelResponseKind,
 } from '@diqier/stratagate'
 import { buildMemoryDerivationMessages, EXTERNAL_MEMORY_DECIDER_PROMPT_ZH_CN, nowUtc8, parseExternalMemoryExport } from '@diqier/stratagate'
+import { PROFILE_FIELDS, validateProfile, type PersistentProfile, type ProfileField } from '@diqier/stratagate'
 import type { ResolvedConfig, StructuredReasoningEffortMode } from './config.js'
 import { ModelJsonResponseError, parseJsonResponse } from './json-response.js'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
@@ -86,6 +87,7 @@ const STRUCTURED_FIELDS = {
   graphProjector: ['reason', 'nodes', 'edges'],
   externalMemoryExtractor: ['reason', 'candidates'],
   externalMemoryDecider: ['action', 'reason', 'confidence'],
+  profileMaintenance: Object.keys(PROFILE_FIELDS),
 } as const
 const STRING_ARRAY: ValueSchemaSpec = { type: 'array', items: { type: 'string' } }
 const OPEN_OBJECT: ValueSchemaSpec = { type: 'object', additionalProperties: true }
@@ -220,6 +222,10 @@ const EXTERNAL_MEMORY_EXTRACTOR_PARAMETERS: ParameterSchemaSpec = {
   candidates: { type: 'array', items: OPEN_OBJECT, required: true },
 }
 
+const PROFILE_MAINTENANCE_PARAMETERS = Object.fromEntries(
+  Object.keys(PROFILE_FIELDS).map((field) => [field, { type: 'string', required: true }]),
+) as ParameterSchemaSpec
+
 const STRUCTURED_TOOLS = {
   summarizer: {
     name: 'stratagate_summarize_block',
@@ -250,6 +256,11 @@ const STRUCTURED_TOOLS = {
     name: 'stratagate_recover_external_memory',
     description: 'Recover structured external-memory candidates from malformed JSON or plain text.',
     parameters: EXTERNAL_MEMORY_EXTRACTOR_PARAMETERS,
+  },
+  profileMaintenance: {
+    name: 'stratagate_maintain_profile',
+    description: 'Return the same eight Persistent Profile fields with only safe wording and redundancy cleanup.',
+    parameters: PROFILE_MAINTENANCE_PARAMETERS,
   },
 } as const
 
@@ -558,6 +569,22 @@ export class DshModelBridge {
     return { candidates: parsed.candidates, reason: text(raw.reason, parsed.reason) }
   }
 
+  async maintainProfile(profile: PersistentProfile): Promise<PersistentProfile> {
+    const raw = object(await this.callStructured('profileMaintenance',
+      `You maintain only the supplied StrataGate Persistent Profile. Call ${STRUCTURED_TOOLS.profileMaintenance.name} exactly once with all eight string fields. You may deduplicate, merge repeated meaning, shorten redundant wording, and improve organization. Preserve every unique fact, uncertainty, constraint, and instruction. Never infer or add facts, broaden meaning, or read Event, Graph, or conversation history. If two statements might conflict or cannot safely merge, retain both. Keep userPreferredName, assistantPreferredName, and preferredLanguage unchanged except necessary whitespace cleanup. Character limits (Unicode code points): ${JSON.stringify(Object.fromEntries(Object.entries(PROFILE_FIELDS).map(([field, spec]) => [field, spec.maxLength])))}. Total maximum: 6000. If safe compression is impossible, return the original value.`,
+      { profile, fieldDefinitions: PROFILE_FIELDS },
+    ))
+    if (Object.keys(raw).length !== Object.keys(PROFILE_FIELDS).length || Object.keys(raw).some((field) => !(field in PROFILE_FIELDS))) {
+      throw new Error('Profile maintenance returned unexpected fields')
+    }
+    const proposed = raw as PersistentProfile
+    validateProfile(proposed)
+    for (const field of ['userPreferredName', 'assistantPreferredName', 'preferredLanguage'] as ProfileField[]) {
+      if (proposed[field].trim() !== profile[field].trim()) throw new Error(`Profile maintenance changed protected short field ${field}`)
+    }
+    return proposed
+  }
+
   private async callStructured(kind: SuccessfulModelResponseKind, system: string, payload: unknown): Promise<unknown> {
     const execution = this.sessions.getStore()
     if (!execution) throw new Error('StrataGate model callback ran without an execution context')
@@ -677,13 +704,15 @@ export class DshModelBridge {
             )
           }
         }
-        this.successfulResponses.push({
-          id: `model_response_${crypto.randomUUID()}`,
-          kind,
-          response: responseForError,
-          createdAt: nowUtc8(),
-        })
-        if (this.successfulResponses.length > 5) this.successfulResponses.shift()
+        if (kind !== 'profileMaintenance') {
+          this.successfulResponses.push({
+            id: `model_response_${crypto.randomUUID()}`,
+            kind,
+            response: responseForError,
+            createdAt: nowUtc8(),
+          })
+          if (this.successfulResponses.length > 5) this.successfulResponses.shift()
+        }
         return parsed
       } catch (error) {
         if (!(error instanceof ModelJsonResponseError)) throw error

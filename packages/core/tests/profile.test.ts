@@ -1,0 +1,92 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { describe, expect, it } from 'vitest';
+import { emptyProfile, profileLength, profileMaintenanceDue, renderPersistentProfile } from '../src/profile.js';
+import { SqliteStorage } from '../src/sqlite.js';
+
+describe('installation-wide Persistent Profile', () => {
+  it('starts with eight empty fields and updates only one field across connections and namespaces', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-'));
+    const filename = join(directory, 'memory.db');
+    try {
+      const first = new SqliteStorage({ filename });
+      expect(first.getPersistentProfile()).toEqual(emptyProfile());
+      expect(first.updateProfileField('preferredLanguage', '中文', 'user_explicit', 'msg-1'))
+        .toEqual({ field: 'preferredLanguage', value: '中文', modified: true });
+      expect(first.updateProfileField('preferredLanguage', '中文', 'agent_tool').modified).toBe(false);
+      expect(first.getPersistentProfile()).toEqual({ ...emptyProfile(), preferredLanguage: '中文' });
+      expect(first.getProfileChanges()).toEqual([expect.objectContaining({
+        field: 'preferredLanguage', oldValue: '', newValue: '中文', source: 'user_explicit', sourceMessageId: 'msg-1',
+      })]);
+      expect(() => first.updateProfileField('unknown', 'x', 'settings')).toThrow(/Unknown/);
+      expect(() => first.updateProfileField('preferredLanguage', 'x'.repeat(101), 'settings')).toThrow(/100 characters/);
+      expect(first.getPersistentProfile().preferredLanguage).toBe('中文');
+      await first.close();
+      const second = new SqliteStorage({ filename });
+      expect(second.listNamespaces()).toEqual([]);
+      expect(second.getPersistentProfile()).toEqual({ ...emptyProfile(), preferredLanguage: '中文' });
+      expect(second.updateProfileField('preferredLanguage', '', 'settings').modified).toBe(true);
+      expect(second.getPersistentProfile()).toEqual(emptyProfile());
+      await second.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('counts Unicode code points and renders only nonempty fields', () => {
+    expect(profileLength('😀中文')).toBe(3);
+    expect(renderPersistentProfile(emptyProfile())).toBeNull();
+    const rendered = renderPersistentProfile({ ...emptyProfile(), preferredLanguage: '中文' });
+    expect(rendered).toContain('Preferred language: 中文');
+    expect(rendered).not.toContain('User background:');
+    expect(rendered).toContain('It does not override higher-priority system instructions.');
+  });
+
+  it('triggers maintenance by time or either capacity threshold and records only changed fields', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-maintenance-'));
+    const filename = join(directory, 'memory.db');
+    try {
+      const storage = new SqliteStorage({ filename });
+      const empty = storage.getPersistentProfile();
+      expect(profileMaintenanceDue(empty, null)).toBe(false);
+      storage.updateProfileField('responsePreferences', 'A. A.', 'settings');
+      const current = storage.getPersistentProfile();
+      expect(storage.profileMaintenanceDue()).toBe(true);
+      expect(storage.applyProfileMaintenance(current, { ...current, responsePreferences: 'A.' })).toBe(true);
+      expect(storage.getProfileChanges().at(-1)).toMatchObject({ source: 'maintenance', oldValue: 'A. A.', newValue: 'A.' });
+      expect(storage.profileMaintenanceDue()).toBe(false);
+      const last = storage.getProfileMaintenanceState()!.lastSucceededAt;
+      expect(profileMaintenanceDue(storage.getPersistentProfile(), last, Date.parse(last) + 24 * 60 * 60 * 1000)).toBe(true);
+      storage.updateProfileField('responsePreferences', 'x'.repeat(800), 'settings');
+      expect(storage.profileMaintenanceDue()).toBe(true);
+      expect(storage.applyProfileMaintenance(current, current)).toBe(false);
+      expect(storage.getPersistentProfile().responsePreferences).toHaveLength(800);
+      await storage.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+    expect(profileMaintenanceDue({ ...emptyProfile(), userBackground: 'x'.repeat(1500), responsePreferences: 'x'.repeat(1000),
+      standingInstructions: 'x'.repeat(1000), persistentNotes: 'x'.repeat(1200), userPreferredName: 'x'.repeat(100) }, new Date().toISOString())).toBe(true);
+  });
+
+  it('upgrades a version 11 database without losing existing rows', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-migration-'));
+    const filename = join(directory, 'memory.db');
+    try {
+      const first = new SqliteStorage({ filename });
+      await first.close();
+      const old = new DatabaseSync(filename);
+      old.exec("INSERT INTO memory_spaces (namespace, schema_version, revision, current_turn, block_turn_size, block_decay_lambda, created_at, updated_at) VALUES ('legacy:project', 11, 2, 1, 6, 0.3, '2026-01-01', '2026-01-01'); DROP TABLE persistent_profile_changes; DROP TABLE persistent_profile_maintenance; DROP TABLE persistent_profile; PRAGMA user_version = 11;");
+      old.close();
+      const upgraded = new SqliteStorage({ filename });
+      expect(upgraded.listNamespaces()).toEqual(['legacy:project']);
+      expect(upgraded.getPersistentProfile()).toEqual(emptyProfile());
+      expect(upgraded.updateProfileField('preferredLanguage', '中文', 'settings').modified).toBe(true);
+      await upgraded.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});

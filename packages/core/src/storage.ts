@@ -2,7 +2,7 @@ import { BLOCK_DECAY_LAMBDA } from './blocks.js';
 import { normalizeStandardEventType } from './events.js';
 import type { ElementCard, EventCard, ExternalMemoryImportJob, GraphEdge, GraphNode, MemoryBlock, RawMessage } from './types.js';
 
-export const STRATAGATE_STORAGE_SCHEMA_VERSION = 11;
+export const STRATAGATE_STORAGE_SCHEMA_VERSION = 12;
 export const KNOWLEDGE_GRAPH_PROJECTOR_VERSION = 1;
 export const DERIVATION_MAX_ATTEMPTS = 3;
 
@@ -28,7 +28,7 @@ export interface BlockSummaryJob {
   updatedAt: string;
 }
 
-export type SuccessfulModelResponseKind = 'summarizer' | 'extractor' | 'projector' | 'graphProjector' | 'externalMemoryExtractor' | 'externalMemoryDecider';
+export type SuccessfulModelResponseKind = 'summarizer' | 'extractor' | 'projector' | 'graphProjector' | 'externalMemoryExtractor' | 'externalMemoryDecider' | 'profileMaintenance';
 
 export interface SuccessfulModelResponse {
   id: string;
@@ -353,6 +353,8 @@ export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
       ...structuredClone(value as LegacySnapshotV10),
       schemaVersion: STRATAGATE_STORAGE_SCHEMA_VERSION,
     };
+  } else if (schemaVersion === 11) {
+    snapshot = { ...structuredClone(value as StrataGateSnapshot), schemaVersion: STRATAGATE_STORAGE_SCHEMA_VERSION };
   } else if (schemaVersion === STRATAGATE_STORAGE_SCHEMA_VERSION) {
     snapshot = structuredClone(value) as StrataGateSnapshot;
   } else {

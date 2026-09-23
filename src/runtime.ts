@@ -15,6 +15,10 @@ import {
   rrfRank,
   StorageConflictError,
   StrataGate,
+  PROFILE_FIELDS,
+  renderPersistentProfile,
+  type PersistentProfile,
+  type ProfileField,
   type ElementSearchResult,
   type EventCard,
   type EventSearchResult,
@@ -238,6 +242,7 @@ export function feedbackDraftUrl(namespace: string, origin?: string): string {
 }
 
 export class StrataGateRuntime {
+  private profileStorage: SqliteStorage | undefined
   private readonly folder = new TurnFolder()
   private readonly spaces = new Map<string, Promise<StrataGate>>()
   private readonly batches = new Map<string, Map<string, RetrievalBatch>>()
@@ -264,6 +269,8 @@ export class StrataGateRuntime {
   private backgroundWorkerTimer: ReturnType<typeof setTimeout> | undefined
   private backgroundWorkerRun: Promise<void> | undefined
   private backgroundWorkerWakePending = false
+  private profileMaintenanceRun: Promise<boolean> | undefined
+  private profileMaintenanceRetryAt = 0
   private readonly disposeAdaptersUpdated: () => void
   private settingsTail: Promise<void> = Promise.resolve()
   private batchSequence = 0
@@ -305,6 +312,7 @@ export class StrataGateRuntime {
 
   private async runBackgroundWorker(): Promise<void> {
     if (this.closed || !this.models.isReady()) return
+    void this.runProfileMaintenance().catch((error: unknown) => this.onIngestError(error))
     let namespaces: string[]
     try {
       namespaces = await this.adminNamespaces()
@@ -320,6 +328,75 @@ export class StrataGateRuntime {
         this.onIngestError(error)
       }
     }
+  }
+
+  async runProfileMaintenance(now = Date.now()): Promise<boolean> {
+    if (this.profileMaintenanceRun) return this.profileMaintenanceRun
+    if (this.closed || now < this.profileMaintenanceRetryAt || !this.models.isReady() || !this.profileStore().profileMaintenanceDue(now)) return false
+    const run = (async () => {
+      try {
+        const current = this.profileStore().getPersistentProfile()
+        const proposed = await this.models.runDetached('stratagate-profile-maintenance', () => this.models.maintainProfile(current))
+        return this.profileStore().applyProfileMaintenance(current, proposed, new Date(now).toISOString())
+      } catch (error) {
+        this.profileMaintenanceRetryAt = Date.now() + 5 * 60 * 1000
+        throw error
+      }
+    })()
+    this.profileMaintenanceRun = run
+    try { return await run } finally { if (this.profileMaintenanceRun === run) this.profileMaintenanceRun = undefined }
+  }
+
+  getPersistentProfile(): PersistentProfile {
+    return this.profileStore().getPersistentProfile()
+  }
+
+  renderProfileContext(): string | null {
+    return renderPersistentProfile(this.getPersistentProfile())
+  }
+
+  getProfileChanges() {
+    return this.profileStore().getProfileChanges()
+  }
+
+  updatePersistentProfile(field: string, value: string, source: 'settings' | 'user_explicit' | 'agent_tool', sourceMessageId?: string | null) {
+    const result = this.profileStore().updateProfileField(field, value, source, sourceMessageId)
+    if (result.modified) this.wakeBackgroundWorker()
+    return result
+  }
+
+  private profileStore(): SqliteStorage {
+    return this.profileStorage ??= new SqliteStorage({ filename: this.config.database })
+  }
+
+  updatePersistentProfileFromTool(session: Session, field: string, value: string) {
+    const messages = typeof session.deriveMessages === 'function' ? session.deriveMessages() : []
+    let lastUserIndex = -1
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === 'user' && messages[index]?.source.kind === 'user') { lastUserIndex = index; break }
+    }
+    if (lastUserIndex < 0) throw new Error('Profile update requires a current user message')
+    const lastUser = messages[lastUserIndex]!
+    const userText = renderContent(lastUser.content).trim()
+    let source: 'user_explicit' | 'agent_tool' = 'user_explicit'
+    if (userText === '同意') {
+      if (this.profileStore().hasProfileConsentUse(lastUser.id)) throw new Error('This 同意 has already authorized one Profile change')
+      const previous = messages[lastUserIndex - 1]
+      const proposal = previous?.role === 'assistant' ? renderContent(previous.content) : ''
+      const labels: Record<ProfileField, string> = {
+        userPreferredName: '用户希望你怎么称呼他', assistantPreferredName: '用户希望你叫什么',
+        preferredLanguage: '默认使用语言', responsePreferences: '回复方式和风格偏好',
+        standingInstructions: '长期持续生效的要求', userBackground: '稳定的用户背景',
+        longTermGoals: '长期目标', persistentNotes: '其他必须常驻的信息',
+      }
+      const proposedValueMatches = value ? proposal.includes(value) : /清空|清除|设为空|设置为空/.test(proposal)
+      if (!(field in PROFILE_FIELDS) || !proposedValueMatches
+        || !(proposal.includes(field) || proposal.includes(labels[field as ProfileField]))) {
+        throw new Error('A direct subsequent 同意 must match the proposed Profile field and exact value')
+      }
+      source = 'agent_tool'
+    }
+    return this.updatePersistentProfile(field, value, source, lastUser.id)
   }
 
   private async runBackgroundNamespace(namespace: string): Promise<void> {
@@ -963,10 +1040,12 @@ export class StrataGateRuntime {
     const settled = await Promise.allSettled(this.spaces.values())
     await Promise.allSettled(this.backgroundNamespaceRuns.values())
     if (this.backgroundWorkerRun) await Promise.allSettled([this.backgroundWorkerRun])
+    if (this.profileMaintenanceRun) await Promise.allSettled([this.profileMaintenanceRun])
     await Promise.allSettled(this.migrationRuns.values())
     await Promise.allSettled(this.derivationRuns.values())
     await Promise.allSettled(this.externalImportRuns.values())
     await Promise.all(settled.flatMap((result) => result.status === 'fulfilled' ? [result.value.close()] : []))
+    if (this.profileStorage) await this.profileStorage.close()
     this.sessionsById.clear()
     if (flushError !== undefined) throw flushError
   }

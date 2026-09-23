@@ -1,0 +1,53 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { Session } from '@deepseek-ai/dsh-session'
+import { describe, expect, it } from 'vitest'
+import type { PersistentProfile } from '@diqier/stratagate'
+import type { DshModelBridge } from '../src/llm.js'
+import { StrataGateRuntime } from '../src/runtime.js'
+
+describe('DSH Persistent Profile runtime', () => {
+  it('shares one profile across sessions, projects, restart, and maintenance', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-runtime-'))
+    const database = join(directory, 'memory.db')
+    const calls: PersistentProfile[] = []
+    let ready = false
+    const models = {
+      isReady: () => ready,
+      onAdaptersUpdated: () => () => {},
+      runDetached: async <T>(_id: string, action: () => Promise<T>): Promise<T> => action(),
+      maintainProfile: async (profile: PersistentProfile) => {
+        calls.push(structuredClone(profile))
+        return { ...profile, responsePreferences: profile.responsePreferences.replace('简洁。简洁。', '简洁。') }
+      },
+    } as unknown as DshModelBridge
+    const config = { database, namespaceMode: 'project' as const, namespacePrefix: 'dsh', globalNamespace: 'global', blockTurnSize: 6, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 2048, structuredTaskTimeoutMs: 120000 }
+    const session = (id: string, cwd: string) => ({ id, header: { cwd } }) as Session
+    try {
+      const first = new StrataGateRuntime(config, models)
+      expect(first.getPersistentProfile().preferredLanguage).toBe('')
+      const a = session('a', 'C:/alpha')
+      const b = session('b', 'C:/beta')
+      expect(first.namespaceFor(a)).not.toBe(first.namespaceFor(b))
+      first.updatePersistentProfile('preferredLanguage', '中文', 'settings')
+      first.updatePersistentProfile('responsePreferences', '简洁。简洁。', 'user_explicit', 'msg-1')
+      expect(first.renderProfileContext()).toContain('Preferred language: 中文')
+      expect(first.getPersistentProfile().preferredLanguage).toBe('中文')
+      ready = true
+      expect(await first.runProfileMaintenance()).toBe(true)
+      expect(calls).toEqual([{ ...first.getPersistentProfile(), responsePreferences: '简洁。简洁。' }])
+      expect(first.getPersistentProfile().responsePreferences).toBe('简洁。')
+      expect(first.getProfileChanges().map(({ source }) => source)).toEqual(['settings', 'user_explicit', 'maintenance'])
+      expect(await first.runProfileMaintenance()).toBe(false)
+      await first.close()
+      const second = new StrataGateRuntime(config, models)
+      expect(second.getPersistentProfile().preferredLanguage).toBe('中文')
+      expect(second.getPersistentProfile().responsePreferences).toBe('简洁。')
+      expect(second.namespaceFor(b)).not.toBe(second.namespaceFor(a))
+      await second.close()
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+})

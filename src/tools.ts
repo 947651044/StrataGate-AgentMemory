@@ -20,6 +20,28 @@ function sessionOf(exec: ToolRunContext): Session {
 
 export function registerMemoryTools(ctx: Context, runtime: StrataGateRuntime): void {
   ctx.tools.register(defineTool({
+    name: 'memory_profile_update',
+    description: `This tool is provided by the StrataGate plugin. Update exactly one field of the user's global Persistent Profile. Persistent Profile data is injected into every future conversation without retrieval, so use this tool only for information that should remain continuously available or continuously affect future behavior, such as how to address the user, what the user wants the assistant to be called, the default language, stable response preferences, standing instructions, stable user background, long-term goals, or other genuinely persistent notes.
+
+Do not use this tool merely because the user says "remember". If the information describes something that happened, a decision, an activity, a project change, a dated fact, or something that only needs to be recalled when relevant, it belongs in Event memory instead. A separate Event-memory tool is reserved for that purpose and is not part of this implementation.
+
+When the user explicitly asks to make a persistent change, that request is already authorization and the tool may be called immediately.
+
+If the assistant only infers that something might be a useful persistent preference or profile fact, it must not update the profile immediately. It must first tell the user exactly which field it proposes to change and what the new value would be, and ask the user to reply exactly "同意". Only a directly subsequent "同意" authorizes that single proposed change. If the user refuses, does not reply "同意", changes the subject, or proposes a different change, do not perform the update.
+
+Each call changes exactly one predefined Profile field. Never create, delete, or rename Profile fields, and never rewrite the complete Profile when only one field is being changed.`,
+    parameters: {
+      field: { type: 'string', required: true, enum: ['userPreferredName', 'assistantPreferredName', 'preferredLanguage', 'responsePreferences', 'standingInstructions', 'userBackground', 'longTermGoals', 'persistentNotes'] as const },
+      value: { type: 'string', required: true },
+    },
+    output: jsonOutput,
+    execute: async (args, exec) => {
+      if (Object.keys(args).some((key) => key !== 'field' && key !== 'value')) throw new TypeError('Unknown Profile update argument')
+      return runtime.updatePersistentProfileFromTool(sessionOf(exec), args.field, args.value) as never
+    },
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'feedback_prepare',
     description: 'This tool is provided by the StrataGate plugin. Create or revise a local StrataGate feedback draft when the user directly requests it, or after a proactive suggestion permitted by the StrataGate feedback policy and the user explicitly agrees. A direct user request is already authorization. Use only facts known from the current conversation; leave unknown fields empty and never invent versions, logs, Block counts, or diagnostics. Never submit anything to GitHub. After success, briefly say the draft is local and not submitted, then render feedbackUrl as a Markdown link labeled "打开反馈草稿". Then ask exactly once: "要不要顺便让我尝试修复这个问题，并提交一个 PR？" If the user does not respond or declines, do not ask again. Do not use a popup or other additional UI. Do not print draft fields or an Issue-content table, and do not direct the user through Settings manually.',
     parameters: {
