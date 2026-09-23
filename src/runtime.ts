@@ -2078,11 +2078,17 @@ function directUserProfileRequest(userText: string, field: string, value: string
     .filter((candidate) => request.includes(candidate) || request.includes(PROFILE_FIELD_LABELS[candidate]))
   if (namedFields.length > 1 || (namedFields.length === 1 && namedFields[0] !== field)) return false
   const stripValue = (text: string) => text.trim().replace(/^[“"]|[”"]$/g, '').trim()
-  const named = namedFields.length === 1
-    ? request.match(/(?:改为|改成|设为|设置为|更新为)\s*(.+)$/u)?.[1]
-    : undefined
-  if (named !== undefined) return stripValue(named) === value
-  if (namedFields.length === 1 && !value && /清空|清除|删除|置空|设为空|设置为空/.test(request)) return true
+  if (namedFields.length === 1) {
+    const fieldName = `(?:${field}|${PROFILE_FIELD_LABELS[field as ProfileField]})`
+    const namedChange = new RegExp(`^(?:以后|今后|从现在起)?(?:请)?(?:把|将)?\\s*${fieldName}\\s*(?:改为|改成|设为|设置为|更新为)\\s*(.+)$`, 'u')
+    const named = request.match(namedChange)?.[1]
+    if (named !== undefined) return stripValue(named) === value
+    if (!value) {
+      const clear = new RegExp(`^(?:请)?(?:(?:清空|清除|删除|置空)\\s*${fieldName}|(?:把|将)?\\s*${fieldName}\\s*(?:清空|清除|删除|置空|设为空|设置为空))$`, 'u')
+      return clear.test(request)
+    }
+    return false
+  }
   if (!value) return false
 
   // Require a positive, field-specific instruction with the complete requested
