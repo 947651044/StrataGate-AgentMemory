@@ -2330,9 +2330,13 @@ export class StrataGate {
       const relevant = query
         ? (await this.searchEvents(query, { limit: 8, trackRetrieval: false })).map(({ event }) => event)
         : [];
+      // formedTurn is thread-local; Block sequence preserves order across threads.
+      const sourceSequence = new Map(this.blocks.map((block) => [block.id, block.sequence]));
       const recent = this.events
         .filter((event) => event.status === 'active' || event.status === 'superseded')
-        .sort((left, right) => (right.formedTurn ?? -1) - (left.formedTurn ?? -1)
+        .sort((left, right) => (sourceSequence.get(right.sourceBlockId) ?? -1)
+          - (sourceSequence.get(left.sourceBlockId) ?? -1)
+          || (right.formedTurn ?? -1) - (left.formedTurn ?? -1)
           || right.createdAt.localeCompare(left.createdAt)
           || right.id.localeCompare(left.id))
         .slice(0, 4);
