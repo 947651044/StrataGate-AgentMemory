@@ -83,7 +83,7 @@ describe('Event extraction timeline', () => {
     expect(new Set(timeline().map(({ id }) => id)).size).toBe(timeline().length);
   });
 
-  it('uses formation time, includes superseded history, and does no retrieval bookkeeping', async () => {
+  it('includes superseded history and does no retrieval bookkeeping', async () => {
     const { memory, timeline } = fixture();
     const source = (await memory.appendTurn({ user: 'source', assistant: 'recorded' })).sealedBlock!;
     const add = (id: string, title: string, supersedesEventIds?: string[]) => memory.addEvent({
@@ -105,6 +105,28 @@ describe('Event extraction timeline', () => {
     ]);
     expect(timeline().map(({ id }) => id)).not.toContain('old-touched');
     expect(memory.listEvents().map(({ id, weight }) => [id, weight])).toEqual(before);
+  });
+
+  it('ranks recent Events by formedTurn when an old Block is extracted later', async () => {
+    const { memory, timeline } = fixture();
+    const blocks = [];
+    for (let index = 0; index < 6; index += 1) {
+      blocks.push((await memory.appendTurn({ user: `source ${index}`, assistant: 'recorded' })).sealedBlock!);
+    }
+    const newer = [];
+    for (let index = 1; index < blocks.length; index += 1) {
+      const source = blocks[index]!;
+      newer.push(await memory.addEvent({ id: `new-${index}`, title: `recent memory ${index}`,
+        summary: 'A newer conversation.', sourceBlockId: source.id, sourceMessageIds: [source.l5Raw[0]!.id] }));
+    }
+    const oldSource = blocks[0]!;
+    const delayed = await memory.addEvent({ id: 'delayed-old', title: 'historical memory',
+      summary: 'An old conversation processed later.', sourceBlockId: oldSource.id,
+      sourceMessageIds: [oldSource.l5Raw[0]!.id], temporal: { happenedStart: '2099-01-01' } });
+    expect(delayed.createdAt > newer.at(-1)!.createdAt).toBe(true);
+    expect(delayed.formedTurn! < newer[0]!.formedTurn!).toBe(true);
+    await memory.appendTurn({ user: 'TARGET zephyr query', assistant: 'review' });
+    expect(timeline().map(({ id }) => id)).toEqual(['new-5', 'new-4', 'new-3', 'new-2']);
   });
 
   it('still validates extractor evidence against the target L5 messages', async () => {

@@ -2332,8 +2332,8 @@ export class StrataGate {
         : [];
       const recent = this.events
         .filter((event) => event.status === 'active' || event.status === 'superseded')
-        .sort((left, right) => right.createdAt.localeCompare(left.createdAt)
-          || (right.formedTurn ?? -1) - (left.formedTurn ?? -1)
+        .sort((left, right) => (right.formedTurn ?? -1) - (left.formedTurn ?? -1)
+          || right.createdAt.localeCompare(left.createdAt)
           || right.id.localeCompare(left.id))
         .slice(0, 4);
       const timelineEvents = new Map(relevant.map((event) => [event.id, event]));
