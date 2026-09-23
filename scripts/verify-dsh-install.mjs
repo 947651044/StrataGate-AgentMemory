@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -202,7 +202,10 @@ try {
     // change the host under this compatibility check.
     const hostManifest = JSON.parse(readFileSync(join(packageRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))
     const internalVersion = version === '0.1.5-rc.1' ? '0.1.5-rc.2' : version
-    const overrides = Object.fromEntries(Object.keys(hostManifest.dependencies ?? {})
+    const localInternalNames = readdirSync(join(packageRoot, 'node_modules', '@deepseek-ai'))
+      .filter(name => name.startsWith('dsh-'))
+      .map(name => `@deepseek-ai/${name}`)
+    const overrides = Object.fromEntries([...new Set([...Object.keys(hostManifest.dependencies ?? {}), ...localInternalNames])]
       .filter(name => name.startsWith('@deepseek-ai/dsh-'))
       .map(name => [name, internalVersion]))
     overrides['@deepseek-ai/cordis'] = '4.0.2'
