@@ -2073,7 +2073,10 @@ function proposalAuthorizesProfileChange(proposal: string, field: string, value:
 
 function directUserProfileRequest(userText: string, field: string, value: string): boolean {
   if (!(field in PROFILE_FIELDS)) return false
-  const request = userText.trim().replace(/[。！!？?\s]+$/u, '')
+  const fullRequest = userText.trim().replace(/[。！!？?\s]+$/u, '')
+  const request = /^记住[，,:：]\s*(?:以后|今后|从现在|你以后|你今后|你从现在)/u.test(fullRequest)
+    ? fullRequest.replace(/^记住[，,:：]\s*/u, '')
+    : fullRequest
   const namedFields = (Object.keys(PROFILE_FIELDS) as ProfileField[])
     .filter((candidate) => request.includes(candidate) || request.includes(PROFILE_FIELD_LABELS[candidate]))
   if (namedFields.length > 1 || (namedFields.length === 1 && namedFields[0] !== field)) return false
@@ -2098,6 +2101,7 @@ function directUserProfileRequest(userText: string, field: string, value: string
     assistantPreferredName: [
       /^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:你)?(?:叫|称呼)(?:你)?(?:为)?(.+)$/u,
       /^我希望你(?:以后|今后|从现在(?:起|开始))叫(.+)$/u,
+      /^你(?:以后|今后|从现在(?:起|开始))叫(.+)$/u,
     ],
     preferredLanguage: [
       /^(?:请)?(?:以后|今后|从现在(?:起|开始))?(?:请)?(?:默认)?(?:都)?(?:用|说|使用)(.+?)(?:回复|回答|交流)?$/u,
