@@ -3255,7 +3255,7 @@ window.__ModuleLoader__.load({
     }
 
     const profileGroups = [
-      ['身份与语言', [['userPreferredName', 'DeepSeek Harness对你的称呼', 100], ['assistantPreferredName', 'DeepSeek Harness的名字', 100], ['preferredLanguage', '默认回答语言', 100], ['reasoningLanguage', '思考过程语言', 100]]],
+      ['身份与语言', [['userPreferredName', 'StrataGate对你的称呼', 100], ['assistantPreferredName', 'StrataGate的名字', 100], ['preferredLanguage', '默认回答语言', 100], ['reasoningLanguage', '思考过程语言', 100]]],
       ['交互偏好', [['responsePreferences', '回复方式和风格偏好', 1000], ['standingInstructions', '长期持续生效的要求', 1000]]],
       ['关于用户', [['userBackground', '稳定的用户背景', 1500], ['longTermGoals', '长期目标', 1000]]],
       ['其他', [['persistentNotes', '其他必须常驻的信息', 1200]]],
