@@ -2117,4 +2117,24 @@ describe('DSH runtime agent memory', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
+
+  it('applies the configured agent memory retrieval weight to merged search', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-agent-weight-'))
+    const runtime = new StrataGateRuntime(
+      agentRuntimeConfig(join(directory, 'memory.db'), { agentMemoryRetrievalWeight: 0 }),
+      fakeModels,
+    )
+    try {
+      const recorded = await runtime.recordAgentMemory(session, '用户偏好 pnpm 作为包管理器。', 'preference') as Record<string, unknown>
+      expect(recorded.action).toBe('ADDED')
+      // Weight 0 keeps the recording stored but never surfaced through search.
+      const batch = await runtime.searchEvents(session, 'pnpm 包管理器') as { evidenceRefs: string[] }
+      expect(batch.evidenceRefs).not.toContain(`event:${String(recorded.eventId)}`)
+      const dashboard = await runtime.adminAgentMemories({}) as { items: unknown[] }
+      expect(dashboard.items).toHaveLength(1)
+    } finally {
+      await runtime.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
 })

@@ -523,6 +523,11 @@ export interface SearchOptions {
   eventType?: string;
   happenedFrom?: string;
   happenedTo?: string;
+  /**
+   * Relative weight of the agent-recorded pool when its ranking fuses with
+   * the conversation-derived pool (1 = equal footing, 0 = never surfaced).
+   */
+  agentMemoryWeight?: number;
   /** Disable retrieval bookkeeping for read-only previews. */
   trackRetrieval?: boolean;
 }

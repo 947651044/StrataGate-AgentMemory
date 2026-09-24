@@ -13,6 +13,7 @@ export interface Config {
   blockDecayLambda?: number
   ingestSubagents?: boolean
   agentMemoryEnabled?: boolean
+  agentMemoryRetrievalWeight?: number
   provider?: string
   model?: string
   maxOutputTokens?: number
@@ -33,6 +34,7 @@ export interface ResolvedConfig {
   blockDecayLambda: number
   ingestSubagents: boolean
   agentMemoryEnabled?: boolean
+  agentMemoryRetrievalWeight?: number
   provider?: string
   model?: string
   maxOutputTokens: number
@@ -79,6 +81,9 @@ export const Config: z<Config> = z.object({
   agentMemoryEnabled: z.boolean().default(true)
     .description('启用 agent 主动记忆（memory_remember）')
     .comment('开启后 agent 可以把值得记忆的事实写入长期记忆 Event 管线：进入数据库、参与知识图谱、跨会话共享；写入前会自动检测并消解重复与冲突。'),
+  agentMemoryRetrievalWeight: z.number().step(0.05).min(0).max(5).default(1)
+    .description('主动记忆在检索中的占比权重')
+    .comment('agent 记录与对话派生记忆分别独立排序后按权重融合：1 为平权，0 为不浮现 agent 记录，大于 1 则提升 agent 记录的排序权重。'),
   provider: z.string(),
   model: z.string(),
   maxOutputTokens: z.natural().min(256).default(2_048),
@@ -110,6 +115,7 @@ export function resolveConfig(config: Config): ResolvedConfig {
     blockDecayLambda: Math.max(0, config.blockDecayLambda ?? 0.3),
     ingestSubagents: config.ingestSubagents ?? false,
     agentMemoryEnabled: config.agentMemoryEnabled ?? true,
+    agentMemoryRetrievalWeight: Math.min(5, Math.max(0, config.agentMemoryRetrievalWeight ?? 1)),
     ...(provider && model ? { provider, model } : {}),
     maxOutputTokens: Math.max(256, Math.floor(config.maxOutputTokens ?? 2_048)),
     structuredTaskTimeoutMs: Math.max(1_000, Math.floor(config.structuredTaskTimeoutMs ?? 120_000)),

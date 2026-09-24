@@ -96,7 +96,7 @@ DSH_HOME/stratagate/memory.db
 - **隔离存储。** agent 记录的 Event 存放在专属的 `agent_events` 隔离表中，数据模型与普通 Event 完全一致，但与被动对话表物理分离。每次记录会创建一个合成的 `agent-memory:` 溯源 Block，其原始内容即所记录的句子，并标记 `shouldExtract: false`，推导管线不会重复处理。
 - **写入前消解。** 写入前，StrataGate 会先在两个池中检索重复与冲突：精确或高度近似的重复会强化既有卡片而不新写；词面重叠模糊的记录会触发一次同步模型仲裁，复用外部记忆导入的决策契约 —— `ADD`、`MERGE`、`SUPERSEDE`（仅高置信度；低置信度的合并/取代会降级为非破坏性的冲突标记）、`CONFLICT`（双向回链）或 `IGNORE`。工具结果会回报 `action`、`gate` 与 `reason`。与既有记忆没有实质重叠的事实直接写入，不调用模型。
 
-其余行为与普通 Event 一致：agent 记录会投影进 Knowledge Graph，与被动 Event 在同一 BM25/RRF 检索排序中合并竞争（卡片带 `source: 'agent-recorded'` 标记），跨会话持久保存，走同样的 turn 衰减与引用强化生命周期（`memory_assess` → `memory_record_use`），也可以通过该生命周期遗忘。记忆面板通过 `/api/stratagate/agent-memories`（查询参数 `session` 与 `includeArchived=true`）展示这些记录。可用 `agentMemoryEnabled: false` 整体关闭该功能，同时注销对应工具。
+其余行为与普通 Event 一致：agent 记录会投影进 Knowledge Graph，跨会话持久保存，走同样的 turn 衰减与引用强化生命周期（`memory_assess` → `memory_record_use`），也可以通过该生命周期遗忘。检索为两个池各开一条独立的 top-k 通道 —— 被动池与 agent 池分别独立排序，再按加权 RRF 融合，任何一方都无法把另一方挤出结果窗口。agent 通道的占比由 `agentMemoryRetrievalWeight` 配置（默认 `1` = 平权；`0` = 记录保留但不再浮现；更大值提升 agent 记录的排序权重），卡片带 `source: 'agent-recorded'` 标记。记忆面板通过 `/api/stratagate/agent-memories`（查询参数 `session` 与 `includeArchived=true`）展示这些记录。可用 `agentMemoryEnabled: false` 整体关闭该功能，同时注销对应工具。
 
 插件注册以下工具：
 
@@ -153,6 +153,7 @@ config:
   blockDecayLambda: 0.3
   ingestSubagents: false
   agentMemoryEnabled: true
+  agentMemoryRetrievalWeight: 1
   maxOutputTokens: 10000
   structuredTaskTimeoutMs: 120000
   structuredReasoningEffort: auto # auto | force-off
@@ -169,7 +170,7 @@ config:
 
 `blockDecayLambda` 按当前 Block 锚点与同一 DSH 会话中最新已封存 Block 的距离控制衰减。默认值为 `0.3`；数字越小衰减越慢，不建议大于 `0.4`。open tail 中尚未封存的轮次不会增加 Block age。
 
-`agentMemoryEnabled`（默认 `true`）控制 Agent 主动记忆（见上文）；关闭后同时注销 `memory_remember`。记录与其他 StrataGate 数据一样保存在同一个 SQLite 数据库中。
+`agentMemoryEnabled`（默认 `true`）控制 Agent 主动记忆（见上文）；关闭后同时注销 `memory_remember`。`agentMemoryRetrievalWeight`（默认 `1`，范围 `0`–`5`）设置 agent 通道在融合检索中的占比。记录与其他 StrataGate 数据一样保存在同一个 SQLite 数据库中。
 
 如果省略 `provider` 和 `model`，记忆处理会优先使用会话最近一次请求的路由，并以 DSH 默认模型作为后备。这两个配置项必须同时设置。
 

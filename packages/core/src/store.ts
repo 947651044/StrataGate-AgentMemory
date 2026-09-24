@@ -1297,15 +1297,54 @@ export class StrataGate {
 
   async searchEvents(query: string, options: SearchOptions = {}): Promise<EventSearchResult[]> {
     const limit = Math.max(1, Math.min(20, options.limit ?? 6));
+    const agentWeight = Math.max(0, options.agentMemoryWeight ?? 1);
+    // Per-pool top-k: each pool produces its own ranking over its own lane so
+    // a large pool cannot crowd the other one out of the result window, then
+    // the two rankings fuse through weighted RRF (the agent pool's share is
+    // the caller-configurable weight; passive events always weigh 1).
+    const rankings: EventCard[][] = [];
+    const weights: number[] = [];
+    const passive = this.rankEventPool(
+      this.events.filter((event) => event.status === 'active' || event.status === 'superseded'),
+      query, options, limit,
+    );
+    if (passive.length > 0) {
+      rankings.push(passive);
+      weights.push(1);
+    }
+    if (agentWeight > 0) {
+      const agent = this.rankEventPool(
+        this.agentEvents.filter((event) => event.status === 'active' || event.status === 'superseded'),
+        query, options, limit,
+      );
+      if (agent.length > 0) {
+        rankings.push(agent);
+        weights.push(agentWeight);
+      }
+    }
+    if (rankings.length === 0) return [];
+    const ranked = rrfRank(rankings, weights).slice(0, limit).map(({ item: event, score }) => ({ event, score }));
+    if (ranked.length > 0 && options.trackRetrieval !== false) {
+      const now = toUtc8Iso(this.now());
+      await this.commitMutation(() => {
+        for (const { event } of ranked) event.weight.lastRetrievedAt = now;
+      });
+    }
+    return ranked;
+  }
+
+  /** Rank one event pool (BM25 + structured filters fused by RRF), sliced to `limit`. */
+  private rankEventPool(
+    candidates: readonly EventCard[],
+    query: string,
+    options: SearchOptions,
+    limit: number,
+  ): EventCard[] {
     const participants = (options.participants ?? []).map(normalizeSearchText).filter(Boolean);
     const eventType = normalizeSearchText(options.eventType ?? '');
     const from = options.happenedFrom ? Date.parse(options.happenedFrom) : Number.NEGATIVE_INFINITY;
     const to = options.happenedTo ? Date.parse(options.happenedTo) : Number.POSITIVE_INFINITY;
     const hasTimeFilter = Boolean(options.happenedFrom || options.happenedTo);
-    // Merged retrieval pool: agent-recorded events compete in the same
-    // BM25/RRF fusion as conversation-derived events, with comparable scores.
-    const candidates = this.listAllEvents()
-      .filter((event) => event.status === 'active' || event.status === 'superseded');
     const participantMatches = candidates.filter((event) => participants.length > 0 && participants.every((person) =>
       (event.temporal.participants ?? []).some((candidate) => fuzzySearchMatch(candidate, person))));
     const typeMatches = eventType ? candidates.filter((event) =>
@@ -1360,14 +1399,7 @@ export class StrataGate {
       if (searchTokens(query).length > 0) return [];
       rankings.push(structured(candidates));
     }
-    const ranked = rrfRank(rankings).slice(0, limit).map(({ item: event, score }) => ({ event, score }));
-    if (ranked.length > 0 && options.trackRetrieval !== false) {
-      const now = toUtc8Iso(this.now());
-      await this.commitMutation(() => {
-        for (const { event } of ranked) event.weight.lastRetrievedAt = now;
-      });
-    }
-    return ranked;
+    return rrfRank(rankings).slice(0, limit).map(({ item }) => item);
   }
 
   async claimNextElementProjection(): Promise<ElementProjectionContext | null> {

@@ -109,10 +109,14 @@ two differences:
   and `reason`. Facts with no meaningful overlap write directly without a model call.
 
 Everything else is ordinary Event behavior: agent recordings project into the Knowledge
-Graph, merge with passive Events in the same BM25/RRF retrieval ranking (cards carry
-`source: 'agent-recorded'`), persist across sessions, decay and reinforce through the same
-turn-based lifecycle (`memory_assess` → `memory_record_use`), and can be forgotten through
-that lifecycle. The memory dashboard lists them under
+Graph, persist across sessions, decay and reinforce through the same turn-based lifecycle
+(`memory_assess` → `memory_record_use`), and can be forgotten through that lifecycle.
+Retrieval gives each pool its own top-k lane — the passive pool and the agent pool are
+ranked independently, then fused with weighted RRF, so neither pool can crowd the other
+out of the result window. The agent lane's share is the configurable
+`agentMemoryRetrievalWeight` (default `1` = equal footing; `0` = recordings stay stored but
+never surface; higher values boost agent recordings), and cards carry
+`source: 'agent-recorded'`. The memory dashboard lists them under
 `/api/stratagate/agent-memories` (query parameters `session` and `includeArchived=true`).
 The feature can be disabled entirely with `agentMemoryEnabled: false`, which also
 unregisters the tool.
@@ -175,6 +179,7 @@ config:
   blockDecayLambda: 0.3
   ingestSubagents: false
   agentMemoryEnabled: true
+  agentMemoryRetrievalWeight: 1
   maxOutputTokens: 10000
   structuredTaskTimeoutMs: 120000
   structuredReasoningEffort: auto # auto | force-off
@@ -191,7 +196,7 @@ config:
 
 `blockDecayLambda` controls decay by the distance between a Block's pointer anchor and the latest sealed Block in the same DSH session. It defaults to `0.3`. Smaller values decay more slowly; values above `0.4` are not recommended. Turns in the open tail do not increase Block age.
 
-`agentMemoryEnabled` (default `true`) controls agent-recorded memory (see above); disabling it also unregisters `memory_remember`. Recordings are stored in the same SQLite database as the rest of StrataGate data.
+`agentMemoryEnabled` (default `true`) controls agent-recorded memory (see above); disabling it also unregisters `memory_remember`. `agentMemoryRetrievalWeight` (default `1`, range `0`–`5`) sets the agent lane's share in merged retrieval. Recordings are stored in the same SQLite database as the rest of StrataGate data.
 
 If `provider` and `model` are omitted, memory processing uses the session's latest request route, then the DSH default model as fallback. They must be configured as a pair.
 

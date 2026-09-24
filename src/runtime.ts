@@ -513,9 +513,15 @@ export class StrataGateRuntime {
 
   async searchEvents(session: Session, query: string, options: SearchOptions = {}): Promise<unknown> {
     await this.flush()
-    const results = await (await this.space(session)).searchEvents(query, options)
-    // Agent-recorded events ride in the merged core pool, so they arrive as
-    // ordinary event results with the same evidence refs and reinforcement path.
+    const results = await (await this.space(session)).searchEvents(query, {
+      ...options,
+      // Agent-recorded events ride their own top-k lane and fuse with the
+      // passive pool by the configured weight; they arrive as ordinary event
+      // results with the same evidence refs and reinforcement path.
+      ...(this.config.agentMemoryRetrievalWeight !== undefined
+        ? { agentMemoryWeight: this.config.agentMemoryRetrievalWeight }
+        : {}),
+    })
     return this.batch(
       session,
       results.map(({ event }) => ({
@@ -825,7 +831,14 @@ export class StrataGateRuntime {
     const activationQuery = [currentUserMessage(session), renderMessages(recentTurns(openTail, 2))]
       .filter(Boolean)
       .join('\n\n')
-    const eventHits = activationQuery ? await memory.searchEvents(activationQuery, { limit: 20 }) : []
+    const eventHits = activationQuery
+      ? await memory.searchEvents(activationQuery, {
+          limit: 20,
+          ...(this.config.agentMemoryRetrievalWeight !== undefined
+            ? { agentMemoryWeight: this.config.agentMemoryRetrievalWeight }
+            : {}),
+        })
+      : []
     let graphResults: GraphNodeSearchResult[] = []
     if (activationQuery && typeof memory.searchGraphNodes === 'function') {
       graphResults = await memory.searchGraphNodes(activationQuery, 12)

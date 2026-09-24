@@ -226,6 +226,54 @@ describe('StrataGate.recordAgentEvent', () => {
     expect(memory.listAgentEvents()).toHaveLength(1)
   })
 
+  it('gives the agent pool its own top-k lane in merged retrieval', async () => {
+    const memory = openMemory()
+    // Three passive matches would fill a size-2 window in a single merged
+    // pool; separate lanes guarantee the agent match still surfaces.
+    for (const title of ['Release pipeline checklist', 'Release pipeline automation', 'Release pipeline review']) {
+      await memory.appendTurn({ user: title, assistant: '已记录。' }, { deferDerivation: true })
+      const block = memory.listBlocks().at(-1)!
+      await memory.addEvent({
+        title,
+        summary: `${title} for the deployment process.`,
+        sourceBlockId: block.id,
+        sourceMessageIds: [block.l5Raw[0]!.id],
+      })
+    }
+    const recorded = await memory.recordAgentEvent({ content: 'Release pipeline owners rotate monthly.' })
+    const hits = await memory.searchEvents('release pipeline', { limit: 2 })
+    const ids = hits.map(({ event }) => event.id)
+    expect(hits).toHaveLength(2)
+    expect(ids).toContain(recorded.eventId)
+  })
+
+  it('honors the agent memory retrieval weight in fused ranking', async () => {
+    const memory = openMemory()
+    await memory.appendTurn({ user: 'Alpha launch decision', assistant: '已记录。' }, { deferDerivation: true })
+    const block = memory.listBlocks().at(-1)!
+    await memory.addEvent({
+      title: 'Alpha launch decision',
+      summary: 'Alpha launch decision made by the team.',
+      sourceBlockId: block.id,
+      sourceMessageIds: [block.l5Raw[0]!.id],
+    })
+    const agent = await memory.recordAgentEvent({ content: 'Alpha launch retrospective notes.' })
+    expect(agent.eventId).toBeDefined()
+    const query = 'alpha launch'
+
+    const equal = await memory.searchEvents(query)
+    expect(equal.map(({ event }) => event.id)).toContain(agent.eventId)
+
+    // Boosting the agent lane puts its top hit above the passive one.
+    const boosted = await memory.searchEvents(query, { agentMemoryWeight: 2 })
+    expect(boosted[0]!.event.id).toBe(agent.eventId)
+
+    // Weight 0 keeps the recording stored but never surfaced.
+    const suppressed = await memory.searchEvents(query, { agentMemoryWeight: 0 })
+    expect(suppressed.map(({ event }) => event.id)).not.toContain(agent.eventId)
+    expect(suppressed.map(({ event }) => event.id)).toContain(memory.listEvents()[0]!.id)
+  })
+
   it('merges both pools into one search and reinforces agent events through recordMemoryUse', async () => {
     const memory = openMemory()
     const passiveId = await seedPassiveEvent(memory)
