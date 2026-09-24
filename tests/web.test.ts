@@ -1232,26 +1232,32 @@ describe('StrataGate admin routes', () => {
 
   it('reads and updates one shared Profile field from Settings', async () => {
     const profile = { preferredLanguage: '' }
+    let revision = 0
     const calls: unknown[] = []
     const profileRuntime = {
-      getPersistentProfile: () => profile,
-      updatePersistentProfile: (field: string, value: string, source: string) => {
-        calls.push({ field, value, source })
+      getProfileSnapshot: () => ({ profile, revisions: { preferredLanguage: revision } }),
+      updatePersistentProfile: (field: string, value: string, source: string, _sourceMessageId: unknown, expectedValue: string, expectedRevision: number) => {
+        calls.push({ field, value, source, expectedValue, expectedRevision })
+        if (profile.preferredLanguage !== expectedValue || revision !== expectedRevision) return { field, value: profile.preferredLanguage, modified: false, conflict: true }
         profile.preferredLanguage = value
+        revision++
         return { field, value, modified: true }
       },
     } as unknown as StrataGateRuntime
-    expect(await request('/api/stratagate/profile', 'GET', profileRuntime)).toMatchObject({ status: 200, body: { preferredLanguage: '' } })
-    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: '中文' }))
+    expect(await request('/api/stratagate/profile', 'GET', profileRuntime)).toMatchObject({ status: 200, body: { preferredLanguage: '', _revisions: { preferredLanguage: 0 } } })
+    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: '中文', expectedValue: '', expectedRevision: 0 }))
       .toMatchObject({ status: 200, body: { field: 'preferredLanguage', value: '中文', modified: true } })
-    expect(calls).toEqual([{ field: 'preferredLanguage', value: '中文', source: 'settings' }])
+    expect(calls).toEqual([{ field: 'preferredLanguage', value: '中文', source: 'settings', expectedValue: '', expectedRevision: 0 }])
     expect(await request('/api/stratagate/profile', 'GET', profileRuntime)).toMatchObject({ body: { preferredLanguage: '中文' } })
     const literal = 'Use password: abc as an example; token=demo stays literal.'
-    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: literal }))
+    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: literal, expectedValue: '中文', expectedRevision: 1 }))
       .toMatchObject({ body: { value: literal } })
     expect(await request('/api/stratagate/profile', 'GET', profileRuntime)).toMatchObject({ body: { preferredLanguage: literal } })
-    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: `${literal} More.` }))
+    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: `${literal} More.`, expectedValue: literal, expectedRevision: 2 }))
       .toMatchObject({ body: { value: `${literal} More.` } })
+    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: 'stale draft', expectedValue: literal, expectedRevision: 2 }))
+      .toMatchObject({ status: 409, body: { error: '该项刚刚在其他位置更新' } })
+    expect(profile.preferredLanguage).toBe(`${literal} More.`)
     expect((await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: '中文', other: true })).status).toBe(400)
   })
 })

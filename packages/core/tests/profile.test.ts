@@ -134,6 +134,31 @@ describe('installation-wide Persistent Profile', () => {
     }
   });
 
+  it('rejects a stale Settings edit inside the write transaction without changing audit history', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-conflict-'));
+    const filename = join(directory, 'memory.db');
+    try {
+      const store = new SqliteStorage({ filename });
+      store.updateProfileField('responsePreferences', 'A', 'settings');
+      const firstRevision = store.getProfileSnapshot().revisions.responsePreferences;
+      store.updateProfileField('preferredLanguage', '中文', 'agent_tool');
+      expect(store.updateProfileField('responsePreferences', 'C', 'settings', null, 'A', firstRevision)).toMatchObject({ modified: true });
+      store.updateProfileField('responsePreferences', 'B', 'maintenance');
+      const before = store.getProfileChanges().length;
+      expect(store.updateProfileField('responsePreferences', 'stale C', 'settings', null, 'C', firstRevision + 1)).toMatchObject({ conflict: true, modified: false, value: 'B' });
+      expect(store.getPersistentProfile().responsePreferences).toBe('B');
+      expect(store.getProfileChanges()).toHaveLength(before);
+      store.updateProfileField('responsePreferences', 'A', 'agent_tool');
+      store.updateProfileField('responsePreferences', 'B', 'maintenance');
+      const afterReturn = store.getProfileChanges().length;
+      expect(store.updateProfileField('responsePreferences', 'stale after A→B→A→B', 'settings', null, 'B', firstRevision + 2)).toMatchObject({ conflict: true, modified: false, value: 'B' });
+      expect(store.getProfileChanges()).toHaveLength(afterReturn);
+      await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('backfills a pre-fix v12 Profile and removes consent-only index without losing audit rows', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-v12-'));
     const filename = join(directory, 'memory.db');
