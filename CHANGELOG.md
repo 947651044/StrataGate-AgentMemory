@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.82 - 2026-09-23
+
+- Add a global, eight-field Persistent Profile that enters every model call without retrieval, with one-field Settings and `memory_profile_update` edits.
+- Track Profile changes in SQLite and safely compress existing Profile wording in a bounded background maintenance pass.
+
 ## 0.2.81 - 2026-09-23
 
 - Bound Event extraction history to eight relevant and four recently formed Events, excluding forgotten and archived memory while keeping superseded history eligible.

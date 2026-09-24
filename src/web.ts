@@ -138,11 +138,11 @@ export interface WebServerLike {
   }): () => void
 }
 
-function sendJson(res: WebResponse, status: number, body: unknown): void {
+function sendJson(res: WebResponse, status: number, body: unknown, preserveProfileText = false): void {
   res.statusCode = status
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
-  res.end(JSON.stringify(redactValue(body)))
+  res.end(JSON.stringify(preserveProfileText ? body : redactValue(body)))
 }
 
 function numeric(value: string | null, fallback: number, minimum: number, maximum: number): number {
@@ -691,6 +691,39 @@ async function updateSettings(runtime: StrataGateRuntime, url: URL): Promise<unk
   if (turnSize !== undefined) result.blockTurnSize = await runtime.adminSetBlockTurnSize(turnSize)
   if (lambda !== undefined) result.blockDecayLambda = await runtime.adminSetBlockDecayLambda(lambda)
   return result
+}
+
+async function persistentProfile(runtime: StrataGateRuntime, req: WebRequest): Promise<unknown> {
+  if (req.method === 'GET') return runtime.getPersistentProfile()
+  if (req.method !== 'PATCH') throw new AdminHttpError(405, 'Persistent Profile requires GET or PATCH')
+  let suppliedBody = req.body
+  if (suppliedBody === undefined && typeof req[Symbol.asyncIterator] === 'function') {
+    const chunks: Buffer[] = []
+    let size = 0
+    for await (const chunk of req as AsyncIterable<Uint8Array | string>) {
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      size += value.length
+      if (size > 16 * 1024) throw new AdminHttpError(413, 'Profile update exceeds 16 KB')
+      chunks.push(value)
+    }
+    suppliedBody = Buffer.concat(chunks).toString('utf8')
+  }
+  let body: unknown = suppliedBody
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body) } catch { throw new AdminHttpError(400, 'Profile update must be valid JSON') }
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AdminHttpError(400, 'Profile update must be an object')
+  const input = body as Record<string, unknown>
+  if (Object.keys(input).length !== 2 || !Object.hasOwn(input, 'field') || !Object.hasOwn(input, 'value')
+    || typeof input.field !== 'string' || typeof input.value !== 'string') {
+    throw new AdminHttpError(400, 'Profile update requires exactly field and value strings')
+  }
+  try {
+    return runtime.updatePersistentProfile(input.field, input.value, 'settings')
+  } catch (error) {
+    if (error instanceof TypeError || error instanceof RangeError) throw new AdminHttpError(400, error.message)
+    throw error
+  }
 }
 
 async function feedback(runtime: StrataGateRuntime, req: WebRequest, url: URL): Promise<unknown> {
@@ -1434,6 +1467,10 @@ export async function handleAdminRequest(runtime: StrataGateRuntime, req: WebReq
     const path = url.pathname.replace(/\/$/, '')
     if (path === '/api/stratagate/feedback') {
       sendJson(res, 200, await feedback(runtime, req, url))
+    } else if (path === '/api/stratagate/profile') {
+      // This is the authenticated Settings editor. Redacting its editable values
+      // would replace user data with placeholders on the next save.
+      sendJson(res, 200, await persistentProfile(runtime, req), true)
     } else if (path === '/api/stratagate/settings') {
       if (req.method !== 'PATCH') throw new AdminHttpError(405, 'StrataGate settings require PATCH')
       sendJson(res, 200, await updateSettings(runtime, url))

@@ -15,6 +15,8 @@ import {
   rrfRank,
   StorageConflictError,
   StrataGate,
+  renderPersistentProfile,
+  type PersistentProfile,
   type ElementSearchResult,
   type EventCard,
   type EventSearchResult,
@@ -238,6 +240,7 @@ export function feedbackDraftUrl(namespace: string, origin?: string): string {
 }
 
 export class StrataGateRuntime {
+  private profileStorage: SqliteStorage | undefined
   private readonly folder = new TurnFolder()
   private readonly spaces = new Map<string, Promise<StrataGate>>()
   private readonly batches = new Map<string, Map<string, RetrievalBatch>>()
@@ -264,6 +267,7 @@ export class StrataGateRuntime {
   private backgroundWorkerTimer: ReturnType<typeof setTimeout> | undefined
   private backgroundWorkerRun: Promise<void> | undefined
   private backgroundWorkerWakePending = false
+  private profileMaintenanceRun: Promise<boolean> | undefined
   private readonly disposeAdaptersUpdated: () => void
   private settingsTail: Promise<void> = Promise.resolve()
   private batchSequence = 0
@@ -305,6 +309,7 @@ export class StrataGateRuntime {
 
   private async runBackgroundWorker(): Promise<void> {
     if (this.closed || !this.models.isReady()) return
+    void this.runProfileMaintenance().catch((error: unknown) => this.onIngestError(error))
     let namespaces: string[]
     try {
       namespaces = await this.adminNamespaces()
@@ -320,6 +325,49 @@ export class StrataGateRuntime {
         this.onIngestError(error)
       }
     }
+  }
+
+  async runProfileMaintenance(now = Date.now()): Promise<boolean> {
+    if (this.profileMaintenanceRun) return this.profileMaintenanceRun
+    if (this.closed || !this.models.isReady() || !this.profileStore().profileMaintenanceDue(now)) return false
+    const run = (async () => {
+      const current = this.profileStore().getPersistentProfile()
+      try {
+        const proposed = await this.models.runDetached('stratagate-profile-maintenance', () => this.models.maintainProfile(current))
+        return this.profileStore().applyProfileMaintenance(current, proposed, new Date(now).toISOString())
+      } catch (error) {
+        this.profileStore().recordProfileMaintenanceFailure(current, now)
+        throw error
+      }
+    })()
+    this.profileMaintenanceRun = run
+    try { return await run } finally { if (this.profileMaintenanceRun === run) this.profileMaintenanceRun = undefined }
+  }
+
+  getPersistentProfile(): PersistentProfile {
+    return this.profileStore().getPersistentProfile()
+  }
+
+  renderProfileContext(): string | null {
+    return renderPersistentProfile(this.getPersistentProfile())
+  }
+
+  getProfileChanges() {
+    return this.profileStore().getProfileChanges()
+  }
+
+  updatePersistentProfile(field: string, value: string, source: 'settings' | 'user_explicit' | 'agent_tool', sourceMessageId?: string | null) {
+    const result = this.profileStore().updateProfileField(field, value, source, sourceMessageId)
+    if (result.modified) this.wakeBackgroundWorker()
+    return result
+  }
+
+  private profileStore(): SqliteStorage {
+    return this.profileStorage ??= new SqliteStorage({ filename: this.config.database })
+  }
+
+  updatePersistentProfileFromTool(field: string, value: string) {
+    return this.updatePersistentProfile(field, value, 'agent_tool')
   }
 
   private async runBackgroundNamespace(namespace: string): Promise<void> {
@@ -963,10 +1011,12 @@ export class StrataGateRuntime {
     const settled = await Promise.allSettled(this.spaces.values())
     await Promise.allSettled(this.backgroundNamespaceRuns.values())
     if (this.backgroundWorkerRun) await Promise.allSettled([this.backgroundWorkerRun])
+    if (this.profileMaintenanceRun) await Promise.allSettled([this.profileMaintenanceRun])
     await Promise.allSettled(this.migrationRuns.values())
     await Promise.allSettled(this.derivationRuns.values())
     await Promise.allSettled(this.externalImportRuns.values())
     await Promise.all(settled.flatMap((result) => result.status === 'fulfilled' ? [result.value.close()] : []))
+    if (this.profileStorage) await this.profileStorage.close()
     this.sessionsById.clear()
     if (flushError !== undefined) throw flushError
   }

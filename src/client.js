@@ -3252,6 +3252,37 @@ window.__ModuleLoader__.load({
     function SettingsPage({ selected, namespace, dataDirectory, onBack, setView, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort }) {
       const [turnSize, setTurnSize] = React.useState(String(selected.blockTurnSize ?? 6))
       const [lambda, setLambda] = React.useState(String(selected.blockDecayLambda ?? 0.3))
+      const [profile, setProfile] = React.useState(null)
+      const [profileDraft, setProfileDraft] = React.useState(null)
+      const [profileSaving, setProfileSaving] = React.useState('')
+      const [profileError, setProfileError] = React.useState('')
+      const profileFields = [
+        ['userPreferredName', '用户希望你怎么称呼他', 100],
+        ['assistantPreferredName', '用户希望你叫什么', 100],
+        ['preferredLanguage', '默认使用语言', 100],
+        ['responsePreferences', '回复方式和风格偏好', 1000],
+        ['standingInstructions', '长期持续生效的要求', 1000],
+        ['userBackground', '稳定的用户背景', 1500],
+        ['longTermGoals', '长期目标', 1000],
+        ['persistentNotes', '其他必须常驻的信息', 1200],
+      ]
+      React.useEffect(() => {
+        let active = true
+        void api('profile', {}, { method: 'GET' }).then((value) => {
+          if (active) { setProfile(value); setProfileDraft(value); setProfileError('') }
+        }).catch((reason) => { if (active) setProfileError(String(reason?.message || reason)) })
+        return () => { active = false }
+      }, [])
+      const saveProfileField = (field) => {
+        if (!profileDraft || profileSaving) return
+        setProfileSaving(field)
+        setProfileError('')
+        void api('profile', {}, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field, value: profileDraft[field] }) })
+          .then((result) => setProfile((current) => ({ ...current, [field]: result.value })))
+          .catch((reason) => setProfileError(String(reason?.message || reason)))
+          .finally(() => setProfileSaving(''))
+      }
+      const profileTotal = profileDraft ? profileFields.reduce((sum, [field]) => sum + Array.from(profileDraft[field] || '').length, 0) : 0
       const [directoryOpening, setDirectoryOpening] = React.useState(false)
       const [directoryFeedback, setDirectoryFeedback] = React.useState({ kind: '', text: '' })
       React.useEffect(() => {
@@ -3315,6 +3346,21 @@ window.__ModuleLoader__.load({
             showSuggestion ? h('div', { className: 'sg-setting-suggestion' }, h('span', null, '为保持按对话轮数计算的遗忘速度，建议 λ 调整为 ' + suggestedLambda.toFixed(2) + '。'), h('button', { type: 'button', className: 'sg-quiet-button', onClick: () => setLambda(String(Number(suggestedLambda.toFixed(2)))) }, '采用建议值')) : null,
             rows.map(([label, value]) => h('div', { key: label, className: 'sg-stage' }, h('span', null, label), h('span', { className: label === '内部空间 ID' ? 'sg-stage-value sg-code' : 'sg-stage-value' }, String(value)))),
             h('button', { type: 'button', className: 'sg-save-button', disabled: !changed || savingSettings, onClick: () => void updateSettings({ blockTurnSize: turnSizeValue, blockDecayLambda: lambdaValue }) }, savingSettings ? '保存中…' : changed ? '保存设置' : '已保存'))),
+        h('section', { className: 'sg-settings-group', 'aria-labelledby': 'sg-profile-title' },
+          h('h3', { id: 'sg-profile-title', className: 'sg-settings-group-title' }, '常驻画像'),
+          h('p', { className: 'sg-settings-group-copy' }, '跨会话、跨项目生效；非空内容每轮进入上下文。总字符 ' + profileTotal + ' / 6000。'),
+          profileError ? h('p', { role: 'alert', className: 'sg-storage-feedback failed' }, profileError) : null,
+          profileDraft ? h('div', { className: 'sg-settings-panel' }, profileFields.map(([field, label, maximum], index) => {
+            const value = profileDraft[field] || ''
+            const length = Array.from(value).length
+            const changed = value !== profile[field]
+            return h('div', { key: field, className: 'sg-support-field' },
+              h('label', { htmlFor: 'sg-profile-' + field }, label + '（' + length + '/' + maximum + '）'),
+              index < 3
+                ? h('input', { id: 'sg-profile-' + field, className: 'sg-support-input', value, onChange: (event) => setProfileDraft((current) => ({ ...current, [field]: event.target.value })) })
+                : h('textarea', { id: 'sg-profile-' + field, className: 'sg-support-description', value, onChange: (event) => setProfileDraft((current) => ({ ...current, [field]: event.target.value })) }),
+              h('button', { type: 'button', className: 'sg-save-button', disabled: !changed || length > maximum || profileTotal > 6000 || Boolean(profileSaving), onClick: () => saveProfileField(field) }, profileSaving === field ? '保存中…' : changed ? '保存此项' : '已保存'))
+          })) : h('p', null, '正在读取常驻画像…')),
         h('section', { className: 'sg-settings-group', 'aria-labelledby': 'sg-storage-title' },
           h('h3', { id: 'sg-storage-title', className: 'sg-settings-group-title' }, '数据与存储'),
           h('p', { className: 'sg-settings-group-copy' }, '数据目录与原始数据'),
@@ -3552,7 +3598,8 @@ window.__ModuleLoader__.load({
 
       let content = null
       if (loading && !selected) content = h(Loading)
-      else if (!selected) content = h(Empty, { title: '还没有记忆', copy: '完成一些 DSH 对话后，短期记忆和长期记忆会出现在这里。' })
+      else if (view.name === 'settings' && !selected) content = h(SettingsPage, { selected: { blockTurnSize: 6, blockDecayLambda: 0.3, currentTurn: 0, schemaVersion: 12 }, namespace, dataDirectory: overview.dataDirectory, onBack: moreBack, setView, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort })
+      else if (!selected && section !== 'more') content = h(Empty, { title: '还没有记忆', copy: '完成一些 DSH 对话后，短期记忆和长期记忆会出现在这里。' })
       else if (view.name === 'event') content = h(EventDetail, { event: view.item, project, source, onBack: goBack, backLabel, onNode: openGraphNode })
       else if (view.name === 'status') content = h(ProcessingStatus, { overview: selected, blocks: data.blocks, conversations, namespace, serverVersion: overview.pluginVersion, stage: view.stage, onBack: view.back ? goBack : () => setView({ name: 'root' }), backLabel: view.back?.name === 'settings' ? '高级设置' : '返回', refresh })
       else if (view.name === 'import') content = h(ImportPage, { namespace, onBack: moreBack, refresh })

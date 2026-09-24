@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -77,7 +77,20 @@ async function smokeWeb(cli, root, env, version) {
       timer = setTimeout(() => rejectReady(new Error(`${version}: Web smoke timed out\n${output.join('')}`)), 120_000)
     })
     const origin = new URL(launchUrl).origin
-    const exchange = await fetch(launchUrl, { redirect: 'manual' })
+    // The CLI prints the launch URL just before the listener can accept
+    // connections. Retry only this startup race, with a firm time limit.
+    let exchange
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      try {
+        exchange = await fetch(launchUrl, { redirect: 'manual' })
+        break
+      } catch (error) {
+        if (child.exitCode !== null || attempt === 39) {
+          throw new Error(`${version}: Web launch URL never became reachable\n${output.join('')}`, { cause: error })
+        }
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+    }
     assert(exchange.status === 303, `${version}: launch-token exchange returned HTTP ${exchange.status}`)
     const cookie = exchange.headers.get('set-cookie')?.split(';', 1)[0]
     assert(cookie, `${version}: launch-token exchange did not mint a browser cookie`)
@@ -184,8 +197,23 @@ try {
     const dshHome = join(root, 'dsh-home')
     seedSessions(dshHome)
     run(npm, ['init', '--yes'], root)
-    // Install the CLI as a whole. Its package.json intentionally resolves the
-    // internal 0.1.5 packages to rc.2; do not replace that tree package-by-package.
+    // The prerelease CLI uses caret ranges. Pin its complete internal tree to
+    // the version StrataGate actually supports, so a later rc cannot silently
+    // change the host under this compatibility check.
+    const hostManifest = JSON.parse(readFileSync(join(packageRoot, 'node_modules', '@deepseek-ai', 'dsh', 'package.json'), 'utf8'))
+    const internalVersion = version === '0.1.5-rc.1' ? '0.1.5-rc.2' : version
+    const localInternalNames = readdirSync(join(packageRoot, 'node_modules', '@deepseek-ai'))
+      .filter(name => name.startsWith('dsh-'))
+      .map(name => `@deepseek-ai/${name}`)
+    const overrides = Object.fromEntries([...new Set([...Object.keys(hostManifest.dependencies ?? {}), ...localInternalNames])]
+      .filter(name => name.startsWith('@deepseek-ai/dsh-'))
+      .map(name => [name, internalVersion]))
+    overrides['@deepseek-ai/cordis'] = '4.0.2'
+    overrides['@deepseek-ai/schemastery'] = '3.18.2'
+    const freshManifestPath = join(root, 'package.json')
+    const freshManifest = JSON.parse(readFileSync(freshManifestPath, 'utf8'))
+    freshManifest.overrides = overrides
+    writeFileSync(freshManifestPath, JSON.stringify(freshManifest, null, 2))
     run(npm, ['install', '--no-save', '--package-lock=false', `@deepseek-ai/dsh@${version}`], root)
     const cli = join(root, 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
     assert(existsSync(cli), `DSH CLI ${version} was not installed`)
@@ -218,6 +246,13 @@ try {
     // the bootstrap resolver must force StrataGate onto the host-owned tree.
     run(process.execPath, [cli, 'plugin', '--profile', 'web', 'add', tarball], root, dshEnv)
     assert(existsSync(stale), `${version}: upgrade unexpectedly deleted the seeded legacy package`)
+    // The clean CLI web templates can enable live user-patch watching without
+    // mounting HMR. This smoke starts a fresh process for every patch check,
+    // so startup loading exercises the installed plugin without that host bug.
+    const manifestPath = join(profile, 'package.json')
+    const installedManifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    installedManifest.dsh.profile.patchReload = 'startup'
+    writeFileSync(manifestPath, JSON.stringify(installedManifest, null, 2))
     const repair = run(process.execPath, [cli, 'plugin', '--profile', 'web', 'exec', 'stratagate-dsh-repair'], root, dshEnv)
     assert(repair.includes('Quarantined'), `${version}: profile repair did not report a quarantine`)
     assert(!existsSync(stale), `${version}: profile repair left the stale DSH package active`)
