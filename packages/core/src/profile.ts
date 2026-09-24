@@ -49,11 +49,11 @@ export function validateProfile(profile: PersistentProfile): void {
   if (total > PROFILE_TOTAL_MAX_LENGTH) throw new RangeError(`Persistent Profile exceeds ${PROFILE_TOTAL_MAX_LENGTH} characters`);
 }
 
-export function profileMaintenanceDue(profile: PersistentProfile, lastMaintainedAt: string | null, now = Date.now()): boolean {
+export function profileMaintenanceDue(profile: PersistentProfile, timeBasisAt: string | null, now = Date.now()): boolean {
   const lengths = (Object.keys(PROFILE_FIELDS) as ProfileField[]).map((field) => ({ field, length: profileLength(profile[field]) }));
   const total = lengths.reduce((sum, item) => sum + item.length, 0);
   if (total === 0) return false;
-  return !lastMaintainedAt || now - Date.parse(lastMaintainedAt) >= PROFILE_MAINTENANCE_INTERVAL_MS
+  return (timeBasisAt !== null && now - Date.parse(timeBasisAt) >= PROFILE_MAINTENANCE_INTERVAL_MS)
     || total >= PROFILE_MAINTENANCE_TOTAL_THRESHOLD
     || lengths.some(({ field, length }) => length >= PROFILE_FIELDS[field].maxLength * 0.8);
 }

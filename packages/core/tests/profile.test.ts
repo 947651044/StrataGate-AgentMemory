@@ -53,22 +53,59 @@ describe('installation-wide Persistent Profile', () => {
       expect(profileMaintenanceDue(empty, null)).toBe(false);
       storage.updateProfileField('responsePreferences', 'A. A.', 'settings');
       const current = storage.getPersistentProfile();
-      expect(storage.profileMaintenanceDue()).toBe(true);
-      expect(storage.applyProfileMaintenance(current, { ...current, responsePreferences: 'A.' })).toBe(true);
-      expect(storage.getProfileChanges().at(-1)).toMatchObject({ source: 'maintenance', oldValue: 'A. A.', newValue: 'A.' });
-      expect(storage.profileMaintenanceDue()).toBe(false);
-      const last = storage.getProfileMaintenanceState()!.lastSucceededAt;
-      expect(profileMaintenanceDue(storage.getPersistentProfile(), last, Date.parse(last) + 24 * 60 * 60 * 1000)).toBe(true);
-      storage.updateProfileField('responsePreferences', 'x'.repeat(800), 'settings');
-      expect(storage.profileMaintenanceDue()).toBe(true);
-      expect(storage.applyProfileMaintenance(current, current)).toBe(false);
-      expect(storage.getPersistentProfile().responsePreferences).toHaveLength(800);
+      const startedAt = storage.getProfileMaintenanceStartedAt()!;
+      expect(profileMaintenanceDue(current, null)).toBe(false);
+      expect(storage.profileMaintenanceDue(Date.parse(startedAt) + 24 * 60 * 60 * 1000 - 1)).toBe(false);
+      expect(storage.profileMaintenanceDue(Date.parse(startedAt) + 24 * 60 * 60 * 1000)).toBe(true);
       await storage.close();
+      const reopened = new SqliteStorage({ filename });
+      expect(reopened.getProfileMaintenanceStartedAt()).toBe(startedAt);
+      expect(reopened.profileMaintenanceDue(Date.parse(startedAt) + 60 * 60 * 1000)).toBe(false);
+      expect(reopened.applyProfileMaintenance(current, { ...current, responsePreferences: 'A.' }, new Date(Date.parse(startedAt) + 24 * 60 * 60 * 1000).toISOString())).toBe(true);
+      expect(reopened.getProfileChanges().at(-1)).toMatchObject({ source: 'maintenance', oldValue: 'A. A.', newValue: 'A.' });
+      const last = reopened.getProfileMaintenanceState()!.lastSucceededAt;
+      expect(profileMaintenanceDue(reopened.getPersistentProfile(), last, Date.parse(last) + 24 * 60 * 60 * 1000)).toBe(true);
+      reopened.updateProfileField('responsePreferences', 'x'.repeat(800), 'settings');
+      expect(reopened.profileMaintenanceDue()).toBe(true);
+      expect(reopened.applyProfileMaintenance(current, current)).toBe(false);
+      expect(reopened.getPersistentProfile().responsePreferences).toHaveLength(800);
+      await reopened.close();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
     expect(profileMaintenanceDue({ ...emptyProfile(), userBackground: 'x'.repeat(1500), responsePreferences: 'x'.repeat(1000),
       standingInstructions: 'x'.repeat(1000), persistentNotes: 'x'.repeat(1200), userPreferredName: 'x'.repeat(100) }, new Date().toISOString())).toBe(true);
+    expect(profileMaintenanceDue({ ...emptyProfile(), userPreferredName: 'x'.repeat(80) }, null)).toBe(true);
+    expect(profileMaintenanceDue({ ...emptyProfile(), userPreferredName: 'x'.repeat(80), assistantPreferredName: 'x'.repeat(80),
+      preferredLanguage: 'x'.repeat(80), responsePreferences: 'x'.repeat(800), standingInstructions: 'x'.repeat(800),
+      userBackground: 'x'.repeat(1200), longTermGoals: 'x'.repeat(800), persistentNotes: 'x'.repeat(960) }, null)).toBe(true);
+  });
+
+  it('uses first nonempty write as a durable time basis and allows early capacity maintenance', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-first-write-'));
+    const filename = join(directory, 'memory.db');
+    try {
+      const first = new SqliteStorage({ filename });
+      first.updateProfileField('preferredLanguage', '中文', 'agent_tool');
+      const startedAt = first.getProfileMaintenanceStartedAt()!;
+      const hour = 60 * 60 * 1000;
+      expect(first.profileMaintenanceDue(Date.parse(startedAt) + 23 * hour)).toBe(false);
+      first.updateProfileField('preferredLanguage', 'x'.repeat(80), 'agent_tool');
+      expect(first.getProfileMaintenanceStartedAt()).toBe(startedAt);
+      expect(first.profileMaintenanceDue(Date.parse(startedAt) + hour)).toBe(true);
+      first.updateProfileField('preferredLanguage', '', 'settings');
+      expect(first.getProfileMaintenanceStartedAt()).toBeNull();
+      first.updateProfileField('preferredLanguage', '中文', 'settings');
+      expect(first.profileMaintenanceDue()).toBe(false);
+      await first.close();
+      const reopened = new SqliteStorage({ filename });
+      const newStartedAt = reopened.getProfileMaintenanceStartedAt()!;
+      expect(reopened.profileMaintenanceDue(Date.parse(newStartedAt) + 23 * hour)).toBe(false);
+      expect(reopened.profileMaintenanceDue(Date.parse(newStartedAt) + 24 * hour)).toBe(true);
+      await reopened.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('bounds failed maintenance attempts durably until Profile content changes', async () => {
@@ -91,6 +128,29 @@ describe('installation-wide Persistent Profile', () => {
       expect(reopened.profileMaintenanceDue(start + 28 * 60 * 60 * 1000 + 1000)).toBe(false);
       reopened.updateProfileField('responsePreferences', '中文'.repeat(499), 'settings');
       expect(reopened.profileMaintenanceDue(start + 48 * 60 * 60 * 1000)).toBe(true);
+      await reopened.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('backfills a pre-fix v12 Profile and removes consent-only index without losing audit rows', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-v12-'));
+    const filename = join(directory, 'memory.db');
+    try {
+      const first = new SqliteStorage({ filename });
+      first.updateProfileField('preferredLanguage', '中文', 'agent_tool', 'msg-1');
+      const firstWriteAt = first.getProfileChanges()[0]!.updatedAt;
+      await first.close();
+      const old = new DatabaseSync(filename);
+      old.exec("DROP TABLE persistent_profile_maintenance_baseline; CREATE UNIQUE INDEX persistent_profile_single_consent ON persistent_profile_changes (source_message_id) WHERE source = 'agent_tool' AND source_message_id IS NOT NULL;");
+      old.close();
+      const reopened = new SqliteStorage({ filename });
+      expect(reopened.getProfileMaintenanceStartedAt()).toBe(firstWriteAt);
+      expect(reopened.profileMaintenanceDue(Date.parse(firstWriteAt) + 60 * 60 * 1000)).toBe(false);
+      expect(reopened.getProfileChanges()).toHaveLength(1);
+      reopened.updateProfileField('userPreferredName', '橙子', 'agent_tool', 'msg-1');
+      expect(reopened.getProfileChanges()).toHaveLength(2);
       await reopened.close();
     } finally {
       await rm(directory, { recursive: true, force: true });

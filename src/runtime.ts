@@ -15,10 +15,8 @@ import {
   rrfRank,
   StorageConflictError,
   StrataGate,
-  PROFILE_FIELDS,
   renderPersistentProfile,
   type PersistentProfile,
-  type ProfileField,
   type ElementSearchResult,
   type EventCard,
   type EventSearchResult,
@@ -368,28 +366,8 @@ export class StrataGateRuntime {
     return this.profileStorage ??= new SqliteStorage({ filename: this.config.database })
   }
 
-  updatePersistentProfileFromTool(session: Session, field: string, value: string) {
-    const messages = typeof session.deriveMessages === 'function' ? session.deriveMessages() : []
-    let lastUserIndex = -1
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      if (messages[index]?.role === 'user' && messages[index]?.source.kind === 'user') { lastUserIndex = index; break }
-    }
-    if (lastUserIndex < 0) throw new Error('Profile update requires a current user message')
-    const lastUser = messages[lastUserIndex]!
-    const userText = renderContent(lastUser.content).trim()
-    let source: 'user_explicit' | 'agent_tool' = 'user_explicit'
-    if (userText === '同意') {
-      if (this.profileStore().hasProfileConsentUse(lastUser.id)) throw new Error('This 同意 has already authorized one Profile change')
-      const previous = messages[lastUserIndex - 1]
-      const proposal = previous?.role === 'assistant' ? renderContent(previous.content) : ''
-      if (!proposalAuthorizesProfileChange(proposal, field, value)) {
-        throw new Error('A direct subsequent 同意 must match the proposed Profile field and exact value')
-      }
-      source = 'agent_tool'
-    } else if (!directUserProfileRequest(userText, field, value)) {
-      throw new Error('Profile update requires an explicit current user request or a directly subsequent 同意')
-    }
-    return this.updatePersistentProfile(field, value, source, lastUser.id)
+  updatePersistentProfileFromTool(field: string, value: string) {
+    return this.updatePersistentProfile(field, value, 'agent_tool')
   }
 
   private async runBackgroundNamespace(namespace: string): Promise<void> {
@@ -2053,78 +2031,6 @@ function currentUserMessage(session: Session): string {
     return renderContent(message.content)
   }
   return ''
-}
-
-const PROFILE_FIELD_LABELS: Record<ProfileField, string> = {
-  userPreferredName: '用户希望你怎么称呼他', assistantPreferredName: '用户希望你叫什么',
-  preferredLanguage: '默认使用语言', responsePreferences: '回复方式和风格偏好',
-  standingInstructions: '长期持续生效的要求', userBackground: '稳定的用户背景',
-  longTermGoals: '长期目标', persistentNotes: '其他必须常驻的信息',
-}
-
-function proposalAuthorizesProfileChange(proposal: string, field: string, value: string): boolean {
-  if (!(field in PROFILE_FIELDS) || !/请回复\s*[“"]?同意[”"]?/u.test(proposal)) return false
-  const questions = [...proposal.matchAll(/(?:^|[。！？\n])\s*((?:要|是否|请问)?\s*(?:将|把)\s*[^。！？\n]*?(?:改为|修改为|设为|设置为|更新为)\s*[“"]([^”"]*)[”"]\s*吗[？?])/gu)]
-  if (questions.length !== 1 || questions[0]![2] !== value) return false
-  const question = questions[0]![1]!
-  const namedFields = (Object.keys(PROFILE_FIELDS) as ProfileField[])
-    .filter((candidate) => question.includes(candidate) || question.includes(PROFILE_FIELD_LABELS[candidate]))
-  return namedFields.length === 1 && namedFields[0] === field
-}
-
-function directUserProfileRequest(userText: string, field: string, value: string): boolean {
-  if (!(field in PROFILE_FIELDS)) return false
-  const fullRequest = userText.trim().replace(/[。！!？?\s]+$/u, '')
-  const request = /^记住[，,:：]\s*(?:以后|今后|从现在|你以后|你今后|你从现在)/u.test(fullRequest)
-    ? fullRequest.replace(/^记住[，,:：]\s*/u, '')
-    : fullRequest
-  const namedFields = (Object.keys(PROFILE_FIELDS) as ProfileField[])
-    .filter((candidate) => request.includes(candidate) || request.includes(PROFILE_FIELD_LABELS[candidate]))
-  if (namedFields.length > 1 || (namedFields.length === 1 && namedFields[0] !== field)) return false
-  const stripValue = (text: string) => text.trim().replace(/^[“"]|[”"]$/g, '').trim()
-  if (namedFields.length === 1) {
-    const fieldName = `(?:${field}|${PROFILE_FIELD_LABELS[field as ProfileField]})`
-    const namedChange = new RegExp(`^(?:以后|今后|从现在起)?(?:请)?(?:把|将)?\\s*${fieldName}\\s*(?:改为|改成|设为|设置为|更新为)\\s*(.+)$`, 'u')
-    const named = request.match(namedChange)?.[1]
-    if (named !== undefined) return stripValue(named) === value
-    if (!value) {
-      const clear = new RegExp(`^(?:请)?(?:(?:清空|清除|删除|置空)\\s*${fieldName}|(?:把|将)?\\s*${fieldName}\\s*(?:清空|清除|删除|置空|设为空|设置为空))$`, 'u')
-      return clear.test(request)
-    }
-    return false
-  }
-  if (!value) return false
-
-  // Require a positive, field-specific instruction with the complete requested
-  // value. A keyword occurring in a denial or unrelated fact is insufficient.
-  const natural: Partial<Record<ProfileField, RegExp[]>> = {
-    userPreferredName: [
-      /^(?:请)?(?:以后|今后|从现在(?:起|开始))(?:请)?(?:都)?(?:叫我|称呼我(?:为)?)(.+)$/u,
-      /^你(?:以后|今后|从现在(?:起|开始))叫我(.+)$/u,
-      /^我希望你(?:以后|今后|从现在(?:起|开始))叫我(.+)$/u,
-    ],
-    assistantPreferredName: [
-      /^(?:请)?(?:以后|今后|从现在(?:起|开始))(?:请)?(?:你叫(?!我)|叫你|称呼你(?:为)?)(.+)$/u,
-      /^我希望你(?:以后|今后|从现在(?:起|开始))叫(?!我)(.+)$/u,
-      /^你(?:以后|今后|从现在(?:起|开始))叫(?!我)(.+)$/u,
-    ],
-    preferredLanguage: [
-      /^(?:请)?(?:(?:以后|今后|从现在(?:起|开始))(?:请)?(?:默认)?|默认)(?:都)?(?:用|说|使用)(.+?)(?:回复|回答|交流)?$/u,
-      /^(?:请)?(?:把)?(?:默认语言|回复语言)(?:改为|改成|设为|设置为)(.+)$/u,
-    ],
-    responsePreferences: [/^(?:请)?(?:以后|今后|从现在(?:起|开始)|默认)(?:都)?(?:回答|回复)(?:请)?(.+)$/u],
-    userBackground: [/^(?:请记住|以后请记住)(?:我的)?(?:职业|身份|背景)(?:是|为)(.+)$/u],
-    longTermGoals: [/^(?:请记住|以后请记住)(?:我的)?(?:长期目标|长远目标)(?:是|为)(.+)$/u],
-  }
-  for (const pattern of natural[field as ProfileField] ?? []) {
-    const match = request.match(pattern)
-    if (match && stripValue(match[1]!) === value) return true
-  }
-  if (field === 'standingInstructions' && value === request
-    && /^(?:以后|今后|从现在起)/.test(request)
-    && /请|不要|别|务必|必须|每次|始终/.test(request)
-    && !/(?:用|说)(?:中文|英文|英语|汉语)|(?:不)?叫我/.test(request)) return true
-  return false
 }
 
 function renderContent(content: readonly ContentBlock[]): string {

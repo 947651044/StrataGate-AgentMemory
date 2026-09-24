@@ -37,7 +37,8 @@ Each call changes exactly one predefined Profile field. Never create, delete, or
     output: jsonOutput,
     execute: async (args, exec) => {
       if (Object.keys(args).some((key) => key !== 'field' && key !== 'value')) throw new TypeError('Unknown Profile update argument')
-      return runtime.updatePersistentProfileFromTool(sessionOf(exec), args.field, args.value) as never
+      sessionOf(exec)
+      return runtime.updatePersistentProfileFromTool(args.field, args.value) as never
     },
   }))
 

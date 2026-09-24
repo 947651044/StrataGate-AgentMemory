@@ -253,14 +253,15 @@ CREATE TABLE IF NOT EXISTS persistent_profile_changes (
   updated_at TEXT NOT NULL,
   source_message_id TEXT
 ) STRICT;
-CREATE UNIQUE INDEX IF NOT EXISTS persistent_profile_single_consent
-  ON persistent_profile_changes (source_message_id)
-  WHERE source = 'agent_tool' AND source_message_id IS NOT NULL;
-
 CREATE TABLE IF NOT EXISTS persistent_profile_maintenance (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   last_succeeded_at TEXT NOT NULL,
   input_json TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS persistent_profile_maintenance_baseline (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  started_at TEXT NOT NULL
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS persistent_profile_maintenance_failures (
@@ -913,9 +914,10 @@ export class SqliteStorage implements StorageAdapter {
       source: row.source, updatedAt: row.updated_at, sourceMessageId: row.source_message_id }));
   }
 
-  hasProfileConsentUse(sourceMessageId: string): boolean {
+  getProfileMaintenanceStartedAt(): string | null {
     this.assertOpen();
-    return Boolean(this.database.prepare("SELECT 1 FROM persistent_profile_changes WHERE source = 'agent_tool' AND source_message_id = ? LIMIT 1").get(sourceMessageId));
+    const row = this.database.prepare('SELECT started_at FROM persistent_profile_maintenance_baseline WHERE id = 1').get() as { started_at: string } | undefined;
+    return row?.started_at ?? null;
   }
 
   getProfileMaintenanceState(): { lastSucceededAt: string; inputJson: string } | null {
@@ -942,11 +944,21 @@ export class SqliteStorage implements StorageAdapter {
     if (!['settings', 'user_explicit', 'agent_tool', 'maintenance'].includes(source)) throw new TypeError('Invalid Profile change source');
     return this.immediateTransaction(() => {
       const profile = this.getPersistentProfile();
+      const wasNonempty = Object.values(profile).some((entry) => entry.length > 0);
       const oldValue = profile[field];
       if (oldValue === value) return { field, value, modified: false };
       profile[field] = value;
       validateProfile(profile);
-      this.writeProfileField(field, oldValue, value, source, sourceMessageId ?? null);
+      const now = new Date().toISOString();
+      this.writeProfileField(field, oldValue, value, source, sourceMessageId ?? null, now);
+      const isNonempty = Object.values(profile).some((entry) => entry.length > 0);
+      if (!wasNonempty && isNonempty) {
+        this.database.prepare('INSERT INTO persistent_profile_maintenance_baseline (id, started_at) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET started_at = excluded.started_at').run(now);
+        this.database.prepare('DELETE FROM persistent_profile_maintenance WHERE id = 1').run();
+        this.database.prepare('DELETE FROM persistent_profile_maintenance_failures WHERE id = 1').run();
+      } else if (!isNonempty) {
+        this.database.prepare('DELETE FROM persistent_profile_maintenance_baseline WHERE id = 1').run();
+      }
       return { field, value, modified: true };
     });
   }
@@ -975,7 +987,7 @@ export class SqliteStorage implements StorageAdapter {
     if (failed?.input_json === JSON.stringify(profile)
       && now < Date.parse(failed.next_retry_at)) return false;
     const state = this.getProfileMaintenanceState();
-    if (!profileMaintenanceDue(profile, state?.lastSucceededAt ?? null, now)) return false;
+    if (!profileMaintenanceDue(profile, state?.lastSucceededAt ?? this.getProfileMaintenanceStartedAt(), now)) return false;
     // A high-capacity profile that could not be compressed is retried after 24h,
     // or immediately after a new edit, rather than on every worker tick.
     return !state || now - Date.parse(state.lastSucceededAt) >= 24 * 60 * 60 * 1000
@@ -1523,6 +1535,19 @@ export class SqliteStorage implements StorageAdapter {
       this.database.exec(THREAD_INDEXES);
       this.enableRawSearchFts();
     }
+    this.immediateTransaction(() => {
+      this.database.exec('DROP INDEX IF EXISTS persistent_profile_single_consent');
+      this.database.exec(`
+        INSERT INTO persistent_profile_maintenance_baseline (id, started_at)
+        SELECT 1, COALESCE(
+          (SELECT MIN(updated_at) FROM persistent_profile_changes WHERE new_value <> ''),
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        )
+        WHERE EXISTS (SELECT 1 FROM persistent_profile WHERE value <> '')
+        ON CONFLICT (id) DO NOTHING
+      `);
+      this.database.exec("DELETE FROM persistent_profile_maintenance_baseline WHERE NOT EXISTS (SELECT 1 FROM persistent_profile WHERE value <> '')");
+    });
     this.assertSchemaVersion();
   }
 
