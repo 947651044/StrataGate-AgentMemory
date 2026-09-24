@@ -106,16 +106,22 @@ function modelBridge(responses: Array<{ text?: string; tool?: unknown; toolName?
 
 describe('DeepSeek Harness model JSON retries', () => {
   it('sends maintenance only the current Profile and rejects added facts in protected fields', async () => {
-    const input = { ...emptyProfile(), responsePreferences: '简洁。简洁。' }
+    const input = { ...emptyProfile(), preferredLanguage: '中文', reasoningLanguage: 'English', responsePreferences: '简洁。简洁。' }
     const output = { ...input, responsePreferences: '简洁。' }
     const { bridge, session, calls } = modelBridge([{ tool: output }])
     expect(await bridge.run(session, () => bridge.maintainProfile(input))).toEqual(output)
     const request = calls.mock.calls[0]![0] as { system: string; messages: Array<{ content: Array<{ text: string }> }> }
     expect(request.system).toContain('Never infer or add facts')
+    expect(request.system).toContain('all nine string fields')
+    expect(request.system).toContain('never infer, copy, or merge either language field into the other')
     expect(JSON.parse(request.messages[0]!.content[0]!.text)).toEqual({ profile: input, fieldDefinitions: expect.any(Object) })
     expect(bridge.takeSuccessfulResponses()).toEqual([])
     const invalid = modelBridge([{ tool: { ...input, userPreferredName: 'invented' } }, { tool: { ...input, userPreferredName: 'invented' } }])
     await expect(invalid.bridge.run(invalid.session, () => invalid.bridge.maintainProfile(input))).rejects.toThrow(/protected short field/)
+    const copied = modelBridge([{ tool: { ...input, reasoningLanguage: '中文' } }, { tool: { ...input, reasoningLanguage: '中文' } }])
+    await expect(copied.bridge.run(copied.session, () => copied.bridge.maintainProfile(input))).rejects.toThrow(/protected short field reasoningLanguage/)
+    const inferred = modelBridge([{ tool: { ...input, preferredLanguage: 'English' } }, { tool: { ...input, preferredLanguage: 'English' } }])
+    await expect(inferred.bridge.run(inferred.session, () => inferred.bridge.maintainProfile(input))).rejects.toThrow(/protected short field preferredLanguage/)
   })
 
   it('reserves enough output for a full Chinese Profile and retries a truncated response', async () => {

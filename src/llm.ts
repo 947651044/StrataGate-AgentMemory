@@ -26,7 +26,7 @@ import type {
   SuccessfulModelResponseKind,
 } from '@diqier/stratagate'
 import { buildMemoryDerivationMessages, EXTERNAL_MEMORY_DECIDER_PROMPT_ZH_CN, nowUtc8, parseExternalMemoryExport } from '@diqier/stratagate'
-import { PROFILE_FIELDS, validateProfile, type PersistentProfile, type ProfileField } from '@diqier/stratagate'
+import { PROFILE_FIELDS, PROFILE_PROTECTED_SHORT_FIELDS, validateProfile, type PersistentProfile } from '@diqier/stratagate'
 import type { ResolvedConfig, StructuredReasoningEffortMode } from './config.js'
 import { ModelJsonResponseError, parseJsonResponse } from './json-response.js'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
@@ -259,7 +259,7 @@ const STRUCTURED_TOOLS = {
   },
   profileMaintenance: {
     name: 'stratagate_maintain_profile',
-    description: 'Return the same eight Persistent Profile fields with only safe wording and redundancy cleanup.',
+    description: 'Return the same nine Persistent Profile fields with only safe wording and redundancy cleanup; preserve the four short fields apart from necessary whitespace cleanup.',
     parameters: PROFILE_MAINTENANCE_PARAMETERS,
   },
 } as const
@@ -571,7 +571,7 @@ export class DshModelBridge {
 
   async maintainProfile(profile: PersistentProfile): Promise<PersistentProfile> {
     const raw = object(await this.callStructured('profileMaintenance',
-      `You maintain only the supplied StrataGate Persistent Profile. Call ${STRUCTURED_TOOLS.profileMaintenance.name} exactly once with all eight string fields. You may deduplicate, merge repeated meaning, shorten redundant wording, and improve organization. Preserve every unique fact, uncertainty, constraint, and instruction. Never infer or add facts, broaden meaning, or read Event, Graph, or conversation history. If two statements might conflict or cannot safely merge, retain both. Keep userPreferredName, assistantPreferredName, and preferredLanguage unchanged except necessary whitespace cleanup. Character limits (Unicode code points): ${JSON.stringify(Object.fromEntries(Object.entries(PROFILE_FIELDS).map(([field, spec]) => [field, spec.maxLength])))}. Total maximum: 6000. If safe compression is impossible, return the original value.`,
+      `You maintain only the supplied StrataGate Persistent Profile. Call ${STRUCTURED_TOOLS.profileMaintenance.name} exactly once with all nine string fields. You may deduplicate, merge repeated meaning, shorten redundant wording, and improve organization. Preserve every unique fact, uncertainty, constraint, and instruction. Never infer or add facts, broaden meaning, or read Event, Graph, or conversation history. If two statements might conflict or cannot safely merge, retain both. Keep userPreferredName, assistantPreferredName, preferredLanguage, and reasoningLanguage unchanged except necessary whitespace cleanup. preferredLanguage and reasoningLanguage are independent: never infer, copy, or merge either language field into the other. reasoningLanguage is only for user-visible reasoning/thinking text when supported, not hidden chain-of-thought. Character limits (Unicode code points): ${JSON.stringify(Object.fromEntries(Object.entries(PROFILE_FIELDS).map(([field, spec]) => [field, spec.maxLength])))}. Total maximum: 6000. If safe compression is impossible, return the original value.`,
       { profile, fieldDefinitions: PROFILE_FIELDS },
     ))
     if (Object.keys(raw).length !== Object.keys(PROFILE_FIELDS).length || Object.keys(raw).some((field) => !(field in PROFILE_FIELDS))) {
@@ -579,7 +579,7 @@ export class DshModelBridge {
     }
     const proposed = raw as PersistentProfile
     validateProfile(proposed)
-    for (const field of ['userPreferredName', 'assistantPreferredName', 'preferredLanguage'] as ProfileField[]) {
+    for (const field of PROFILE_PROTECTED_SHORT_FIELDS) {
       if (proposed[field].trim() !== profile[field].trim()) throw new Error(`Profile maintenance changed protected short field ${field}`)
     }
     return proposed

@@ -39,7 +39,7 @@ import type {
 } from './types.js';
 import { nowUtc8 } from './time.js';
 import { normalizeStandardEventType } from './events.js';
-import { emptyProfile, isProfileField, PROFILE_FIELDS, profileMaintenanceDue, validateProfile,
+import { emptyProfile, isProfileField, PROFILE_FIELDS, PROFILE_PROTECTED_SHORT_FIELDS, profileMaintenanceDue, validateProfile,
   type PersistentProfile, type ProfileChange, type ProfileChangeSource, type ProfileField } from './profile.js';
 import { searchTokens } from './search.js';
 
@@ -983,6 +983,9 @@ export class SqliteStorage implements StorageAdapter {
     validateProfile(proposed);
     if (Object.keys(proposed).length !== Object.keys(PROFILE_FIELDS).length
       || Object.keys(proposed).some((field) => !isProfileField(field))) throw new TypeError('Maintenance returned unknown or missing Profile fields');
+    for (const field of PROFILE_PROTECTED_SHORT_FIELDS) {
+      if (proposed[field].trim() !== expected[field].trim()) throw new Error(`Profile maintenance changed protected short field ${field}`);
+    }
     return this.immediateTransaction(() => {
       const current = this.getPersistentProfile();
       if (JSON.stringify(current) !== JSON.stringify(expected)) return false;

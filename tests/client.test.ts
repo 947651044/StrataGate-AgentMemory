@@ -928,18 +928,21 @@ describe('StrataGate Web client contract', () => {
     expect(elementProps(tree).find((props) => props.className === 'sg-storage-path')?.title).toBe(dataDirectory)
   })
 
-  it('shows eight compact Profile rows on the primary page and no Profile editor in Advanced settings', () => {
+  it('shows nine compact Profile rows on the primary page and no Profile editor in Advanced settings', () => {
     const profile = {
-      userPreferredName: '', assistantPreferredName: '', preferredLanguage: '中文', responsePreferences: '',
+      userPreferredName: '', assistantPreferredName: '', preferredLanguage: '中文', reasoningLanguage: '', responsePreferences: '',
       standingInstructions: '', userBackground: '', longTermGoals: '', persistentNotes: '',
     }
     const { ProfilePage } = loadSupportHelpers([profile])
     const profileTree = ProfilePage()
-    expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-row')).toHaveLength(8)
+    expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-row')).toHaveLength(9)
     expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-group')).toHaveLength(4)
     expect(deepElementProps(profileTree).filter((props) => String(props.id || '').startsWith('sg-profile-') && props.value !== undefined)).toHaveLength(0)
-    expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-action')).toHaveLength(8)
-    expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-value empty')).toHaveLength(7)
+    expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-action')).toHaveLength(9)
+    expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-value empty')).toHaveLength(8)
+    expect(JSON.stringify(profileTree)).toContain('默认回答语言')
+    expect(JSON.stringify(profileTree)).toContain('思考过程语言')
+    expect(JSON.stringify(profileTree)).not.toContain('默认使用语言')
     const settings = loadSupportHelpers().SettingsPage
     const tree = settings({
       selected: { schemaVersion: 12, blockTurnSize: 6, blockDecayLambda: 0.3, currentTurn: 0 },
@@ -952,8 +955,8 @@ describe('StrataGate Web client contract', () => {
   })
 
   it('polls only while visible, keeps an edit draft, and saves only the current field after conflict resolution', async () => {
-    let server = { userPreferredName: '', assistantPreferredName: '', preferredLanguage: '中文', responsePreferences: 'A', standingInstructions: '', userBackground: '', longTermGoals: '', persistentNotes: '' }
-    const revisions: Record<string, number> = { preferredLanguage: 0, responsePreferences: 0 }
+    let server = { userPreferredName: '', assistantPreferredName: '', preferredLanguage: '中文', reasoningLanguage: '', responsePreferences: 'A', standingInstructions: '', userBackground: '', longTermGoals: '', persistentNotes: '' }
+    const revisions: Record<string, number> = { preferredLanguage: 0, reasoningLanguage: 0, responsePreferences: 0 }
     const state: unknown[] = []
     const refs: Array<{ current: unknown }> = []
     const effects: Array<() => () => void> = []
@@ -1009,7 +1012,7 @@ describe('StrataGate Web client contract', () => {
     mounted = true
     await flush()
     expect(reads).toBe(1)
-    expect(deepElementProps(render()).filter((props) => props.className === 'sg-profile-row')).toHaveLength(8)
+    expect(deepElementProps(render()).filter((props) => props.className === 'sg-profile-row')).toHaveLength(9)
     changes = 0
     await tick()
     expect(changes).toBe(0)
@@ -1017,7 +1020,7 @@ describe('StrataGate Web client contract', () => {
     revisions.preferredLanguage = (revisions.preferredLanguage || 0) + 1
     await tick()
     expect(JSON.stringify(render())).toContain('English')
-    const edit = deepElementProps(render()).filter((props) => props.className === 'sg-profile-action')[3]!
+    const edit = deepElementProps(render()).filter((props) => props.className === 'sg-profile-action')[4]!
     edit.onClick()
     let tree = render()
     const textarea = deepElementProps(tree).find((props) => props.id === 'sg-profile-responsePreferences')!
@@ -1026,7 +1029,7 @@ describe('StrataGate Web client contract', () => {
     deepElementProps(render()).find((props) => props.className === 'sg-quiet-button')!.onClick()
     expect(writes).toHaveLength(0)
     expect(deepElementProps(render()).filter((props) => props.id === 'sg-profile-responsePreferences')).toHaveLength(0)
-    deepElementProps(render()).filter((props) => props.className === 'sg-profile-action')[3]!.onClick()
+    deepElementProps(render()).filter((props) => props.className === 'sg-profile-action')[4]!.onClick()
     deepElementProps(render()).find((props) => props.id === 'sg-profile-responsePreferences')!.onChange({ target: { value: 'draft C' } })
     server = { ...server, responsePreferences: 'B', preferredLanguage: 'Français' }
     revisions.responsePreferences = (revisions.responsePreferences || 0) + 1
@@ -1045,6 +1048,28 @@ describe('StrataGate Web client contract', () => {
     deepElementProps(render()).find((props) => props.className === 'sg-save-button')!.onClick()
     await flush()
     expect(writes).toEqual([{ field: 'responsePreferences', value: 'saved C', expectedValue: 'B', expectedRevision: 1 }])
+    expect(server.preferredLanguage).toBe('Français')
+    server = { ...server, reasoningLanguage: '中文' }
+    revisions.reasoningLanguage = (revisions.reasoningLanguage || 0) + 1
+    await tick()
+    expect(JSON.stringify(render())).toContain('中文')
+    deepElementProps(render()).filter((props) => props.className === 'sg-profile-action')[3]!.onClick()
+    expect(deepElementProps(render()).find((props) => props.id === 'sg-profile-reasoningLanguage')?.value).toBe('中文')
+    deepElementProps(render()).find((props) => props.id === 'sg-profile-reasoningLanguage')!.onChange({ target: { value: '日语' } })
+    server = { ...server, reasoningLanguage: 'English' }
+    revisions.reasoningLanguage = (revisions.reasoningLanguage || 0) + 1
+    await tick()
+    tree = render()
+    expect(deepElementProps(tree).find((props) => props.id === 'sg-profile-reasoningLanguage')?.value).toBe('日语')
+    expect(JSON.stringify(tree)).toContain('该项刚刚在其他位置更新')
+    expect(deepElementProps(tree).find((props) => props.className === 'sg-save-button')?.disabled).toBe(true)
+    deepElementProps(tree).find((props) => props.className === 'sg-profile-action' && props.onClick && !props.disabled && props.type === 'button')?.onClick?.()
+    await flush()
+    expect(deepElementProps(render()).find((props) => props.id === 'sg-profile-reasoningLanguage')?.value).toBe('English')
+    deepElementProps(render()).find((props) => props.id === 'sg-profile-reasoningLanguage')!.onChange({ target: { value: '日语' } })
+    deepElementProps(render()).find((props) => props.className === 'sg-save-button')!.onClick()
+    await flush()
+    expect(writes.at(-1)).toEqual({ field: 'reasoningLanguage', value: '日语', expectedValue: 'English', expectedRevision: 2 })
     expect(server.preferredLanguage).toBe('Français')
     document.hidden = true
     onVisibilityChange()

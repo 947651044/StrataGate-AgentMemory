@@ -4,6 +4,7 @@
 
 - Move Persistent Profile to a compact primary tab with grouped, single-field editing.
 - Keep the visible Profile current with lightweight polling, and reject stale same-field Settings saves without overwriting Agent or maintenance changes.
+- Add an independent visible reasoning language preference alongside the final answer language, with nine fixed Profile fields and no change to the overall budget.
 
 ## 0.2.82 - 2026-09-23
 

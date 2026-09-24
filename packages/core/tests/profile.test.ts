@@ -3,16 +3,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { emptyProfile, profileLength, profileMaintenanceDue, renderPersistentProfile } from '../src/profile.js';
+import { emptyProfile, PROFILE_FIELDS, PROFILE_MAINTENANCE_TOTAL_THRESHOLD, PROFILE_TOTAL_MAX_LENGTH, profileLength, profileMaintenanceDue, renderPersistentProfile } from '../src/profile.js';
 import { SqliteStorage } from '../src/sqlite.js';
 
 describe('installation-wide Persistent Profile', () => {
-  it('starts with eight empty fields and updates only one field across connections and namespaces', async () => {
+  it('starts with nine empty fields and updates independent language fields across connections and namespaces', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-'));
     const filename = join(directory, 'memory.db');
     try {
       const first = new SqliteStorage({ filename });
       expect(first.getPersistentProfile()).toEqual(emptyProfile());
+      expect(Object.keys(first.getPersistentProfile())).toHaveLength(9);
+      expect(Object.keys(PROFILE_FIELDS)).toHaveLength(9);
+      expect(PROFILE_FIELDS.reasoningLanguage.maxLength).toBe(100);
+      expect(PROFILE_TOTAL_MAX_LENGTH).toBe(6000);
+      expect(PROFILE_MAINTENANCE_TOTAL_THRESHOLD).toBe(4800);
       expect(first.updateProfileField('preferredLanguage', '中文', 'user_explicit', 'msg-1'))
         .toEqual({ field: 'preferredLanguage', value: '中文', modified: true });
       expect(first.updateProfileField('preferredLanguage', '中文', 'agent_tool').modified).toBe(false);
@@ -22,12 +27,20 @@ describe('installation-wide Persistent Profile', () => {
       })]);
       expect(() => first.updateProfileField('unknown', 'x', 'settings')).toThrow(/Unknown/);
       expect(() => first.updateProfileField('preferredLanguage', 'x'.repeat(101), 'settings')).toThrow(/100 characters/);
+      expect(() => first.updateProfileField('reasoningLanguage', 'x'.repeat(101), 'settings')).toThrow(/100 characters/);
       expect(first.getPersistentProfile().preferredLanguage).toBe('中文');
+      expect(first.getPersistentProfile().reasoningLanguage).toBe('');
       await first.close();
       const second = new SqliteStorage({ filename });
       expect(second.listNamespaces()).toEqual([]);
       expect(second.getPersistentProfile()).toEqual({ ...emptyProfile(), preferredLanguage: '中文' });
+      expect(second.getProfileSnapshot().profile.reasoningLanguage).toBe('');
+      expect(second.getProfileSnapshot().revisions.reasoningLanguage).toBe(0);
+      expect(second.updateProfileField('reasoningLanguage', '中文', 'agent_tool').modified).toBe(true);
+      expect(second.getPersistentProfile()).toEqual({ ...emptyProfile(), preferredLanguage: '中文', reasoningLanguage: '中文' });
       expect(second.updateProfileField('preferredLanguage', '', 'settings').modified).toBe(true);
+      expect(second.getPersistentProfile()).toEqual({ ...emptyProfile(), reasoningLanguage: '中文' });
+      expect(second.updateProfileField('reasoningLanguage', '', 'settings').modified).toBe(true);
       expect(second.getPersistentProfile()).toEqual(emptyProfile());
       await second.close();
     } finally {
@@ -39,7 +52,15 @@ describe('installation-wide Persistent Profile', () => {
     expect(profileLength('😀中文')).toBe(3);
     expect(renderPersistentProfile(emptyProfile())).toBeNull();
     const rendered = renderPersistentProfile({ ...emptyProfile(), preferredLanguage: '中文' });
-    expect(rendered).toContain('Preferred language: 中文');
+    expect(rendered).toContain('Preferred answer language: 中文');
+    expect(rendered).toContain('applies to the assistant\'s final/user-facing answer');
+    expect(rendered).not.toContain('Preferred visible reasoning language:');
+    expect(rendered).not.toContain('when supported');
+    const both = renderPersistentProfile({ ...emptyProfile(), preferredLanguage: 'English', reasoningLanguage: '中文' });
+    expect(both).toContain('Preferred answer language: English');
+    expect(both).toContain('Preferred visible reasoning language: 中文');
+    expect(both).toContain('These are independent preferences. Do not infer one from the other.');
+    expect(both).toContain('It does not control hidden chain-of-thought.');
     expect(rendered).not.toContain('User background:');
     expect(rendered).toContain('It does not override higher-priority system instructions.');
   });
@@ -54,6 +75,8 @@ describe('installation-wide Persistent Profile', () => {
       storage.updateProfileField('responsePreferences', 'A. A.', 'settings');
       const current = storage.getPersistentProfile();
       const startedAt = storage.getProfileMaintenanceStartedAt()!;
+      expect(() => storage.applyProfileMaintenance(current, { ...current, reasoningLanguage: '中文' })).toThrow(/protected short field reasoningLanguage/);
+      expect(() => storage.applyProfileMaintenance(current, { ...current, preferredLanguage: '中文' })).toThrow(/protected short field preferredLanguage/);
       expect(profileMaintenanceDue(current, null)).toBe(false);
       expect(storage.profileMaintenanceDue(Date.parse(startedAt) + 24 * 60 * 60 * 1000 - 1)).toBe(false);
       expect(storage.profileMaintenanceDue(Date.parse(startedAt) + 24 * 60 * 60 * 1000)).toBe(true);
@@ -154,6 +177,26 @@ describe('installation-wide Persistent Profile', () => {
       expect(store.updateProfileField('responsePreferences', 'stale after A→B→A→B', 'settings', null, 'B', firstRevision + 2)).toMatchObject({ conflict: true, modified: false, value: 'B' });
       expect(store.getProfileChanges()).toHaveLength(afterReturn);
       await store.close();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('opens a database containing only the former eight fields without losing them', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-profile-eight-field-'));
+    const filename = join(directory, 'memory.db');
+    try {
+      const legacyFields = Object.keys(PROFILE_FIELDS).filter((field) => field !== 'reasoningLanguage');
+      const first = new SqliteStorage({ filename });
+      for (const field of legacyFields) first.updateProfileField(field, `old-${field}`, 'settings');
+      await first.close();
+      const reopened = new SqliteStorage({ filename });
+      const profile = reopened.getPersistentProfile();
+      expect(Object.keys(profile)).toHaveLength(9);
+      expect(profile.reasoningLanguage).toBe('');
+      for (const field of legacyFields) expect(profile[field as keyof typeof profile]).toBe(`old-${field}`);
+      expect(reopened.getProfileSnapshot().revisions.reasoningLanguage).toBe(0);
+      await reopened.close();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

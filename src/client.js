@@ -3255,7 +3255,7 @@ window.__ModuleLoader__.load({
     }
 
     const profileGroups = [
-      ['身份与语言', [['userPreferredName', '用户希望你怎么称呼他', 100], ['assistantPreferredName', '用户希望你叫什么', 100], ['preferredLanguage', '默认使用语言', 100]]],
+      ['身份与语言', [['userPreferredName', '用户希望你怎么称呼他', 100], ['assistantPreferredName', '用户希望你叫什么', 100], ['preferredLanguage', '默认回答语言', 100], ['reasoningLanguage', '思考过程语言', 100]]],
       ['交互偏好', [['responsePreferences', '回复方式和风格偏好', 1000], ['standingInstructions', '长期持续生效的要求', 1000]]],
       ['关于用户', [['userBackground', '稳定的用户背景', 1500], ['longTermGoals', '长期目标', 1000]]],
       ['其他', [['persistentNotes', '其他必须常驻的信息', 1200]]],
@@ -3348,7 +3348,7 @@ window.__ModuleLoader__.load({
               return h('div', { key: field, className: 'sg-profile-row' },
                 h('div', { className: 'sg-profile-summary' }, h('span', { className: 'sg-profile-label' }, label), h('span', { className: 'sg-profile-value ' + (value ? '' : 'empty'), title: value || undefined }, value || '未设置'), h('button', { type: 'button', className: 'sg-profile-action', onClick: () => beginEdit(field), disabled: saving || Boolean(editing) }, value ? '编辑' : '添加')),
                 isEditing ? h('div', { className: 'sg-profile-editor' },
-                  field === 'userPreferredName' || field === 'assistantPreferredName' || field === 'preferredLanguage'
+                  field === 'userPreferredName' || field === 'assistantPreferredName' || field === 'preferredLanguage' || field === 'reasoningLanguage'
                     ? h('input', { id: 'sg-profile-' + field, 'aria-label': label, value: editing.draft, onChange: (event) => setEditing((current) => ({ ...current, draft: event.target.value })) })
                     : h('textarea', { id: 'sg-profile-' + field, 'aria-label': label, value: editing.draft, onChange: (event) => setEditing((current) => ({ ...current, draft: event.target.value })) }),
                   changedElsewhere || conflict ? h('p', { className: 'sg-profile-conflict', role: 'alert' }, '该项刚刚在其他位置更新。', h('button', { type: 'button', className: 'sg-profile-action', onClick: reloadField }, '载入最新内容')) : null,
