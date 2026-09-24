@@ -81,7 +81,7 @@ Removing the plugin does not delete that database.
 - Each DSH turn has a durable ingestion receipt, so replay or retry cannot store it twice.
 - StrataGate performs Block summarization, Event extraction, versioned Knowledge Graph projection, search, Evidence Gate, and use-only reinforcement.
 - When a Block reaches its boundary, StrataGate first seals durable L3-L5 without touching the DSH surface. Only after validated L0-L2 and Event processing make the Block ready does the plugin use native surface `replace`; pending or failed Blocks keep their original conversation messages. Later decay, manual lift, or λ changes update only ready checkpoints. Unsealed open-tail messages and complete tool-call/result chains remain native DSH messages.
-- Before every main-model call, dynamic system context injects only up to four project-scoped activated Events and four active Graph nodes. It never serializes the current conversation, open tail, sealed Blocks, or tool calls into that prompt.
+- Before every main-model call, a separate Persistent Profile context injects its nonempty global fields without retrieval. The dynamic memory context injects up to four project-scoped activated Events and four active Graph nodes. It never serializes the current conversation, open tail, sealed Blocks, or tool calls into that prompt.
 
 Activated memory uses the current human message plus the latest two open-tail turns from the current session as its query. Existing BM25 search remains the lexical relevance gate; pinned and safety memory are the only exceptions. Existing memory weights provide a second ranking, and RRF fuses the relevance and weight rankings. The activated section has a fixed budget of about 900 tokens, so it does not grow with the database.
 
@@ -129,6 +129,7 @@ memory_search_graph    memory_expand_graph_node
 memory_search_raw      memory_get_blocks
 memory_expand_block    memory_assess
 memory_record_use      memory_remember
+memory_profile_update
 ```
 
 `memory_get_blocks` accepts `scope=session` (the default, preserving the historical
@@ -163,7 +164,9 @@ Open DSH Settings and select **StrataGate-AgentMemory**. The page provides:
 - manual Block expansion and a two-step external-memory import flow;
 - a Usage Audit chain from a recorded answer turn, through the Evidence Gate verdict and selected memories, back to source messages.
 
-Events, graph facts, and source messages cannot be edited, deleted, or approved in the UI. The UI can still change memory state in three explicit ways: manually expand a Block, import memory exported by another AI, and use Advanced Settings to change the completed turns per Block or the global Block decay coefficient λ. When the Block size changes, the UI explains their relationship and suggests a λ that preserves the decay rate per conversation turn; the user decides whether to adopt it. Saved settings immediately apply to every existing workspace, become the defaults for future workspaces, and survive restarts. Existing sealed Blocks are never repartitioned.
+Events, graph facts, and source messages cannot be edited, deleted, or approved in the UI. The UI can manually expand a Block, import memory exported by another AI, and change the completed turns per Block or the global Block decay coefficient λ in Advanced Settings. When the Block size changes, the UI explains their relationship and suggests a λ that preserves the decay rate per conversation turn; the user decides whether to adopt it. Saved settings immediately apply to every existing workspace, become the defaults for future workspaces, and survive restarts. Existing sealed Blocks are never repartitioned.
+
+Advanced Settings also edits eight fixed Persistent Profile fields. The same installation-wide Profile is used by `memory_profile_update`, across sessions and namespaces. Each saved field takes effect on the next model call; empty fields are omitted. Profile values use Unicode code-point limits of 100/100/100/1000/1000/1500/1000/1200 characters, with a 6000-character total budget. The SQLite database records each Settings, tool, and maintenance change with its previous value and source. Maintenance runs when 24 hours have passed since the first nonempty write or the last successful run, or when a capacity threshold is reached; it sees only the current Profile and may compress wording without adding facts. Event extraction and Graph projection never write Profile fields.
 
 The UI validates and previews pasted `stratagate.external-memory.v2` JSON before writing. Malformed input uses a model-backed recovery fallback whose candidates always require review. Exact duplicates are ignored deterministically; the configured model adjudicates other candidates against Top-K local Events as add, merge, supersede, conflict, or ignore. Analysis jobs persist per-candidate progress in SQLite, resume after the import page is reopened, and let users choose the action for low-confidence decisions. High-confidence decisions remain automatic, and a committed import can be undone as one batch. Common token and credential patterns are redacted in message content and structured tool traces before they leave the local server. The SQLite database remains the source of truth.
 

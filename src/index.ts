@@ -118,9 +118,16 @@ export async function apply(ctx: Context, config: StrataGateConfig): Promise<() 
   ctx.systemPrompt.section({ name: 'tool:stratagate-feedback', order: 114, text: FEEDBACK_PROTOCOL })
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
-    const session = context.agent?.session
-    if (!session) return assembled
     const contexts = [...assembled.contexts]
+    try {
+      const profile = runtime.renderProfileContext()
+      if (profile) contexts.push({ name: 'stratagate:persistent-profile', text: profile })
+    } catch (error) {
+      ctx.logger.warn(`stratagate-memory profile context failed: ${renderError(error)}`)
+      throw error
+    }
+    const session = context.agent?.session
+    if (!session) return { ...assembled, contexts }
     try {
       const text = await runtime.buildAutoContext(session)
       contexts.push({ name: 'stratagate:auto-memory', text })

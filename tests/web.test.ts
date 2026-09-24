@@ -1253,4 +1253,29 @@ describe('StrataGate admin routes', () => {
     const result = await request('/api/stratagate/memories', 'POST')
     expect(result).toMatchObject({ status: 405, body: { error: expect.stringContaining('read-only') } })
   })
+
+  it('reads and updates one shared Profile field from Settings', async () => {
+    const profile = { preferredLanguage: '' }
+    const calls: unknown[] = []
+    const profileRuntime = {
+      getPersistentProfile: () => profile,
+      updatePersistentProfile: (field: string, value: string, source: string) => {
+        calls.push({ field, value, source })
+        profile.preferredLanguage = value
+        return { field, value, modified: true }
+      },
+    } as unknown as StrataGateRuntime
+    expect(await request('/api/stratagate/profile', 'GET', profileRuntime)).toMatchObject({ status: 200, body: { preferredLanguage: '' } })
+    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: '中文' }))
+      .toMatchObject({ status: 200, body: { field: 'preferredLanguage', value: '中文', modified: true } })
+    expect(calls).toEqual([{ field: 'preferredLanguage', value: '中文', source: 'settings' }])
+    expect(await request('/api/stratagate/profile', 'GET', profileRuntime)).toMatchObject({ body: { preferredLanguage: '中文' } })
+    const literal = 'Use password: abc as an example; token=demo stays literal.'
+    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: literal }))
+      .toMatchObject({ body: { value: literal } })
+    expect(await request('/api/stratagate/profile', 'GET', profileRuntime)).toMatchObject({ body: { preferredLanguage: literal } })
+    expect(await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: `${literal} More.` }))
+      .toMatchObject({ body: { value: `${literal} More.` } })
+    expect((await request('/api/stratagate/profile', 'PATCH', profileRuntime, { field: 'preferredLanguage', value: '中文', other: true })).status).toBe(400)
+  })
 })

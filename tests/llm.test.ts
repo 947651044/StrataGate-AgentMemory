@@ -4,6 +4,7 @@ import type { ExtractionContext, MemoryBlock } from '@diqier/stratagate'
 import { describe, expect, it, vi } from 'vitest'
 import { ModelJsonResponseError, parseJsonResponse } from '../src/json-response.js'
 import { DshModelBridge } from '../src/llm.js'
+import { emptyProfile } from '@diqier/stratagate'
 
 describe('DeepSeek Harness model JSON parsing', () => {
   it('extracts fenced JSON without being confused by braces in strings', () => {
@@ -104,6 +105,32 @@ function modelBridge(responses: Array<{ text?: string; tool?: unknown; toolName?
 }
 
 describe('DeepSeek Harness model JSON retries', () => {
+  it('sends maintenance only the current Profile and rejects added facts in protected fields', async () => {
+    const input = { ...emptyProfile(), responsePreferences: '简洁。简洁。' }
+    const output = { ...input, responsePreferences: '简洁。' }
+    const { bridge, session, calls } = modelBridge([{ tool: output }])
+    expect(await bridge.run(session, () => bridge.maintainProfile(input))).toEqual(output)
+    const request = calls.mock.calls[0]![0] as { system: string; messages: Array<{ content: Array<{ text: string }> }> }
+    expect(request.system).toContain('Never infer or add facts')
+    expect(JSON.parse(request.messages[0]!.content[0]!.text)).toEqual({ profile: input, fieldDefinitions: expect.any(Object) })
+    expect(bridge.takeSuccessfulResponses()).toEqual([])
+    const invalid = modelBridge([{ tool: { ...input, userPreferredName: 'invented' } }, { tool: { ...input, userPreferredName: 'invented' } }])
+    await expect(invalid.bridge.run(invalid.session, () => invalid.bridge.maintainProfile(input))).rejects.toThrow(/protected short field/)
+  })
+
+  it('reserves enough output for a full Chinese Profile and retries a truncated response', async () => {
+    const input = {
+      ...emptyProfile(), responsePreferences: '中'.repeat(1000), standingInstructions: '文'.repeat(1000),
+      userBackground: '背'.repeat(1500), longTermGoals: '目'.repeat(1000), persistentNotes: '注'.repeat(1200),
+    }
+    const { bridge, session, calls } = modelBridge([
+      { text: '{"partial":', finish: 'max-tokens' }, { tool: input },
+    ])
+    expect(await bridge.run(session, () => bridge.maintainProfile(input))).toEqual(input)
+    expect(calls).toHaveBeenCalledTimes(2)
+    expect(calls.mock.calls[0]![0].maxTokens).toBeGreaterThan(2048)
+  })
+
   it('retries NO_ADAPTER once without spending a structured-response retry', async () => {
     const calls = vi.fn()
     const ctx = {

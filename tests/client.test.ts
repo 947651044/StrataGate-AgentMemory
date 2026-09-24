@@ -928,6 +928,28 @@ describe('StrataGate Web client contract', () => {
     expect(elementProps(tree).find((props) => props.className === 'sg-storage-path')?.title).toBe(dataDirectory)
   })
 
+  it('shows the same eight editable Profile fields in Advanced settings', () => {
+    const profile = {
+      userPreferredName: '', assistantPreferredName: '', preferredLanguage: '中文', responsePreferences: '',
+      standingInstructions: '', userBackground: '', longTermGoals: '', persistentNotes: '',
+    }
+    const { SettingsPage } = loadSupportHelpers(['6', '0.3', profile, profile, '', ''])
+    const tree = SettingsPage({
+      selected: { schemaVersion: 12, blockTurnSize: 6, blockDecayLambda: 0.3, currentTurn: 0 },
+      namespace: '', dataDirectory: '', onBack: () => {}, setView: () => {},
+      updateSettings: () => Promise.resolve(), savingSettings: false, usePluginSettings: null,
+      setEffort: null, resetEffort: null,
+    })
+    const controls = deepElementProps(tree).filter((props) => String(props.id || '').startsWith('sg-profile-') && props.value !== undefined)
+    expect(controls).toHaveLength(8)
+    expect(controls.filter((props) => props.value === '中文')).toHaveLength(1)
+    expect(controls.map((props) => props.id)).toEqual([
+      'sg-profile-userPreferredName', 'sg-profile-assistantPreferredName', 'sg-profile-preferredLanguage',
+      'sg-profile-responsePreferences', 'sg-profile-standingInstructions', 'sg-profile-userBackground',
+      'sg-profile-longTermGoals', 'sg-profile-persistentNotes',
+    ])
+  })
+
   it('inherits the resolved light, dark, or system appearance from DSH theme tokens', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
     expect(source).toContain('color-scheme:inherit')

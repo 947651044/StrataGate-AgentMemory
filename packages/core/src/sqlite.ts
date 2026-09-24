@@ -39,6 +39,8 @@ import type {
 } from './types.js';
 import { nowUtc8 } from './time.js';
 import { normalizeStandardEventType } from './events.js';
+import { emptyProfile, isProfileField, PROFILE_FIELDS, profileMaintenanceDue, validateProfile,
+  type PersistentProfile, type ProfileChange, type ProfileChangeSource, type ProfileField } from './profile.js';
 import { searchTokens } from './search.js';
 
 export interface SqliteStorageOptions {
@@ -237,6 +239,38 @@ interface RawSearchIndexRow {
 }
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS persistent_profile (
+  field TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS persistent_profile_changes (
+  id INTEGER PRIMARY KEY,
+  field TEXT NOT NULL,
+  old_value TEXT NOT NULL,
+  new_value TEXT NOT NULL,
+  source TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  source_message_id TEXT
+) STRICT;
+CREATE TABLE IF NOT EXISTS persistent_profile_maintenance (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  last_succeeded_at TEXT NOT NULL,
+  input_json TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS persistent_profile_maintenance_baseline (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  started_at TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS persistent_profile_maintenance_failures (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  input_json TEXT NOT NULL,
+  failure_count INTEGER NOT NULL,
+  next_retry_at TEXT NOT NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS memory_spaces (
   namespace TEXT PRIMARY KEY,
   schema_version INTEGER NOT NULL,
@@ -927,6 +961,110 @@ export class SqliteStorage implements StorageAdapter {
     this.closed = true;
   }
 
+  /** Installation-wide state; intentionally has no namespace column. */
+  getPersistentProfile(): PersistentProfile {
+    this.assertOpen();
+    const profile = emptyProfile();
+    const rows = this.database.prepare('SELECT field, value FROM persistent_profile').all() as Array<{ field: string; value: string }>;
+    for (const row of rows) if (isProfileField(row.field)) profile[row.field] = row.value;
+    return profile;
+  }
+
+  getProfileChanges(): ProfileChange[] {
+    this.assertOpen();
+    const rows = this.database.prepare('SELECT field, old_value, new_value, source, updated_at, source_message_id FROM persistent_profile_changes ORDER BY id').all() as Array<{
+      field: ProfileField; old_value: string; new_value: string; source: ProfileChangeSource; updated_at: string; source_message_id: string | null;
+    }>;
+    return rows.map((row) => ({ field: row.field, oldValue: row.old_value, newValue: row.new_value,
+      source: row.source, updatedAt: row.updated_at, sourceMessageId: row.source_message_id }));
+  }
+
+  getProfileMaintenanceStartedAt(): string | null {
+    this.assertOpen();
+    const row = this.database.prepare('SELECT started_at FROM persistent_profile_maintenance_baseline WHERE id = 1').get() as { started_at: string } | undefined;
+    return row?.started_at ?? null;
+  }
+
+  getProfileMaintenanceState(): { lastSucceededAt: string; inputJson: string } | null {
+    this.assertOpen();
+    const row = this.database.prepare('SELECT last_succeeded_at, input_json FROM persistent_profile_maintenance WHERE id = 1').get() as { last_succeeded_at: string; input_json: string } | undefined;
+    return row ? { lastSucceededAt: row.last_succeeded_at, inputJson: row.input_json } : null;
+  }
+
+  recordProfileMaintenanceFailure(profile: PersistentProfile, now = Date.now()): void {
+    this.assertOpen();
+    const inputJson = JSON.stringify(profile);
+    const previous = this.database.prepare('SELECT input_json, failure_count, next_retry_at FROM persistent_profile_maintenance_failures WHERE id = 1').get() as { input_json: string; failure_count: number; next_retry_at: string } | undefined;
+    const sameWindow = previous?.input_json === inputJson
+      && !(previous.failure_count >= 3 && now >= Date.parse(previous.next_retry_at));
+    const count = sameWindow ? previous!.failure_count + 1 : 1;
+    const nextRetryAt = new Date(now + (count >= 3 ? 24 * 60 : count * 5) * 60 * 1000).toISOString();
+    this.database.prepare('INSERT INTO persistent_profile_maintenance_failures (id, input_json, failure_count, next_retry_at) VALUES (1, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET input_json = excluded.input_json, failure_count = excluded.failure_count, next_retry_at = excluded.next_retry_at').run(inputJson, count, nextRetryAt);
+  }
+
+  updateProfileField(field: string, value: string, source: ProfileChangeSource, sourceMessageId?: string | null): { field: ProfileField; value: string; modified: boolean } {
+    this.assertOpen();
+    if (!isProfileField(field)) throw new TypeError(`Unknown Persistent Profile field: ${field}`);
+    if (typeof value !== 'string') throw new TypeError('Persistent Profile value must be a string');
+    if (!['settings', 'user_explicit', 'agent_tool', 'maintenance'].includes(source)) throw new TypeError('Invalid Profile change source');
+    return this.immediateTransaction(() => {
+      const profile = this.getPersistentProfile();
+      const wasNonempty = Object.values(profile).some((entry) => entry.length > 0);
+      const oldValue = profile[field];
+      if (oldValue === value) return { field, value, modified: false };
+      profile[field] = value;
+      validateProfile(profile);
+      const now = new Date().toISOString();
+      this.writeProfileField(field, oldValue, value, source, sourceMessageId ?? null, now);
+      const isNonempty = Object.values(profile).some((entry) => entry.length > 0);
+      if (!wasNonempty && isNonempty) {
+        this.database.prepare('INSERT INTO persistent_profile_maintenance_baseline (id, started_at) VALUES (1, ?) ON CONFLICT (id) DO UPDATE SET started_at = excluded.started_at').run(now);
+        this.database.prepare('DELETE FROM persistent_profile_maintenance WHERE id = 1').run();
+        this.database.prepare('DELETE FROM persistent_profile_maintenance_failures WHERE id = 1').run();
+      } else if (!isNonempty) {
+        this.database.prepare('DELETE FROM persistent_profile_maintenance_baseline WHERE id = 1').run();
+      }
+      return { field, value, modified: true };
+    });
+  }
+
+  /** Compare the complete input snapshot before writing a model result. */
+  applyProfileMaintenance(expected: PersistentProfile, proposed: PersistentProfile, now = new Date().toISOString()): boolean {
+    this.assertOpen();
+    validateProfile(proposed);
+    if (Object.keys(proposed).length !== Object.keys(PROFILE_FIELDS).length
+      || Object.keys(proposed).some((field) => !isProfileField(field))) throw new TypeError('Maintenance returned unknown or missing Profile fields');
+    return this.immediateTransaction(() => {
+      const current = this.getPersistentProfile();
+      if (JSON.stringify(current) !== JSON.stringify(expected)) return false;
+      for (const field of Object.keys(PROFILE_FIELDS) as ProfileField[]) {
+        if (current[field] !== proposed[field]) this.writeProfileField(field, current[field], proposed[field], 'maintenance', null, now);
+      }
+      this.database.prepare('INSERT INTO persistent_profile_maintenance (id, last_succeeded_at, input_json) VALUES (1, ?, ?) ON CONFLICT (id) DO UPDATE SET last_succeeded_at = excluded.last_succeeded_at, input_json = excluded.input_json').run(now, JSON.stringify(proposed));
+      this.database.prepare('DELETE FROM persistent_profile_maintenance_failures WHERE id = 1').run();
+      return true;
+    });
+  }
+
+  profileMaintenanceDue(now = Date.now()): boolean {
+    const profile = this.getPersistentProfile();
+    const failed = this.database.prepare('SELECT input_json, failure_count, next_retry_at FROM persistent_profile_maintenance_failures WHERE id = 1').get() as { input_json: string; failure_count: number; next_retry_at: string } | undefined;
+    if (failed?.input_json === JSON.stringify(profile)
+      && now < Date.parse(failed.next_retry_at)) return false;
+    const state = this.getProfileMaintenanceState();
+    if (!profileMaintenanceDue(profile, state?.lastSucceededAt ?? this.getProfileMaintenanceStartedAt(), now)) return false;
+    // A high-capacity profile that could not be compressed is retried after 24h,
+    // or immediately after a new edit, rather than on every worker tick.
+    return !state || now - Date.parse(state.lastSucceededAt) >= 24 * 60 * 60 * 1000
+      || state.inputJson !== JSON.stringify(profile);
+  }
+
+  private writeProfileField(field: ProfileField, oldValue: string, newValue: string, source: ProfileChangeSource, sourceMessageId: string | null, now = new Date().toISOString()): void {
+    this.database.prepare('INSERT INTO persistent_profile (field, value) VALUES (?, ?) ON CONFLICT (field) DO UPDATE SET value = excluded.value').run(field, newValue);
+    this.database.prepare('INSERT INTO persistent_profile_changes (field, old_value, new_value, source, updated_at, source_message_id) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(field, oldValue, newValue, source, now, sourceMessageId);
+  }
+
   searchRawMessageIds(
     namespace: string,
     tokens: readonly string[],
@@ -1515,6 +1653,19 @@ export class SqliteStorage implements StorageAdapter {
       this.rebuildLegacyElementSourceForeignKeys();
       this.enableRawSearchFts();
     }
+    this.immediateTransaction(() => {
+      this.database.exec('DROP INDEX IF EXISTS persistent_profile_single_consent');
+      this.database.exec(`
+        INSERT INTO persistent_profile_maintenance_baseline (id, started_at)
+        SELECT 1, COALESCE(
+          (SELECT MIN(updated_at) FROM persistent_profile_changes WHERE new_value <> ''),
+          strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        )
+        WHERE EXISTS (SELECT 1 FROM persistent_profile WHERE value <> '')
+        ON CONFLICT (id) DO NOTHING
+      `);
+      this.database.exec("DELETE FROM persistent_profile_maintenance_baseline WHERE NOT EXISTS (SELECT 1 FROM persistent_profile WHERE value <> '')");
+    });
     this.assertSchemaVersion();
   }
 

@@ -116,6 +116,7 @@ describe('DSH plugin composition', () => {
       const tools = ctx.tools.schemas()
       const names = tools.map(({ name }) => name)
       expect(names).toEqual([
+        'memory_profile_update',
         'feedback_prepare',
         'memory_search_events',
         'memory_search_graph',
@@ -147,12 +148,13 @@ describe('DSH plugin composition', () => {
         text: expect.stringMatching(/clear error signal[\s\S]*at most one proactive feedback suggestion[\s\S]*namespace plus its substantive characteristics[\s\S]*feedback_prepare itself/),
       }))
 
+      const conversationMessages: Array<{ id: string; role: 'user' | 'assistant'; content: Array<{ type: 'text'; text: string }>; source: { kind: 'user' | 'model' } }> = []
       const session = {
         id: 'auto-context-session',
         header: { id: 'auto-context-session', version: 0, createdAt: 0, cwd: directory },
         snapshotEvents: () => [],
         eventAt: () => undefined,
-        deriveMessages: () => [],
+        deriveMessages: () => conversationMessages,
       } as unknown as Session
       const steered: unknown[] = []
       const agent = {
@@ -166,12 +168,51 @@ describe('DSH plugin composition', () => {
         name: 'stratagate:auto-memory',
         text: expect.stringContaining('[Activated long-term memory]'),
       }))
+      expect(scopedPrompt.contexts.some((item) => item.name === 'stratagate:persistent-profile')).toBe(false)
 
       const search = ctx.tools.get('memory_search_events')
+      const profileUpdate = ctx.tools.get('memory_profile_update')
       const feedbackPrepare = ctx.tools.get('feedback_prepare')
       const recordUse = ctx.tools.get('memory_record_use')
       const remember = ctx.tools.get('memory_remember')
       expect(search).toBeDefined()
+      expect(profileUpdate).toBeDefined()
+      expect(profileUpdate!.description).toMatch(/explicitly asks[\s\S]*called immediately/)
+      expect(profileUpdate!.description).toMatch(/only infers[\s\S]*which field[\s\S]*new value[\s\S]*reply exactly "同意"[\s\S]*Only a directly subsequent "同意"/)
+      expect(profileUpdate!.description).toMatch(/refuses[\s\S]*changes the subject[\s\S]*do not perform the update/)
+      expect(profileUpdate!.description).toMatch(/belongs in Event memory[\s\S]*separate Event-memory tool/)
+      conversationMessages.push({ id: 'profile-user-1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '以后默认都用中文回复。' }] })
+      expect(await profileUpdate!.execute({ field: 'preferredLanguage', value: '中文' }, { agent, callId: 'profile-call' } as never))
+        .toEqual({ field: 'preferredLanguage', value: '中文', modified: true })
+      expect(await profileUpdate!.execute({ field: 'preferredLanguage', value: '中文' }, { agent, callId: 'profile-call-2' } as never))
+        .toEqual({ field: 'preferredLanguage', value: '中文', modified: false })
+      const nextPrompt = await ctx.systemPrompt.assemble({ agent })
+      expect(nextPrompt.contexts).toContainEqual(expect.objectContaining({ name: 'stratagate:persistent-profile', text: expect.stringContaining('Preferred language: 中文') }))
+      expect(nextPrompt.contexts.find((item) => item.name === 'stratagate:persistent-profile')?.text).not.toContain('User background:')
+      for (const [id, utterance, field, value] of [
+        ['chinese-language', '以后都用英文回答我。', 'preferredLanguage', '英文'],
+        ['english-language', 'From now on, please answer me in English.', 'preferredLanguage', 'English'],
+        ['chinese-name', '以后叫我橙子。', 'userPreferredName', '橙子'],
+        ['remember-assistant', '记住，你以后叫小橙。', 'assistantPreferredName', '小橙'],
+      ] as const) {
+        conversationMessages.push({ id, role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: utterance }] })
+        expect(await profileUpdate!.execute({ field, value }, { agent, callId: id } as never))
+          .toMatchObject({ field, value, modified: true })
+      }
+      // The agent applies the description's consent rule; runtime does not parse proposal wording.
+      conversationMessages.push({ id: 'profile-proposal', role: 'assistant', source: { kind: 'model' }, content: [{ type: 'text', text: 'I could keep responses concise in future. Reply 同意 to save responsePreferences = concise.' }] })
+      conversationMessages.push({ id: 'profile-consent', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '同意' }] })
+      expect(await profileUpdate!.execute({ field: 'responsePreferences', value: 'concise' }, { agent, callId: 'profile-consent' } as never))
+        .toMatchObject({ modified: true })
+      await expect(profileUpdate!.execute({ field: 'notAProfileField', value: 'x' } as never, { agent, callId: 'unknown-field' } as never))
+        .rejects.toThrow(/"field" must be one of|Unknown Persistent Profile field/)
+      await expect(profileUpdate!.execute({ field: 'preferredLanguage', value: 42 } as never, { agent, callId: 'non-string' } as never))
+        .rejects.toThrow(/string/)
+      await expect(profileUpdate!.execute({ field: 'preferredLanguage', value: 'x'.repeat(101) }, { agent, callId: 'too-long' } as never))
+        .rejects.toThrow(/100 characters/)
+      await expect(profileUpdate!.execute({ field: 'preferredLanguage', value: 'English', userPreferredName: 'wrong' } as never, { agent, callId: 'two-fields' } as never))
+        .rejects.toThrow(/Unknown Profile update argument/)
+      expect(profileUpdate!.parameters).toMatchObject({ required: ['field', 'value'], properties: { field: { type: 'string' }, value: { type: 'string' } } })
       expect(feedbackPrepare).toBeDefined()
       expect(recordUse).toBeDefined()
       expect(remember).toBeDefined()

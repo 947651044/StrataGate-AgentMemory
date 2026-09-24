@@ -5,6 +5,11 @@
 - Let the agent record durable long-term memories through `memory_remember`: each recording is written into a new isolated `agent_events` pool (schema v12) that mirrors the Event model, gets a synthetic `agent-memory:` provenance block, and projects into the Knowledge Graph.
 - Resolve duplicates and conflicts before writing: exact and near duplicates reinforce the existing card, ambiguous overlap gets one synchronous model adjudication reusing the external-memory decision contract (add/merge/supersede/conflict/ignore with a non-destructive low-confidence downgrade), and clear-new facts write without a model call.
 - Merge agent-recorded Events into retrieval through per-pool top-k lanes: the passive and agent pools are ranked independently and fused with weighted RRF, keeping `source: 'agent-recorded'` cards, cross-session persistence, and the `/api/stratagate/agent-memories` view; `agentMemoryRetrievalWeight` tunes the agent lane's share (0–5, default 1) and `agentMemoryEnabled: false` disables and unregisters the feature.
+## 0.2.82 - 2026-09-23
+
+- Add a global, eight-field Persistent Profile that enters every model call without retrieval, with one-field Settings and `memory_profile_update` edits.
+- Track Profile changes in SQLite and safely compress existing Profile wording in a bounded background maintenance pass.
+
 ## 0.2.81 - 2026-09-23
 
 - Bound Event extraction history to eight relevant and four recently formed Events, excluding forgotten and archived memory while keeping superseded history eligible.

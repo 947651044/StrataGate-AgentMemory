@@ -39,7 +39,7 @@ export interface BlockSummaryJob {
   updatedAt: string;
 }
 
-export type SuccessfulModelResponseKind = 'summarizer' | 'extractor' | 'projector' | 'graphProjector' | 'externalMemoryExtractor' | 'externalMemoryDecider';
+export type SuccessfulModelResponseKind = 'summarizer' | 'extractor' | 'projector' | 'graphProjector' | 'externalMemoryExtractor' | 'externalMemoryDecider' | 'profileMaintenance';
 
 export interface SuccessfulModelResponse {
   id: string;
@@ -376,6 +376,8 @@ export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
       schemaVersion: STRATAGATE_STORAGE_SCHEMA_VERSION,
       agentEvents: [],
     };
+  } else if (schemaVersion === 11) {
+    snapshot = { ...structuredClone(value as StrataGateSnapshot), schemaVersion: STRATAGATE_STORAGE_SCHEMA_VERSION };
   } else if (schemaVersion === STRATAGATE_STORAGE_SCHEMA_VERSION) {
     snapshot = structuredClone(value) as StrataGateSnapshot;
   } else {
