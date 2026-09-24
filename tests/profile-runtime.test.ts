@@ -32,7 +32,7 @@ describe('DSH Persistent Profile runtime', () => {
       expect(first.namespaceFor(a)).not.toBe(first.namespaceFor(b))
       first.updatePersistentProfileFromTool('preferredLanguage', '中文')
       first.updatePersistentProfile('responsePreferences', '简洁。简洁。', 'user_explicit', 'msg-1')
-      expect(first.renderProfileContext()).toContain('Preferred language: 中文')
+      expect(first.renderProfileContext()).toContain('Preferred answer language: 中文')
       expect(first.getPersistentProfile().preferredLanguage).toBe('中文')
       ready = true
       const writtenAt = Date.now()

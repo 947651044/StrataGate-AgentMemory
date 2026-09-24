@@ -1,6 +1,6 @@
 {
   "name": "stratagate-dsh",
-  "version": "0.2.82",
+  "version": "0.2.83",
   "description": "Recent conversations stay vivid. Older ones fade into summaries, not oblivion. StrataGate gives DeepSeek Harness six-layer, time-decaying memory, while lasting events and relationships settle into a knowledge graph. Bring your memories from other AIs with you—no need to start over.",
   "type": "module",
   "main": "./dist/index.js",
@@ -56,6 +56,7 @@
     "check:workbuddy": "npm run check --workspace stratagate-workbuddy",
     "test": "npm run test:core && npm run test:dsh && npm run test:workbuddy",
     "test:dsh": "vitest run --config vitest.config.ts",
+    "test:profile-browser": "node scripts/test-profile-browser.mjs",
     "test:core": "npm run test --workspace @diqier/stratagate",
     "test:workbuddy": "npm run test --workspace stratagate-workbuddy",
     "verify:dsh": "npm run build:dsh && node scripts/verify-package.mjs && npm pack --ignore-scripts --pack-destination . && node scripts/verify-dsh-install.mjs",
@@ -223,6 +224,7 @@
     "cytoscape": "^3.34.1",
     "cytoscape-fcose": "^2.2.0",
     "esbuild": "^0.28.2",
+    "playwright-core": "^1.63.0",
     "tsup": "^8.5.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"

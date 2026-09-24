@@ -348,6 +348,10 @@ export class StrataGateRuntime {
     return this.profileStore().getPersistentProfile()
   }
 
+  getProfileSnapshot() {
+    return this.profileStore().getProfileSnapshot()
+  }
+
   renderProfileContext(): string | null {
     return renderPersistentProfile(this.getPersistentProfile())
   }
@@ -356,8 +360,8 @@ export class StrataGateRuntime {
     return this.profileStore().getProfileChanges()
   }
 
-  updatePersistentProfile(field: string, value: string, source: 'settings' | 'user_explicit' | 'agent_tool', sourceMessageId?: string | null) {
-    const result = this.profileStore().updateProfileField(field, value, source, sourceMessageId)
+  updatePersistentProfile(field: string, value: string, source: 'settings' | 'user_explicit' | 'agent_tool', sourceMessageId?: string | null, expectedValue?: string, expectedRevision?: number) {
+    const result = this.profileStore().updateProfileField(field, value, source, sourceMessageId, expectedValue, expectedRevision)
     if (result.modified) this.wakeBackgroundWorker()
     return result
   }

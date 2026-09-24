@@ -6,7 +6,7 @@ function loadSupportHelpers(stateValues: unknown[] = [], globals: Record<string,
   const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
   const instrumented = source.replace(
     "    exports.name = 'stratagate-dsh'",
-    "    exports.__test = { feedbackDraftMarkdown, restoreFeedbackDraftValues, shouldExpandFeedbackPreview, handleFeedbackIssueResult, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, MemoryStatusAlert, taskStatus, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
+    "    exports.__test = { feedbackDraftMarkdown, restoreFeedbackDraftValues, shouldExpandFeedbackPreview, handleFeedbackIssueResult, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, MemoryStatusAlert, taskStatus, ProfilePage, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
   )
   let definition: any
   runInNewContext(instrumented, {
@@ -20,7 +20,7 @@ function loadSupportHelpers(stateValues: unknown[] = [], globals: Record<string,
     },
   })
   let stateIndex = 0
-  const React = {
+  const React = (globals.react as any) || {
     createContext: (value: unknown) => ({ Provider: 'provider', value }),
     createElement: (...args: unknown[]) => args,
     Fragment: 'fragment',
@@ -808,7 +808,7 @@ describe('StrataGate Web client contract', () => {
   it('uses the memory-first three-part information architecture', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
     expect(source).toContain("const [section, setSection] = React.useState('short')")
-    expect(source).toContain("[['short', '短期记忆'], ['long', '长期记忆'], ['more', '更多']]")
+    expect(source).toContain("[['profile', '常驻画像'], ['short', '短期记忆'], ['long', '长期记忆'], ['more', '更多']]")
     expect(source).toContain('块衰减总览')
     expect(source).toContain('开放块 · 未封存')
     expect(source).toContain('距最新封存块')
@@ -928,26 +928,158 @@ describe('StrataGate Web client contract', () => {
     expect(elementProps(tree).find((props) => props.className === 'sg-storage-path')?.title).toBe(dataDirectory)
   })
 
-  it('shows the same eight editable Profile fields in Advanced settings', () => {
+  it('shows nine compact Profile rows on the primary page and no Profile editor in Advanced settings', () => {
     const profile = {
-      userPreferredName: '', assistantPreferredName: '', preferredLanguage: '中文', responsePreferences: '',
+      userPreferredName: '', assistantPreferredName: '', preferredLanguage: '中文', reasoningLanguage: '', responsePreferences: '',
       standingInstructions: '', userBackground: '', longTermGoals: '', persistentNotes: '',
     }
-    const { SettingsPage } = loadSupportHelpers(['6', '0.3', profile, profile, '', ''])
-    const tree = SettingsPage({
+    const { ProfilePage } = loadSupportHelpers([profile])
+    const profileTree = ProfilePage()
+    expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-row')).toHaveLength(9)
+    expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-group')).toHaveLength(4)
+    expect(deepElementProps(profileTree).filter((props) => String(props.id || '').startsWith('sg-profile-') && props.value !== undefined)).toHaveLength(0)
+    expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-action')).toHaveLength(9)
+    expect(deepElementProps(profileTree).filter((props) => props.className === 'sg-profile-value empty')).toHaveLength(8)
+    expect(JSON.stringify(profileTree)).toContain('默认回答语言')
+    expect(JSON.stringify(profileTree)).toContain('思考过程语言')
+    expect(JSON.stringify(profileTree)).not.toContain('默认使用语言')
+    const settings = loadSupportHelpers().SettingsPage
+    const tree = settings({
       selected: { schemaVersion: 12, blockTurnSize: 6, blockDecayLambda: 0.3, currentTurn: 0 },
       namespace: '', dataDirectory: '', onBack: () => {}, setView: () => {},
       updateSettings: () => Promise.resolve(), savingSettings: false, usePluginSettings: null,
       setEffort: null, resetEffort: null,
     })
-    const controls = deepElementProps(tree).filter((props) => String(props.id || '').startsWith('sg-profile-') && props.value !== undefined)
-    expect(controls).toHaveLength(8)
-    expect(controls.filter((props) => props.value === '中文')).toHaveLength(1)
-    expect(controls.map((props) => props.id)).toEqual([
-      'sg-profile-userPreferredName', 'sg-profile-assistantPreferredName', 'sg-profile-preferredLanguage',
-      'sg-profile-responsePreferences', 'sg-profile-standingInstructions', 'sg-profile-userBackground',
-      'sg-profile-longTermGoals', 'sg-profile-persistentNotes',
-    ])
+    expect(deepElementProps(tree).filter((props) => String(props.id || '').startsWith('sg-profile-'))).toHaveLength(0)
+    expect(elementProps(tree).some((props) => props['aria-labelledby'] === 'sg-profile-title')).toBe(false)
+  })
+
+  it('polls only while visible, keeps an edit draft, and saves only the current field after conflict resolution', async () => {
+    let server = { userPreferredName: '', assistantPreferredName: '', preferredLanguage: '中文', reasoningLanguage: '', responsePreferences: 'A', standingInstructions: '', userBackground: '', longTermGoals: '', persistentNotes: '' }
+    const revisions: Record<string, number> = { preferredLanguage: 0, reasoningLanguage: 0, responsePreferences: 0 }
+    const state: unknown[] = []
+    const refs: Array<{ current: unknown }> = []
+    const effects: Array<() => () => void> = []
+    const timers = new Map<number, () => void>()
+    const writes: Array<{ field: string; value: string; expectedValue: string; expectedRevision: number }> = []
+    let stateIndex = 0
+    let refIndex = 0
+    let nextTimer = 0
+    let mounted = false
+    let reads = 0
+    let changes = 0
+    let onVisibilityChange = () => {}
+    const document = { hidden: false, addEventListener: (_name: string, listener: () => void) => { onVisibilityChange = listener }, removeEventListener: () => {} }
+    const react = {
+      createContext: (value: unknown) => ({ Provider: 'provider', value }),
+      createElement: (...args: unknown[]) => args, Fragment: 'fragment',
+      useState: (initial: unknown) => {
+        const index = stateIndex++
+        if (!(index in state)) state[index] = initial
+        return [state[index], (update: unknown) => {
+          const next = typeof update === 'function' ? (update as (value: unknown) => unknown)(state[index]) : update
+          if (next !== state[index]) changes++
+          state[index] = next
+        }]
+      },
+      useRef: (initial: unknown) => {
+        const index = refIndex++
+        return refs[index] ||= { current: initial }
+      },
+      useEffect: (effect: () => () => void) => { if (!mounted) effects.push(effect) },
+    }
+    const { ProfilePage } = loadSupportHelpers([], {
+      react, document, AbortController,
+      window: { setTimeout: (callback: () => void) => { const id = ++nextTimer; timers.set(id, callback); return id }, clearTimeout: (id: number) => timers.delete(id) },
+      fetch: async (_url: string, options: { method?: string; body?: string } = {}) => {
+        if (options.method === 'PATCH') {
+          const body = JSON.parse(options.body || '{}') as { field: string; value: string; expectedValue: string; expectedRevision: number }
+          writes.push(body)
+          if (server[body.field as keyof typeof server] !== body.expectedValue || revisions[body.field] !== body.expectedRevision) return { ok: false, status: 409, json: async () => ({ error: '该项刚刚在其他位置更新' }) }
+          server = { ...server, [body.field]: body.value }
+          revisions[body.field] = (revisions[body.field] || 0) + 1
+          return { ok: true, json: async () => ({ field: body.field, value: body.value, modified: true, snapshot: { ...server, _revisions: { ...revisions } } }) }
+        }
+        reads++
+        return { ok: true, json: async () => ({ ...server, _revisions: { ...revisions } }) }
+      },
+    })
+    const render = () => { stateIndex = 0; refIndex = 0; return ProfilePage() }
+    const flush = () => new Promise((resolve) => setImmediate(resolve))
+    const tick = async () => { const next = timers.entries().next().value as [number, () => void]; expect(next).toBeDefined(); timers.delete(next[0]); next[1](); await flush() }
+    render()
+    const cleanup = effects[0]!()
+    mounted = true
+    await flush()
+    expect(reads).toBe(1)
+    expect(deepElementProps(render()).filter((props) => props.className === 'sg-profile-row')).toHaveLength(9)
+    changes = 0
+    await tick()
+    expect(changes).toBe(0)
+    server = { ...server, preferredLanguage: 'English' }
+    revisions.preferredLanguage = (revisions.preferredLanguage || 0) + 1
+    await tick()
+    expect(JSON.stringify(render())).toContain('English')
+    const edit = deepElementProps(render()).filter((props) => props.className === 'sg-profile-action')[4]!
+    edit.onClick()
+    let tree = render()
+    const textarea = deepElementProps(tree).find((props) => props.id === 'sg-profile-responsePreferences')!
+    expect(textarea.value).toBe('A')
+    textarea.onChange({ target: { value: 'discarded draft' } })
+    deepElementProps(render()).find((props) => props.className === 'sg-quiet-button')!.onClick()
+    expect(writes).toHaveLength(0)
+    expect(deepElementProps(render()).filter((props) => props.id === 'sg-profile-responsePreferences')).toHaveLength(0)
+    deepElementProps(render()).filter((props) => props.className === 'sg-profile-action')[4]!.onClick()
+    deepElementProps(render()).find((props) => props.id === 'sg-profile-responsePreferences')!.onChange({ target: { value: 'draft C' } })
+    server = { ...server, responsePreferences: 'B', preferredLanguage: 'Français' }
+    revisions.responsePreferences = (revisions.responsePreferences || 0) + 1
+    revisions.preferredLanguage = (revisions.preferredLanguage || 0) + 1
+    await tick()
+    tree = render()
+    expect(deepElementProps(tree).find((props) => props.id === 'sg-profile-responsePreferences')?.value).toBe('draft C')
+    expect(JSON.stringify(tree)).toContain('Français')
+    expect(JSON.stringify(tree)).toContain('该项刚刚在其他位置更新')
+    expect(deepElementProps(tree).find((props) => props.className === 'sg-save-button')?.disabled).toBe(true)
+    deepElementProps(tree).find((props) => props.className === 'sg-profile-action' && props.onClick && !props.disabled && props.type === 'button')?.onClick?.()
+    await flush()
+    tree = render()
+    expect(deepElementProps(tree).find((props) => props.id === 'sg-profile-responsePreferences')?.value).toBe('B')
+    deepElementProps(tree).find((props) => props.id === 'sg-profile-responsePreferences')!.onChange({ target: { value: 'saved C' } })
+    deepElementProps(render()).find((props) => props.className === 'sg-save-button')!.onClick()
+    await flush()
+    expect(writes).toEqual([{ field: 'responsePreferences', value: 'saved C', expectedValue: 'B', expectedRevision: 1 }])
+    expect(server.preferredLanguage).toBe('Français')
+    server = { ...server, reasoningLanguage: '中文' }
+    revisions.reasoningLanguage = (revisions.reasoningLanguage || 0) + 1
+    await tick()
+    expect(JSON.stringify(render())).toContain('中文')
+    deepElementProps(render()).filter((props) => props.className === 'sg-profile-action')[3]!.onClick()
+    expect(deepElementProps(render()).find((props) => props.id === 'sg-profile-reasoningLanguage')?.value).toBe('中文')
+    deepElementProps(render()).find((props) => props.id === 'sg-profile-reasoningLanguage')!.onChange({ target: { value: '日语' } })
+    server = { ...server, reasoningLanguage: 'English' }
+    revisions.reasoningLanguage = (revisions.reasoningLanguage || 0) + 1
+    await tick()
+    tree = render()
+    expect(deepElementProps(tree).find((props) => props.id === 'sg-profile-reasoningLanguage')?.value).toBe('日语')
+    expect(JSON.stringify(tree)).toContain('该项刚刚在其他位置更新')
+    expect(deepElementProps(tree).find((props) => props.className === 'sg-save-button')?.disabled).toBe(true)
+    deepElementProps(tree).find((props) => props.className === 'sg-profile-action' && props.onClick && !props.disabled && props.type === 'button')?.onClick?.()
+    await flush()
+    expect(deepElementProps(render()).find((props) => props.id === 'sg-profile-reasoningLanguage')?.value).toBe('English')
+    deepElementProps(render()).find((props) => props.id === 'sg-profile-reasoningLanguage')!.onChange({ target: { value: '日语' } })
+    deepElementProps(render()).find((props) => props.className === 'sg-save-button')!.onClick()
+    await flush()
+    expect(writes.at(-1)).toEqual({ field: 'reasoningLanguage', value: '日语', expectedValue: 'English', expectedRevision: 2 })
+    expect(server.preferredLanguage).toBe('Français')
+    document.hidden = true
+    onVisibilityChange()
+    expect(timers.size).toBe(0)
+    document.hidden = false
+    onVisibilityChange()
+    await flush()
+    expect(reads).toBeGreaterThan(3)
+    cleanup()
+    expect(timers.size).toBe(0)
   })
 
   it('inherits the resolved light, dark, or system appearance from DSH theme tokens', () => {

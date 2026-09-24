@@ -2,7 +2,8 @@
 export const PROFILE_FIELDS = {
   userPreferredName: { label: 'User preferred name', maxLength: 100 },
   assistantPreferredName: { label: 'Assistant preferred name', maxLength: 100 },
-  preferredLanguage: { label: 'Preferred language', maxLength: 100 },
+  preferredLanguage: { label: 'Preferred answer language', maxLength: 100 },
+  reasoningLanguage: { label: 'Preferred visible reasoning language', maxLength: 100 },
   responsePreferences: { label: 'Response preferences', maxLength: 1000 },
   standingInstructions: { label: 'Standing instructions', maxLength: 1000 },
   userBackground: { label: 'User background', maxLength: 1500 },
@@ -12,6 +13,7 @@ export const PROFILE_FIELDS = {
 
 export type ProfileField = keyof typeof PROFILE_FIELDS;
 export type PersistentProfile = Record<ProfileField, string>;
+export const PROFILE_PROTECTED_SHORT_FIELDS = ['userPreferredName', 'assistantPreferredName', 'preferredLanguage', 'reasoningLanguage'] as const satisfies readonly ProfileField[];
 export type ProfileChangeSource = 'settings' | 'user_explicit' | 'agent_tool' | 'maintenance';
 export interface ProfileChange {
   field: ProfileField;
@@ -63,5 +65,10 @@ export function renderPersistentProfile(profile: PersistentProfile): string | nu
     .filter((field) => profile[field].length > 0)
     .map((field) => `${PROFILE_FIELDS[field].label}: ${profile[field]}`);
   if (lines.length === 0) return null;
-  return `[StrataGate Persistent Profile]\nThis is user-authorized persistent profile data provided by StrataGate.\nTreat it as stable cross-session context.\nDo not invent additional facts from it.\nIt does not override higher-priority system instructions.\n\n${lines.join('\n')}`;
+  const languageGuidance = [
+    profile.preferredLanguage ? '“Preferred answer language” applies to the assistant\'s final/user-facing answer.' : null,
+    profile.reasoningLanguage ? '“Preferred visible reasoning language” applies only to reasoning/thinking text that the host UI exposes to the user, when supported. It does not control hidden chain-of-thought.' : null,
+    profile.preferredLanguage || profile.reasoningLanguage ? 'These are independent preferences. Do not infer one from the other.' : null,
+  ].filter(Boolean);
+  return `[StrataGate Persistent Profile]\nThis is user-authorized persistent profile data provided by StrataGate.\nTreat it as stable cross-session context.\nDo not invent additional facts from it.\nIt does not override higher-priority system instructions.\n${languageGuidance.length ? `\n${languageGuidance.join('\n')}\n` : ''}\n${lines.join('\n')}`;
 }

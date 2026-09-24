@@ -342,6 +342,11 @@ window.__ModuleLoader__.load({
       .sg-support-ai-notice{position:sticky;top:8px;z-index:8;display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:10px;margin:12px 0;padding:13px 14px;border:1px solid color-mix(in srgb,var(--sg-good) 45%,var(--sg-border));border-radius:8px;background:color-mix(in srgb,var(--sg-good-soft) 92%,var(--sg-surface));color:var(--sg-text);box-shadow:0 8px 24px rgba(0,0,0,.16);scroll-margin-top:8px}.sg-support-ai-notice-mark{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--sg-good);color:#fff;font-weight:800}.sg-support-ai-notice strong{display:block;color:var(--sg-good);font-size:13px}.sg-support-ai-notice p{margin:4px 0 0;color:var(--sg-text);font-size:12px;line-height:1.5}.sg-support-ai-notice .sg-quiet-button{margin-top:9px}.sg-support-ai-notice-close{display:grid;place-items:center;width:26px;height:26px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--sg-muted);font-size:20px;line-height:1;cursor:pointer}.sg-support-ai-notice-close:hover{background:var(--sg-soft);color:var(--sg-text)}
       @media (max-width:560px){.sg-decay-head{align-items:flex-start;flex-direction:column}.sg-conversation{width:100%;justify-content:flex-start}.sg-conversation select{max-width:100%;flex:1}}
       @media (prefers-reduced-motion:reduce){.sg-memory *,.sg-memory *:before,.sg-memory *:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.sg-processing-icon,.sg-memory-alert-mark{animation:none}.sg-skeleton:after{display:none}}
+      .sg-tabs{grid-template-columns:repeat(4,1fr)}
+      .sg-profile-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.sg-profile-sync{color:var(--sg-muted);font-size:11px;white-space:nowrap}.sg-profile-sync:before{content:'●';margin-right:5px;color:var(--sg-good)}.sg-profile-sync.pending:before{color:var(--sg-accent)}.sg-profile-sync.failed:before{color:var(--sg-danger)}
+      .sg-profile-group{margin-top:19px;padding:14px 16px 3px;border:1px solid var(--sg-border);border-radius:10px;background:color-mix(in srgb,var(--sg-surface) 62%,transparent)}.sg-profile-group h3{margin:0 0 4px;font-size:14px}.sg-profile-row{border-bottom:1px solid var(--sg-border)}.sg-profile-row:last-child{border-bottom:0}.sg-profile-summary{display:grid;grid-template-columns:minmax(170px,1fr) minmax(0,2fr) auto;align-items:center;gap:14px;min-height:51px}.sg-profile-label{font-size:13px;font-weight:650}.sg-profile-value{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--sg-muted);font-size:13px}.sg-profile-value.empty{opacity:.66}.sg-profile-action{padding:5px 8px;border:0;border-radius:6px;background:transparent;color:var(--sg-accent)!important;cursor:pointer;font-size:12px!important}.sg-profile-action:hover{background:var(--sg-accent-soft)}.sg-profile-editor{padding:0 0 14px}.sg-profile-editor :is(input,textarea){width:100%;padding:9px 10px;border:1px solid var(--sg-border);border-radius:7px;background:var(--sg-surface);color:var(--sg-text);outline:0}.sg-profile-editor textarea{min-height:104px;resize:vertical;font:inherit}.sg-profile-editor :is(input,textarea):focus{border-color:var(--sg-accent);box-shadow:0 0 0 3px var(--sg-focus)}.sg-profile-editor-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:7px}.sg-profile-count{color:var(--sg-muted);font-size:11px}.sg-profile-actions{display:flex;align-items:center;gap:6px}.sg-profile-actions .sg-save-button{margin-top:0}.sg-profile-conflict{margin:8px 0 0;color:var(--sg-warn);font-size:12px}.sg-profile-error{margin:8px 0 0;color:var(--sg-danger);font-size:12px}
+      .sg-profile-action:disabled{opacity:.45;cursor:default}.sg-profile-action:disabled:hover{background:transparent}
+      @media(max-width:560px){.sg-profile-summary{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px}.sg-profile-group{padding:11px 12px 2px}.sg-profile-label,.sg-profile-value{font-size:12px}}
       ${eventDetailCss}
     `
 
@@ -3249,40 +3254,111 @@ window.__ModuleLoader__.load({
       return h(React.Fragment, null, h(BackBar, { label: backLabel, onBack }), h('div', { className: 'sg-intro' }, h('h2', null, '原始数据'), h('p', null, '供排查问题使用的内部字段与 JSON')), groups.map(([label, value, total]) => h('details', { key: label, className: 'sg-raw-group' }, h('summary', null, label + ' (' + (Array.isArray(value) && Number(total) > value.length ? '已加载 ' + value.length + ' / 共 ' + total : Array.isArray(value) ? value.length : ((value.nodes?.length || 0) + (value.edges?.length || 0))) + ')'), h('pre', { className: 'sg-raw-json sg-code' }, JSON.stringify(value, null, 2)))))
     }
 
+    const profileGroups = [
+      ['身份与语言', [['userPreferredName', 'StrataGate对你的称呼', 100], ['assistantPreferredName', 'StrataGate的名字', 100], ['preferredLanguage', '默认回答语言', 100], ['reasoningLanguage', '思考过程语言', 100]]],
+      ['交互偏好', [['responsePreferences', '回复方式和风格偏好', 1000], ['standingInstructions', '长期持续生效的要求', 1000]]],
+      ['关于用户', [['userBackground', '稳定的用户背景', 1500], ['longTermGoals', '长期目标', 1000]]],
+      ['其他', [['persistentNotes', '其他必须常驻的信息', 1200]]],
+    ]
+    const profileFieldNames = profileGroups.flatMap(([, fields]) => fields.map(([field]) => field))
+    function sameProfile(left, right) {
+      return profileFieldNames.every((field) => left?.[field] === right?.[field] && left?._revisions?.[field] === right?._revisions?.[field])
+    }
+
+    function ProfilePage() {
+      const [profile, setProfile] = React.useState(null)
+      const [editing, setEditing] = React.useState(null)
+      const [saving, setSaving] = React.useState(false)
+      const [syncStatus, setSyncStatus] = React.useState('同步中…')
+      const [error, setError] = React.useState('')
+      const [conflict, setConflict] = React.useState(false)
+      const requestVersion = React.useRef(0)
+      const refreshRef = React.useRef(null)
+      React.useEffect(() => {
+        let active = true
+        let timer = null
+        let controller = null
+        const stopRequest = () => { if (controller) controller.abort(); controller = null }
+        const check = () => {
+          if (!active || document.hidden) return
+          if (timer !== null) window.clearTimeout(timer)
+          timer = null
+          const version = ++requestVersion.current
+          const requestController = new AbortController()
+          controller = requestController
+          void api('profile', {}, { method: 'GET', signal: requestController.signal }).then((latest) => {
+            if (!active || document.hidden || version !== requestVersion.current) return
+            setProfile((current) => sameProfile(current, latest) ? current : latest)
+            setSyncStatus('已同步')
+            setError('')
+          }).catch((reason) => {
+            if (active && version === requestVersion.current && reason?.name !== 'AbortError') { setSyncStatus('同步失败'); setError(String(reason?.message || reason)) }
+          }).finally(() => {
+            if (controller === requestController) controller = null
+            if (active && !document.hidden && version === requestVersion.current) timer = window.setTimeout(check, 5000)
+          })
+        }
+        refreshRef.current = check
+        const onVisibilityChange = () => {
+          if (timer !== null) window.clearTimeout(timer)
+          timer = null
+          if (document.hidden) { ++requestVersion.current; stopRequest() }
+          else check()
+        }
+        document.addEventListener('visibilitychange', onVisibilityChange)
+        check()
+        return () => { active = false; ++requestVersion.current; refreshRef.current = null; if (timer !== null) window.clearTimeout(timer); stopRequest(); document.removeEventListener('visibilitychange', onVisibilityChange) }
+      }, [])
+      const beginEdit = (field) => { setEditing({ field, draft: profile[field] || '', baseValue: profile[field] || '', baseRevision: profile._revisions?.[field] || 0 }); setConflict(false); setError('') }
+      const reloadField = () => {
+        ++requestVersion.current
+        void api('profile', {}, { method: 'GET' }).then((latest) => {
+          setProfile((current) => sameProfile(current, latest) ? current : latest)
+          setEditing((current) => current ? { ...current, draft: latest[current.field] || '', baseValue: latest[current.field] || '', baseRevision: latest._revisions?.[current.field] || 0 } : null)
+          setConflict(false)
+          setError('')
+        }).catch((reason) => setError(String(reason?.message || reason)))
+          .finally(() => refreshRef.current?.())
+      }
+      const save = () => {
+        if (!editing || saving) return
+        if (conflict || profile[editing.field] !== editing.baseValue || profile._revisions?.[editing.field] !== editing.baseRevision) { setConflict(true); return }
+        setSaving(true)
+        setError('')
+        ++requestVersion.current
+        void api('profile', {}, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field: editing.field, value: editing.draft, expectedValue: editing.baseValue, expectedRevision: editing.baseRevision }) })
+          .then((result) => { setProfile((current) => sameProfile(current, result.snapshot) ? current : result.snapshot); setEditing(null); setConflict(false) })
+          .catch((reason) => { if (String(reason?.message || reason).includes('刚刚在其他位置更新')) setConflict(true); else setError(String(reason?.message || reason)) })
+          .finally(() => { setSaving(false); refreshRef.current?.() })
+      }
+      const total = profile ? profileFieldNames.reduce((sum, field) => sum + Array.from(profile[field] || '').length, 0) : 0
+      return h(React.Fragment, null,
+        h('div', { className: 'sg-profile-head' }, h('div', { className: 'sg-intro' }, h('h2', null, '常驻用户画像'), h('p', null, '跨会话、跨项目持续生效，每轮自动进入上下文')), h('span', { className: 'sg-profile-sync ' + (syncStatus === '同步失败' ? 'failed' : syncStatus === '同步中…' ? 'pending' : ''), role: 'status' }, syncStatus)),
+        error ? h('p', { className: 'sg-profile-error', role: 'alert' }, error) : null,
+        profile ? h(React.Fragment, null,
+          h('p', { className: 'sg-settings-group-copy' }, '总字符 ' + total + ' / 6000'),
+          profileGroups.map(([title, fields]) => h('section', { key: title, className: 'sg-profile-group', 'aria-label': title },
+            h('h3', null, title),
+            fields.map(([field, label, maximum]) => {
+              const value = profile[field] || ''
+              const isEditing = editing?.field === field
+              const changedElsewhere = isEditing && (value !== editing.baseValue || profile._revisions?.[field] !== editing.baseRevision)
+              const draftLength = isEditing ? Array.from(editing.draft).length : 0
+              const nextTotal = total - Array.from(value).length + draftLength
+              return h('div', { key: field, className: 'sg-profile-row' },
+                h('div', { className: 'sg-profile-summary' }, h('span', { className: 'sg-profile-label' }, label), h('span', { className: 'sg-profile-value ' + (value ? '' : 'empty'), title: value || undefined }, value || '未设置'), h('button', { type: 'button', className: 'sg-profile-action', onClick: () => beginEdit(field), disabled: saving || Boolean(editing) }, value ? '编辑' : '添加')),
+                isEditing ? h('div', { className: 'sg-profile-editor' },
+                  field === 'userPreferredName' || field === 'assistantPreferredName' || field === 'preferredLanguage' || field === 'reasoningLanguage'
+                    ? h('input', { id: 'sg-profile-' + field, 'aria-label': label, value: editing.draft, onChange: (event) => setEditing((current) => ({ ...current, draft: event.target.value })) })
+                    : h('textarea', { id: 'sg-profile-' + field, 'aria-label': label, value: editing.draft, onChange: (event) => setEditing((current) => ({ ...current, draft: event.target.value })) }),
+                  changedElsewhere || conflict ? h('p', { className: 'sg-profile-conflict', role: 'alert' }, '该项刚刚在其他位置更新。', h('button', { type: 'button', className: 'sg-profile-action', onClick: reloadField }, '载入最新内容')) : null,
+                  h('div', { className: 'sg-profile-editor-foot' }, h('span', { className: 'sg-profile-count' }, draftLength + ' / ' + maximum), h('div', { className: 'sg-profile-actions' }, h('button', { type: 'button', className: 'sg-quiet-button', disabled: saving, onClick: () => { setEditing(null); setConflict(false); setError('') } }, '取消'), h('button', { type: 'button', className: 'sg-save-button', disabled: saving || draftLength > maximum || nextTotal > 6000 || editing.draft === editing.baseValue || changedElsewhere || conflict, onClick: save }, saving ? '保存中…' : '保存')))) : null)
+            })))) : h('p', null, '正在读取常驻画像…'))
+    }
+
     function SettingsPage({ selected, namespace, dataDirectory, onBack, setView, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort }) {
       const [turnSize, setTurnSize] = React.useState(String(selected.blockTurnSize ?? 6))
       const [lambda, setLambda] = React.useState(String(selected.blockDecayLambda ?? 0.3))
-      const [profile, setProfile] = React.useState(null)
-      const [profileDraft, setProfileDraft] = React.useState(null)
-      const [profileSaving, setProfileSaving] = React.useState('')
-      const [profileError, setProfileError] = React.useState('')
-      const profileFields = [
-        ['userPreferredName', '用户希望你怎么称呼他', 100],
-        ['assistantPreferredName', '用户希望你叫什么', 100],
-        ['preferredLanguage', '默认使用语言', 100],
-        ['responsePreferences', '回复方式和风格偏好', 1000],
-        ['standingInstructions', '长期持续生效的要求', 1000],
-        ['userBackground', '稳定的用户背景', 1500],
-        ['longTermGoals', '长期目标', 1000],
-        ['persistentNotes', '其他必须常驻的信息', 1200],
-      ]
-      React.useEffect(() => {
-        let active = true
-        void api('profile', {}, { method: 'GET' }).then((value) => {
-          if (active) { setProfile(value); setProfileDraft(value); setProfileError('') }
-        }).catch((reason) => { if (active) setProfileError(String(reason?.message || reason)) })
-        return () => { active = false }
-      }, [])
-      const saveProfileField = (field) => {
-        if (!profileDraft || profileSaving) return
-        setProfileSaving(field)
-        setProfileError('')
-        void api('profile', {}, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field, value: profileDraft[field] }) })
-          .then((result) => setProfile((current) => ({ ...current, [field]: result.value })))
-          .catch((reason) => setProfileError(String(reason?.message || reason)))
-          .finally(() => setProfileSaving(''))
-      }
-      const profileTotal = profileDraft ? profileFields.reduce((sum, [field]) => sum + Array.from(profileDraft[field] || '').length, 0) : 0
       const [directoryOpening, setDirectoryOpening] = React.useState(false)
       const [directoryFeedback, setDirectoryFeedback] = React.useState({ kind: '', text: '' })
       React.useEffect(() => {
@@ -3346,21 +3422,6 @@ window.__ModuleLoader__.load({
             showSuggestion ? h('div', { className: 'sg-setting-suggestion' }, h('span', null, '为保持按对话轮数计算的遗忘速度，建议 λ 调整为 ' + suggestedLambda.toFixed(2) + '。'), h('button', { type: 'button', className: 'sg-quiet-button', onClick: () => setLambda(String(Number(suggestedLambda.toFixed(2)))) }, '采用建议值')) : null,
             rows.map(([label, value]) => h('div', { key: label, className: 'sg-stage' }, h('span', null, label), h('span', { className: label === '内部空间 ID' ? 'sg-stage-value sg-code' : 'sg-stage-value' }, String(value)))),
             h('button', { type: 'button', className: 'sg-save-button', disabled: !changed || savingSettings, onClick: () => void updateSettings({ blockTurnSize: turnSizeValue, blockDecayLambda: lambdaValue }) }, savingSettings ? '保存中…' : changed ? '保存设置' : '已保存'))),
-        h('section', { className: 'sg-settings-group', 'aria-labelledby': 'sg-profile-title' },
-          h('h3', { id: 'sg-profile-title', className: 'sg-settings-group-title' }, '常驻画像'),
-          h('p', { className: 'sg-settings-group-copy' }, '跨会话、跨项目生效；非空内容每轮进入上下文。总字符 ' + profileTotal + ' / 6000。'),
-          profileError ? h('p', { role: 'alert', className: 'sg-storage-feedback failed' }, profileError) : null,
-          profileDraft ? h('div', { className: 'sg-settings-panel' }, profileFields.map(([field, label, maximum], index) => {
-            const value = profileDraft[field] || ''
-            const length = Array.from(value).length
-            const changed = value !== profile[field]
-            return h('div', { key: field, className: 'sg-support-field' },
-              h('label', { htmlFor: 'sg-profile-' + field }, label + '（' + length + '/' + maximum + '）'),
-              index < 3
-                ? h('input', { id: 'sg-profile-' + field, className: 'sg-support-input', value, onChange: (event) => setProfileDraft((current) => ({ ...current, [field]: event.target.value })) })
-                : h('textarea', { id: 'sg-profile-' + field, className: 'sg-support-description', value, onChange: (event) => setProfileDraft((current) => ({ ...current, [field]: event.target.value })) }),
-              h('button', { type: 'button', className: 'sg-save-button', disabled: !changed || length > maximum || profileTotal > 6000 || Boolean(profileSaving), onClick: () => saveProfileField(field) }, profileSaving === field ? '保存中…' : changed ? '保存此项' : '已保存'))
-          })) : h('p', null, '正在读取常驻画像…')),
         h('section', { className: 'sg-settings-group', 'aria-labelledby': 'sg-storage-title' },
           h('h3', { id: 'sg-storage-title', className: 'sg-settings-group-title' }, '数据与存储'),
           h('p', { className: 'sg-settings-group-copy' }, '数据目录与原始数据'),
@@ -3599,6 +3660,7 @@ window.__ModuleLoader__.load({
       let content = null
       if (loading && !selected) content = h(Loading)
       else if (view.name === 'settings' && !selected) content = h(SettingsPage, { selected: { blockTurnSize: 6, blockDecayLambda: 0.3, currentTurn: 0, schemaVersion: 12 }, namespace, dataDirectory: overview.dataDirectory, onBack: moreBack, setView, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort })
+      else if (section === 'profile' && view.name === 'root') content = h(ProfilePage)
       else if (!selected && section !== 'more') content = h(Empty, { title: '还没有记忆', copy: '完成一些 DSH 对话后，短期记忆和长期记忆会出现在这里。' })
       else if (view.name === 'event') content = h(EventDetail, { event: view.item, project, source, onBack: goBack, backLabel, onNode: openGraphNode })
       else if (view.name === 'status') content = h(ProcessingStatus, { overview: selected, blocks: data.blocks, conversations, namespace, serverVersion: overview.pluginVersion, stage: view.stage, onBack: view.back ? goBack : () => setView({ name: 'root' }), backLabel: view.back?.name === 'settings' ? '高级设置' : '返回', refresh })
@@ -3626,7 +3688,7 @@ window.__ModuleLoader__.load({
             h('span', { className: 'sg-header-community' },
               h('a', { className: 'sg-header-star', href: STAR_REPOSITORY_URL, target: '_blank', rel: 'noopener noreferrer' }, '给 StrataGate 点个 🌟'),
               h('a', { className: 'sg-header-contribute', href: STAR_REPOSITORY_URL, target: '_blank', rel: 'noopener noreferrer' }, '参与开发 · Issue / PR →')))),
-        h('nav', { className: 'sg-tabs', 'aria-label': '记忆视图' }, [['short', '短期记忆'], ['long', '长期记忆'], ['more', '更多']].map(([id, label]) => h('button', { key: id, type: 'button', className: 'sg-tab ' + (section === id ? 'active' : ''), 'aria-current': section === id ? 'page' : undefined, onClick: () => goSection(id) }, label))),
+        h('nav', { className: 'sg-tabs', 'aria-label': '记忆视图' }, [['profile', '常驻画像'], ['short', '短期记忆'], ['long', '长期记忆'], ['more', '更多']].map(([id, label]) => h('button', { key: id, type: 'button', className: 'sg-tab ' + (section === id ? 'active' : ''), 'aria-current': section === id ? 'page' : undefined, onClick: () => goSection(id) }, label))),
         error ? h('div', { className: 'sg-error' }, h('div', { className: 'sg-error-title' }, '暂时无法读取完整记忆'), h('div', null, '已显示能够读取的内容，请稍后重新加载。'), h('details', null, h('summary', null, '技术详情'), h('div', { className: 'sg-code' }, error))) : null,
         view.name === 'status' ? null : h(MemoryStatusAlert, { overview: error ? null : selected, onOpen: (stage) => setView({ name: 'status', stage }) }),
         h('section', { key: section + ':' + view.name, className: 'sg-view', 'aria-label': 'StrataGate 记忆内容' }, content),
