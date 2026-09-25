@@ -21,7 +21,14 @@ function sessionOf(exec: ToolRunContext): Session {
 export function registerMemoryTools(ctx: Context, runtime: StrataGateRuntime): void {
   ctx.tools.register(defineTool({
     name: 'memory_profile_update',
-    description: `This tool is provided by the StrataGate plugin. Update exactly one field of the user's global Persistent Profile. Persistent Profile data is injected into every future conversation without retrieval, so use this tool only for information that should remain continuously available or continuously affect future behavior, such as how to address the user, what the user wants the assistant to be called, the default language, stable response preferences, standing instructions, stable user background, long-term goals, or other genuinely persistent notes.
+    description: `This tool is provided by the StrataGate plugin. Update exactly one field of the user's global Persistent Profile. Persistent Profile data is injected into every future conversation without retrieval, so use this tool only for information that should remain continuously available or continuously affect future behavior, such as how to address the user, what the user wants the assistant to be called, language preferences, stable response preferences, standing instructions, stable user background, long-term goals, or other genuinely persistent notes.
+
+preferredLanguage sets only the default language of the final/user-facing answer. reasoningLanguage sets only the desired language of reasoning/thinking text visible to the user in the DSH or host UI, when supported; it cannot control hidden internal chain-of-thought. An empty reasoningLanguage adds no visible-reasoning language requirement. These are independent settings: never infer one from the other, and never change one merely because the other changed.
+
+Examples:
+User: “以后都用中文回答我” → call memory_profile_update with preferredLanguage = 中文; do not change reasoningLanguage.
+User: “以后思考过程用中文” or “思考链用中文” → call memory_profile_update with reasoningLanguage = 中文; do not change preferredLanguage.
+User: “以后回答和思考过程都用中文” → make two separate memory_profile_update calls: first preferredLanguage = 中文, then reasoningLanguage = 中文. Each call still changes exactly one field.
 
 Do not use this tool merely because the user says "remember". If the information describes something that happened, a decision, an activity, a project change, a dated fact, or something that only needs to be recalled when relevant, it belongs in Event memory instead. A separate Event-memory tool is reserved for that purpose and is not part of this implementation.
 
@@ -31,7 +38,7 @@ If the assistant only infers that something might be a useful persistent prefere
 
 Each call changes exactly one predefined Profile field. Never create, delete, or rename Profile fields, and never rewrite the complete Profile when only one field is being changed.`,
     parameters: {
-      field: { type: 'string', required: true, enum: ['userPreferredName', 'assistantPreferredName', 'preferredLanguage', 'responsePreferences', 'standingInstructions', 'userBackground', 'longTermGoals', 'persistentNotes'] as const },
+      field: { type: 'string', required: true, enum: ['userPreferredName', 'assistantPreferredName', 'preferredLanguage', 'reasoningLanguage', 'responsePreferences', 'standingInstructions', 'userBackground', 'longTermGoals', 'persistentNotes'] as const },
       value: { type: 'string', required: true },
     },
     output: jsonOutput,

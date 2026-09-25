@@ -106,16 +106,22 @@ function modelBridge(responses: Array<{ text?: string; tool?: unknown; toolName?
 
 describe('DeepSeek Harness model JSON retries', () => {
   it('sends maintenance only the current Profile and rejects added facts in protected fields', async () => {
-    const input = { ...emptyProfile(), responsePreferences: '简洁。简洁。' }
+    const input = { ...emptyProfile(), preferredLanguage: '中文', reasoningLanguage: 'English', responsePreferences: '简洁。简洁。' }
     const output = { ...input, responsePreferences: '简洁。' }
     const { bridge, session, calls } = modelBridge([{ tool: output }])
     expect(await bridge.run(session, () => bridge.maintainProfile(input))).toEqual(output)
     const request = calls.mock.calls[0]![0] as { system: string; messages: Array<{ content: Array<{ text: string }> }> }
     expect(request.system).toContain('Never infer or add facts')
+    expect(request.system).toContain('all nine string fields')
+    expect(request.system).toContain('never infer, copy, or merge either language field into the other')
     expect(JSON.parse(request.messages[0]!.content[0]!.text)).toEqual({ profile: input, fieldDefinitions: expect.any(Object) })
     expect(bridge.takeSuccessfulResponses()).toEqual([])
     const invalid = modelBridge([{ tool: { ...input, userPreferredName: 'invented' } }, { tool: { ...input, userPreferredName: 'invented' } }])
     await expect(invalid.bridge.run(invalid.session, () => invalid.bridge.maintainProfile(input))).rejects.toThrow(/protected short field/)
+    const copied = modelBridge([{ tool: { ...input, reasoningLanguage: '中文' } }, { tool: { ...input, reasoningLanguage: '中文' } }])
+    await expect(copied.bridge.run(copied.session, () => copied.bridge.maintainProfile(input))).rejects.toThrow(/protected short field reasoningLanguage/)
+    const inferred = modelBridge([{ tool: { ...input, preferredLanguage: 'English' } }, { tool: { ...input, preferredLanguage: 'English' } }])
+    await expect(inferred.bridge.run(inferred.session, () => inferred.bridge.maintainProfile(input))).rejects.toThrow(/protected short field preferredLanguage/)
   })
 
   it('reserves enough output for a full Chinese Profile and retries a truncated response', async () => {
@@ -257,6 +263,57 @@ describe('DeepSeek Harness model JSON retries', () => {
 
     expect(result.l0Title).toBe('text fallback')
     expect(calls.mock.calls[0]?.[0]).not.toHaveProperty('reasoningEffort')
+  })
+
+  it('configures the Block Summarizer prompt and five described structured fields', async () => {
+    const { bridge, session, calls } = modelBridge([{
+      tool: { l0Title: 'Block topic', l0Tags: [], l1Summary: 'Block overview.', l2Keypoints: [], shouldExtract: false },
+    }])
+
+    await bridge.run(session, () => bridge.summarizer([]))
+
+    const request = calls.mock.calls[0]![0] as {
+      system: string
+      tools: Array<{ name: string; description: string; parameters: {
+        type: string; required: string[]; properties: Record<string, { type: string; description: string }>
+      } }>
+      tool_choice: unknown
+    }
+    expect(request.tools).toHaveLength(1)
+    expect(request.tools[0]).toMatchObject({
+      name: 'stratagate_summarize_block',
+      description: expect.stringContaining('L0-L2 layered compression'),
+    })
+    expect(request.tools[0]!.description).toContain('Event extraction')
+    expect(request.tool_choice).toEqual({ type: 'function', function: { name: 'stratagate_summarize_block' } })
+    const schema = request.tools[0]!.parameters
+    const fields = ['l0Title', 'l0Tags', 'l1Summary', 'l2Keypoints', 'shouldExtract']
+    expect(schema.type).toBe('object')
+    expect(Object.keys(schema.properties)).toEqual(fields)
+    expect(schema.required).toEqual(fields)
+    expect(fields.every((field) => schema.properties[field]!.description.length > 40)).toBe(true)
+    expect(schema.properties.l0Title!.type).toBe('string')
+    expect(schema.properties.l0Tags!.type).toBe('array')
+    expect(schema.properties.l0Tags!.description).toContain('topical labels')
+    expect(schema.properties.l0Tags!.description).toContain('rapid recognition')
+    expect(schema.properties.l0Tags!.description).not.toContain('retrieval')
+    expect(schema.properties.l1Summary!.type).toBe('string')
+    expect(schema.properties.l2Keypoints!.type).toBe('array')
+    expect(schema.properties.shouldExtract!.type).toBe('boolean')
+    expect(schema.properties.shouldExtract!.description).toContain('High-recall pre-screen')
+    expect(schema.properties.shouldExtract!.description).toContain('when uncertain, use true')
+    expect(schema.properties.shouldExtract!.description).toContain('False only when it clearly lacks lasting value')
+    expect(request.system).toContain("Block Summarizer in StrataGate's memory pipeline")
+    expect(request.system).toContain('progressively higher-resolution views of the same history')
+    expect(request.system).toContain('distinctive topical labels for rapid recognition')
+    expect(request.system).toContain('If it is false, Event extraction is skipped entirely')
+    expect(request.system).toContain('When uncertain whether a plausible candidate has lasting value, choose true')
+    expect(request.system).toContain('Set false only when the Block clearly lacks such value')
+    expect(request.system).toContain('what the assistant only proposed or suspected')
+    expect(request.system).toContain('never guess omitted payload details')
+    expect(request.system).toContain('Do not set true merely because some fact appears')
+    expect(request.system).toContain('Call stratagate_summarize_block exactly once')
+    expect(request.system).toContain('Do not return the summary as ordinary text')
   })
 
   it('summarizes from compact derivation messages instead of raw tool traces', async () => {

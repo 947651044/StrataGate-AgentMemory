@@ -39,7 +39,7 @@ import type {
 } from './types.js';
 import { nowUtc8 } from './time.js';
 import { normalizeStandardEventType } from './events.js';
-import { emptyProfile, isProfileField, PROFILE_FIELDS, profileMaintenanceDue, validateProfile,
+import { emptyProfile, isProfileField, PROFILE_FIELDS, PROFILE_PROTECTED_SHORT_FIELDS, profileMaintenanceDue, validateProfile,
   type PersistentProfile, type ProfileChange, type ProfileChangeSource, type ProfileField } from './profile.js';
 import { searchTokens } from './search.js';
 
@@ -972,6 +972,15 @@ export class SqliteStorage implements StorageAdapter {
     return profile;
   }
 
+  getProfileSnapshot(): { profile: PersistentProfile; revisions: Record<ProfileField, number> } {
+    this.assertOpen();
+    const profile = emptyProfile();
+    const revisions = Object.fromEntries((Object.keys(PROFILE_FIELDS) as ProfileField[]).map((field) => [field, 0])) as Record<ProfileField, number>;
+    const rows = this.database.prepare('SELECT p.field, p.value, COALESCE(r.revision, 0) AS revision FROM persistent_profile p LEFT JOIN (SELECT field, MAX(id) AS revision FROM persistent_profile_changes GROUP BY field) r ON r.field = p.field').all() as Array<{ field: string; value: string; revision: number }>;
+    for (const row of rows) if (isProfileField(row.field)) { profile[row.field] = row.value; revisions[row.field] = row.revision; }
+    return { profile, revisions };
+  }
+
   getProfileChanges(): ProfileChange[] {
     this.assertOpen();
     const rows = this.database.prepare('SELECT field, old_value, new_value, source, updated_at, source_message_id FROM persistent_profile_changes ORDER BY id').all() as Array<{
@@ -1004,7 +1013,7 @@ export class SqliteStorage implements StorageAdapter {
     this.database.prepare('INSERT INTO persistent_profile_maintenance_failures (id, input_json, failure_count, next_retry_at) VALUES (1, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET input_json = excluded.input_json, failure_count = excluded.failure_count, next_retry_at = excluded.next_retry_at').run(inputJson, count, nextRetryAt);
   }
 
-  updateProfileField(field: string, value: string, source: ProfileChangeSource, sourceMessageId?: string | null): { field: ProfileField; value: string; modified: boolean } {
+  updateProfileField(field: string, value: string, source: ProfileChangeSource, sourceMessageId?: string | null, expectedValue?: string, expectedRevision?: number): { field: ProfileField; value: string; modified: boolean; conflict?: boolean } {
     this.assertOpen();
     if (!isProfileField(field)) throw new TypeError(`Unknown Persistent Profile field: ${field}`);
     if (typeof value !== 'string') throw new TypeError('Persistent Profile value must be a string');
@@ -1013,6 +1022,11 @@ export class SqliteStorage implements StorageAdapter {
       const profile = this.getPersistentProfile();
       const wasNonempty = Object.values(profile).some((entry) => entry.length > 0);
       const oldValue = profile[field];
+      if (expectedRevision !== undefined) {
+        const row = this.database.prepare('SELECT COALESCE(MAX(id), 0) AS revision FROM persistent_profile_changes WHERE field = ?').get(field) as { revision: number };
+        if (row.revision !== expectedRevision) return { field, value: oldValue, modified: false, conflict: true };
+      }
+      if (expectedValue !== undefined && oldValue !== expectedValue) return { field, value: oldValue, modified: false, conflict: true };
       if (oldValue === value) return { field, value, modified: false };
       profile[field] = value;
       validateProfile(profile);
@@ -1036,6 +1050,9 @@ export class SqliteStorage implements StorageAdapter {
     validateProfile(proposed);
     if (Object.keys(proposed).length !== Object.keys(PROFILE_FIELDS).length
       || Object.keys(proposed).some((field) => !isProfileField(field))) throw new TypeError('Maintenance returned unknown or missing Profile fields');
+    for (const field of PROFILE_PROTECTED_SHORT_FIELDS) {
+      if (proposed[field].trim() !== expected[field].trim()) throw new Error(`Profile maintenance changed protected short field ${field}`);
+    }
     return this.immediateTransaction(() => {
       const current = this.getPersistentProfile();
       if (JSON.stringify(current) !== JSON.stringify(expected)) return false;

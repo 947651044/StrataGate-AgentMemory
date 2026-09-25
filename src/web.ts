@@ -705,7 +705,10 @@ async function updateSettings(runtime: StrataGateRuntime, url: URL): Promise<unk
 }
 
 async function persistentProfile(runtime: StrataGateRuntime, req: WebRequest): Promise<unknown> {
-  if (req.method === 'GET') return runtime.getPersistentProfile()
+  if (req.method === 'GET') {
+    const snapshot = runtime.getProfileSnapshot()
+    return { ...snapshot.profile, _revisions: snapshot.revisions }
+  }
   if (req.method !== 'PATCH') throw new AdminHttpError(405, 'Persistent Profile requires GET or PATCH')
   let suppliedBody = req.body
   if (suppliedBody === undefined && typeof req[Symbol.asyncIterator] === 'function') {
@@ -725,12 +728,16 @@ async function persistentProfile(runtime: StrataGateRuntime, req: WebRequest): P
   }
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AdminHttpError(400, 'Profile update must be an object')
   const input = body as Record<string, unknown>
-  if (Object.keys(input).length !== 2 || !Object.hasOwn(input, 'field') || !Object.hasOwn(input, 'value')
-    || typeof input.field !== 'string' || typeof input.value !== 'string') {
-    throw new AdminHttpError(400, 'Profile update requires exactly field and value strings')
+  if (Object.keys(input).length !== 4 || !Object.hasOwn(input, 'field') || !Object.hasOwn(input, 'value') || !Object.hasOwn(input, 'expectedValue') || !Object.hasOwn(input, 'expectedRevision')
+    || typeof input.field !== 'string' || typeof input.value !== 'string' || typeof input.expectedValue !== 'string'
+    || !Number.isSafeInteger(input.expectedRevision) || (input.expectedRevision as number) < 0) {
+    throw new AdminHttpError(400, 'Profile update requires field, value, expectedValue strings and expectedRevision number')
   }
   try {
-    return runtime.updatePersistentProfile(input.field, input.value, 'settings')
+    const result = runtime.updatePersistentProfile(input.field, input.value, 'settings', null, input.expectedValue, input.expectedRevision as number)
+    if (result.conflict) throw new AdminHttpError(409, '该项刚刚在其他位置更新')
+    const snapshot = runtime.getProfileSnapshot()
+    return { ...result, snapshot: { ...snapshot.profile, _revisions: snapshot.revisions } }
   } catch (error) {
     if (error instanceof TypeError || error instanceof RangeError) throw new AdminHttpError(400, error.message)
     throw error

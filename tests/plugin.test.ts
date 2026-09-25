@@ -181,17 +181,30 @@ describe('DSH plugin composition', () => {
       expect(profileUpdate!.description).toMatch(/only infers[\s\S]*which field[\s\S]*new value[\s\S]*reply exactly "同意"[\s\S]*Only a directly subsequent "同意"/)
       expect(profileUpdate!.description).toMatch(/refuses[\s\S]*changes the subject[\s\S]*do not perform the update/)
       expect(profileUpdate!.description).toMatch(/belongs in Event memory[\s\S]*separate Event-memory tool/)
+      expect(profileUpdate!.description).toMatch(/preferredLanguage sets only the default language of the final\/user-facing answer[\s\S]*reasoningLanguage sets only the desired language of reasoning\/thinking text visible to the user/)
+      expect(profileUpdate!.description).toMatch(/以后都用中文回答我[\s\S]*preferredLanguage = 中文; do not change reasoningLanguage/)
+      expect(profileUpdate!.description).toMatch(/以后思考过程用中文[\s\S]*思考链用中文[\s\S]*reasoningLanguage = 中文; do not change preferredLanguage/)
+      expect(profileUpdate!.description).toMatch(/以后回答和思考过程都用中文[\s\S]*two separate memory_profile_update calls: first preferredLanguage = 中文, then reasoningLanguage = 中文/)
       conversationMessages.push({ id: 'profile-user-1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '以后默认都用中文回复。' }] })
       expect(await profileUpdate!.execute({ field: 'preferredLanguage', value: '中文' }, { agent, callId: 'profile-call' } as never))
         .toEqual({ field: 'preferredLanguage', value: '中文', modified: true })
       expect(await profileUpdate!.execute({ field: 'preferredLanguage', value: '中文' }, { agent, callId: 'profile-call-2' } as never))
         .toEqual({ field: 'preferredLanguage', value: '中文', modified: false })
       const nextPrompt = await ctx.systemPrompt.assemble({ agent })
-      expect(nextPrompt.contexts).toContainEqual(expect.objectContaining({ name: 'stratagate:persistent-profile', text: expect.stringContaining('Preferred language: 中文') }))
+      expect(nextPrompt.contexts).toContainEqual(expect.objectContaining({ name: 'stratagate:persistent-profile', text: expect.stringContaining('Preferred answer language: 中文') }))
+      expect(nextPrompt.contexts.find((item) => item.name === 'stratagate:persistent-profile')?.text).not.toContain('Preferred visible reasoning language:')
       expect(nextPrompt.contexts.find((item) => item.name === 'stratagate:persistent-profile')?.text).not.toContain('User background:')
+      conversationMessages.push({ id: 'both-languages', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '以后回答和思考过程都用中文。' }] })
+      expect(await profileUpdate!.execute({ field: 'preferredLanguage', value: '简体中文' }, { agent, callId: 'both-answer' } as never)).toMatchObject({ modified: true })
+      expect(await profileUpdate!.execute({ field: 'reasoningLanguage', value: '中文' }, { agent, callId: 'both-reasoning' } as never)).toMatchObject({ modified: true })
+      const bothPrompt = await ctx.systemPrompt.assemble({ agent })
+      const profileContext = bothPrompt.contexts.find((item) => item.name === 'stratagate:persistent-profile')?.text
+      expect(profileContext).toContain('Preferred answer language: 简体中文')
+      expect(profileContext).toContain('Preferred visible reasoning language: 中文')
       for (const [id, utterance, field, value] of [
         ['chinese-language', '以后都用英文回答我。', 'preferredLanguage', '英文'],
         ['english-language', 'From now on, please answer me in English.', 'preferredLanguage', 'English'],
+        ['reasoning-language', '以后思考链用日语。', 'reasoningLanguage', '日语'],
         ['chinese-name', '以后叫我橙子。', 'userPreferredName', '橙子'],
         ['remember-assistant', '记住，你以后叫小橙。', 'assistantPreferredName', '小橙'],
       ] as const) {
@@ -199,6 +212,10 @@ describe('DSH plugin composition', () => {
         expect(await profileUpdate!.execute({ field, value }, { agent, callId: id } as never))
           .toMatchObject({ field, value, modified: true })
       }
+      const independentPrompt = await ctx.systemPrompt.assemble({ agent })
+      const independentContext = independentPrompt.contexts.find((item) => item.name === 'stratagate:persistent-profile')?.text
+      expect(independentContext).toContain('Preferred answer language: English')
+      expect(independentContext).toContain('Preferred visible reasoning language: 日语')
       // The agent applies the description's consent rule; runtime does not parse proposal wording.
       conversationMessages.push({ id: 'profile-proposal', role: 'assistant', source: { kind: 'model' }, content: [{ type: 'text', text: 'I could keep responses concise in future. Reply 同意 to save responsePreferences = concise.' }] })
       conversationMessages.push({ id: 'profile-consent', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: '同意' }] })
@@ -213,6 +230,7 @@ describe('DSH plugin composition', () => {
       await expect(profileUpdate!.execute({ field: 'preferredLanguage', value: 'English', userPreferredName: 'wrong' } as never, { agent, callId: 'two-fields' } as never))
         .rejects.toThrow(/Unknown Profile update argument/)
       expect(profileUpdate!.parameters).toMatchObject({ required: ['field', 'value'], properties: { field: { type: 'string' }, value: { type: 'string' } } })
+      expect(profileUpdate!.parameters).toMatchObject({ properties: { field: { enum: expect.arrayContaining(['reasoningLanguage']) } } })
       expect(feedbackPrepare).toBeDefined()
       expect(recordUse).toBeDefined()
       expect(remember).toBeDefined()

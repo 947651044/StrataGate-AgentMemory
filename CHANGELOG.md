@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.84 - 2026-09-25
+
+- Clarify the Block Summarizer's L0-L2 layered memory output, source attribution, uncertainty, and length guidance.
+- Use a high-recall `shouldExtract` pre-screen so plausible long-term Events reach the Event Extractor, and describe L0 tags as topical labels for rapid recognition.
+
+## 0.2.83 - 2026-09-24
+
+- Move Persistent Profile to a compact primary tab with grouped, single-field editing.
+- Keep the visible Profile current with lightweight polling, and reject stale same-field Settings saves without overwriting Agent or maintenance changes.
+- Add an independent visible reasoning language preference alongside the final answer language, with nine fixed Profile fields and no change to the overall budget.
+
+## 0.2.84 - 2026-09-25
+
+- Clarify the Block Summarizer's L0-L2 layered memory output, source attribution, uncertainty, and length guidance.
+- Use a high-recall `shouldExtract` pre-screen so plausible long-term Events reach the Event Extractor, and describe L0 tags as topical labels for rapid recognition.
+
+## 0.2.83 - 2026-09-24
+
+- Move Persistent Profile to a compact primary tab with grouped, single-field editing.
+- Keep the visible Profile current with lightweight polling, and reject stale same-field Settings saves without overwriting Agent or maintenance changes.
+- Add an independent visible reasoning language preference alongside the final answer language, with nine fixed Profile fields and no change to the overall budget.
+
 ## Unreleased
 
 - Let the agent record durable long-term memories through `memory_remember`: each recording is written into a new isolated `agent_events` pool (schema v12) that mirrors the Event model, gets a synthetic `agent-memory:` provenance block, and projects into the Knowledge Graph.
