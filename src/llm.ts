@@ -93,12 +93,27 @@ const STRING_ARRAY: ValueSchemaSpec = { type: 'array', items: { type: 'string' }
 const OPEN_OBJECT: ValueSchemaSpec = { type: 'object', additionalProperties: true }
 
 const SUMMARIZER_PARAMETERS: ParameterSchemaSpec = {
-  l0Title: { type: 'string', required: true },
-  l0Tags: { ...STRING_ARRAY, required: true },
-  l1Summary: { type: 'string', required: true },
-  l2Keypoints: { ...STRING_ARRAY, required: true },
-  shouldExtract: { type: 'boolean', required: true },
+  l0Title: { type: 'string', description: 'L0: a short phrase naming the Block\'s central subject for quick recognition; do not turn it into a sentence-length summary.', required: true },
+  l0Tags: { ...STRING_ARRAY, description: 'L0: a few distinctive topical labels (usually 2-5) for rapid recognition of the Block, such as named people, projects, organizations, tools, technical topics, or specific task concepts; omit generic labels such as discussion, conversation, problem, or task.', required: true },
+  l1Summary: { type: 'string', description: 'L1: a compact, self-contained overview of what happened across the Block, its conclusions or results, significant state changes, and key unresolved work; richer than L0 but still quick to read.', required: true },
+  l2Keypoints: { ...STRING_ARRAY, description: 'L2: specific, self-contained points needed to recover context later. Make each point mostly atomic: one decision, constraint, preference, fact, result, failure reason, or open item. Add detail beyond L1 without splitting or repeating its sentences.', required: true },
+  shouldExtract: { type: 'boolean', description: 'High-recall pre-screen for Event extraction, not the final Event decision. True when this Block clearly contains or may reasonably contain a long-term Event; when uncertain, use true so the Event Extractor can decide. False only when it clearly lacks lasting value, such as greetings, repeated confirmations, or disposable process noise. Mere presence of a fact is not sufficient.', required: true },
 }
+
+const SUMMARIZER_SYSTEM_PROMPT = `You are the Block Summarizer in StrataGate's memory pipeline. Compress one sealed conversation Block, typically about six turns, from the supplied provenance-preserving derivation messages into L0-L2 layered memory and decide whether it warrants later Event extraction. You are a background model, not the main Agent; you have no other conversation context. L5 retains the complete original source, while L3/L4 are produced separately. Your L0-L2 may later replace detailed chat in the Agent's context, so preserve what future work needs without inventing missing context.
+
+L0 -> L1 -> L2 are progressively higher-resolution views of the same history, not three independent or repetitive summaries:
+- L0: l0Title is a short subject phrase for rapid recognition, ideally under about 60 characters; l0Tags are a few distinctive topical labels for rapid recognition, usually 2-5. Prefer named people, projects, organizations, tools, technical topics, and specific task concepts. Avoid generic tags such as discussion, conversation, problem, or task.
+- L1: l1Summary is a compact, self-contained overview of the whole Block: what happened, conclusions or results, meaningful state changes, and key unresolved work. Usually 1-3 sentences; do not retell the conversation turn by turn.
+- L2: l2Keypoints retain concrete details needed to resume work. Usually 3-8 concise points when there is enough substance, fewer for a thin Block. Each point should stand alone and express mainly one decision, constraint, preference, fact, result, significant failure reason, or open item. Be more specific than L1; do not merely split L1 into repeated sentences.
+
+Prioritize important decisions, constraints, user preferences, final outcomes, significant failure causes, and unresolved work; then task-relevant process details. Omit repetition, greetings, and disposable execution noise. Do not discard a constraint or conclusion that would change how later work is understood just to shorten the output.
+
+Keep provenance and uncertainty. Distinguish what the user stated or decided, what the assistant only proposed or suspected, and what a tool actually observed. Do not promote an assistant hypothesis or a recollection of older memory into a verified fact or new outcome. Preserve uncertainty about timing, causes, status, results, and relationships. Ordinary user/assistant text is retained, but large tool arguments or results may be compacted; use only retained tool names, evidence summaries, and excerpts, and never guess omitted payload details.
+
+shouldExtract is a high-recall pre-screen, not the final Event decision. If it is false, Event extraction is skipped entirely; if true, the Event Extractor makes the final evidence-based decision. Set true when this Block clearly contains or may reasonably contain a long-term Event, such as a decision, stable preference, material project change, meaningful task result, important failure and possible cause, future-useful fact, or open item worth tracking. When uncertain whether a plausible candidate has lasting value, choose true and let the Event Extractor decide. Set false only when the Block clearly lacks such value, for example greetings, repeated confirmations, or disposable execution noise. Do not set true merely because some fact appears; an unsupported assistant suggestion or recap of older memory alone does not establish a new Event candidate.
+
+Call stratagate_summarize_block exactly once with l0Title, l0Tags, l1Summary, l2Keypoints, and shouldExtract. Do not return the summary as ordinary text.`
 
 const EVENT_ITEM: ValueSchemaSpec = {
   type: 'object',
@@ -229,7 +244,7 @@ const PROFILE_MAINTENANCE_PARAMETERS = Object.fromEntries(
 const STRUCTURED_TOOLS = {
   summarizer: {
     name: 'stratagate_summarize_block',
-    description: 'Submit the completed durable summary for the supplied conversation block.',
+    description: 'Submit the L0-L2 layered compression of one sealed StrataGate conversation Block and decide whether it should proceed to Event extraction.',
     parameters: SUMMARIZER_PARAMETERS,
   },
   extractor: {
@@ -390,7 +405,7 @@ export class DshModelBridge {
 
   readonly summarizer: BlockSummarizer = async (messages) => {
     const raw = object(await this.callStructured('summarizer',
-      `You compress agent conversations into durable memory blocks. Read the supplied provenance-preserving derivation messages and call ${STRUCTURED_TOOLS.summarizer.name} exactly once with l0Title, l0Tags, l1Summary, l2Keypoints, and shouldExtract. Preserve decisions, constraints, preferences, outcomes, and unresolved work. Tool code and oversized tool payloads may be marked compacted; use the retained tool names, evidence summaries, and excerpts without inventing omitted details. shouldExtract is true only when durable events or facts exist. Do not return the summary as text.`,
+      SUMMARIZER_SYSTEM_PROMPT,
       { messages: buildMemoryDerivationMessages(messages) },
     ))
     return {
