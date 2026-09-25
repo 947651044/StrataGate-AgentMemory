@@ -406,7 +406,7 @@ export function normalizeSnapshot(value: unknown): StrataGateSnapshot {
   for (const event of [...snapshot.events, ...snapshot.agentEvents]) {
     event.temporal = { ...event.temporal, eventType: normalizeStandardEventType(event.temporal.eventType) };
     if (event.formedTurn === undefined) {
-      const sourceBlock = sourceBlockMap.get(event.sourceBlockId);
+      const sourceBlock = event.sourceBlockId !== undefined ? sourceBlockMap.get(event.sourceBlockId) : undefined;
       const reliableSource = sourceBlock && !isSyntheticSourceThreadId(sourceBlock.threadId)
         && Number.isSafeInteger(sourceBlock.endTurn) && sourceBlock.endTurn >= 0;
       if (reliableSource) event.formedTurn = sourceBlock.endTurn;

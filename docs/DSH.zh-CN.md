@@ -93,7 +93,7 @@ DSH_HOME/stratagate/memory.db
 
 `memory_remember` 让 agent 主动记录值得记忆的事实：用户明确的偏好或纠正、决定、持久的项目事实，以及用户要求记住的内容。记录会进入与对话派生记忆相同的长期 Event 管线，但有两点不同：
 
-- **隔离存储。** agent 记录的 Event 存放在专属的 `agent_events` 隔离表中，数据模型与普通 Event 完全一致，但与被动对话表物理分离。每次记录会创建一个合成的 `agent-memory:` 溯源 Block，其原始内容即所记录的句子，并标记 `shouldExtract: false`，推导管线不会重复处理。
+- **隔离存储。** agent 记录的 Event 存放在专属的 `agent_events` 隔离表中，数据模型与普通 Event 完全一致，但与被动对话表物理分离。其溯源直接引用**记录会话中的真实对话消息** —— 优先取 open tail 中的 user/assistant 消息，其次取该会话最新封存 Block 的消息 —— 绝不生成虚构的 user 消息。仅当会话中没有任何已摄取消息时，才会创建合成的 `agent-memory:` 溯源 Block。
 - **写入前消解。** 写入前，StrataGate 会先在两个池中检索重复与冲突：精确或高度近似的重复会强化既有卡片而不新写；词面重叠模糊的记录会触发一次同步模型仲裁，复用外部记忆导入的决策契约 —— `ADD`、`MERGE`、`SUPERSEDE`（仅高置信度；低置信度的合并/取代会降级为非破坏性的冲突标记）、`CONFLICT`（双向回链）或 `IGNORE`。工具结果会回报 `action`、`gate` 与 `reason`。与既有记忆没有实质重叠的事实直接写入，不调用模型。
 
 其余行为与普通 Event 一致：agent 记录会投影进 Knowledge Graph，跨会话持久保存，走同样的 turn 衰减与引用强化生命周期（`memory_assess` → `memory_record_use`），也可以通过该生命周期遗忘。检索为两个池各开一条独立的 top-k 通道 —— 被动池与 agent 池分别独立排序，再按加权 RRF 融合，任何一方都无法把另一方挤出结果窗口。agent 通道的占比由 `agentMemoryRetrievalWeight` 配置（默认 `1` = 平权；`0` = 记录保留但不再浮现；更大值提升 agent 记录的排序权重），卡片带 `source: 'agent-recorded'` 标记。记忆面板通过 `/api/stratagate/agent-memories`（查询参数 `session` 与 `includeArchived=true`）展示这些记录。可用 `agentMemoryEnabled: false` 整体关闭该功能，同时注销对应工具。

@@ -123,13 +123,19 @@ export interface EventCardInput {
   confidence?: number;
 }
 
-export interface EventCard extends Omit<EventCardInput, 'id'> {
+export interface EventCard extends Omit<EventCardInput, 'id' | 'sourceBlockId'> {
   id: string;
   /** Conversation turn where this Event entered its long-term-memory lifecycle. */
   formedTurn?: number;
   narrative: string;
   tags: string[];
   quotes: string[];
+  /**
+   * Provenance block. Always present for conversation-derived and imported
+   * Events; agent-recorded Events may omit it when their provenance cites
+   * real open-tail conversation messages directly.
+   */
+  sourceBlockId?: string;
   temporal: EventTemporal;
   scope: MemoryScope;
   criticality: MemoryCriticality;
@@ -299,6 +305,16 @@ export interface ExternalMemoryUndoResult {
 export type AgentMemoryCategory = 'preference' | 'decision' | 'correction' | 'fact';
 
 /** How the pre-write gate reached its verdict. */
+/**
+ * Input for agent-recorded events: provenance may cite real conversation
+ * messages directly (no source block) — `sourceMessageIds` must then exist in
+ * the store's open tail or blocks at validation time.
+ */
+export type AgentEventCardInput = Omit<EventCardInput, 'sourceBlockId'> & {
+  sourceBlockId?: string;
+  formedTurn?: number;
+};
+
 export type AgentEventGatePath =
   | 'exact-duplicate'
   | 'near-duplicate'
@@ -346,6 +362,8 @@ export interface AgentEventRecordResult {
   downgradedFrom?: 'MERGE' | 'SUPERSEDE';
   reason?: string;
   sourceBlockId?: string;
+  /** Real conversation messages cited as provenance (open tail or blocks). */
+  sourceMessageIds?: string[];
   /** memoryWeightAt(event, currentTurn) at write time. */
   weight?: number;
 }

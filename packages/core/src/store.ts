@@ -43,6 +43,7 @@ import type {
   AppendTurnResult,
   AgentEventRecordOptions,
   AgentEventRecordResult,
+  AgentEventCardInput,
   AgentMemoryCategory,
   BlockLevel,
   BlockLiftSource,
@@ -220,6 +221,8 @@ function externalMemoryFingerprint(value: Pick<ExternalMemoryCandidate, 'title' 
 const AGENT_EVENT_NEAR_DUPLICATE = 0.85;
 const AGENT_EVENT_AMBIGUOUS = 0.35;
 const AGENT_EVENT_MIN_SHARED_TOKENS = 2;
+/** Cap on real conversation messages cited as agent-event provenance. */
+const AGENT_EVENT_PROVENANCE_LIMIT = 6;
 
 /** Phase-1/2 boundary of the recordAgentEvent gate. */
 type AgentEventGateOutcome =
@@ -2095,6 +2098,39 @@ export class StrataGate {
     };
   }
 
+  /**
+   * Provenance for one agent recording: cite the real conversation messages of
+   * the recording session — the most recent open-tail user/assistant messages
+   * when available, otherwise the latest sealed block of that thread. Only
+   * when the session has no ingested messages at all does a synthetic
+   * provenance block get created (mirroring the external-import fallback).
+   */
+  private resolveAgentEventProvenance(
+    candidate: ExternalMemoryCandidate,
+    threadId: string | undefined,
+    now: string,
+  ): { messageIds: string[]; sourceBlockId?: string; synthetic: boolean } {
+    const real = threadId
+      ? this.listOpenTail(threadId).filter((message) => message.role === 'user' || message.role === 'assistant')
+      : [];
+    if (real.length > 0) {
+      return { messageIds: real.slice(-AGENT_EVENT_PROVENANCE_LIMIT).map(({ id }) => id), synthetic: false };
+    }
+    const sealed = threadId
+      ? this.blocks.filter((block) => block.threadId === threadId && block.l5Raw.length > 0)
+      : [];
+    const last = sealed.at(-1);
+    if (last) {
+      return {
+        messageIds: last.l5Raw.slice(-AGENT_EVENT_PROVENANCE_LIMIT).map(({ id }) => id),
+        sourceBlockId: last.id,
+        synthetic: false,
+      };
+    }
+    const source = this.createAgentSourceBlock(candidate.summary, now, candidate.tags ?? []);
+    return { messageIds: [source.l5Raw[0]!.id], sourceBlockId: source.id, synthetic: true };
+  }
+
   private writeAgentEvent(
     candidate: ExternalMemoryCandidate,
     action: AgentEventRecordResult['action'],
@@ -2111,11 +2147,14 @@ export class StrataGate {
     },
   ): AgentEventRecordResult {
     const criticality: MemoryCriticality = candidate.memoryKind === 'preference' ? 'preference' : 'routine';
-    const source = this.createAgentSourceBlock(candidate.summary, opts.now, candidate.tags ?? []);
-    const event = this.addEventInMemory({
+    const threadId = typeof candidate.temporal?.threadId === 'string' && candidate.temporal.threadId.trim()
+      ? candidate.temporal.threadId
+      : undefined;
+    const provenance = this.resolveAgentEventProvenance(candidate, threadId, opts.now);
+    const input: AgentEventCardInput = {
       ...candidate,
-      sourceBlockId: source.id,
-      sourceMessageIds: [source.l5Raw[0]!.id],
+      sourceMessageIds: provenance.messageIds,
+      ...(provenance.sourceBlockId !== undefined ? { sourceBlockId: provenance.sourceBlockId } : {}),
       scope: 'user',
       criticality,
       temporal: {
@@ -2123,7 +2162,10 @@ export class StrataGate {
         ...(opts.supersedes ? { supersedesEventIds: [...targetIds] } : {}),
         ...(opts.conflicts ? { conflictsWithEventIds: [...targetIds] } : {}),
       },
-    }, this.agentEvents);
+    };
+    const event = provenance.synthetic
+      ? this.addEventInMemory(input as EventCardInput, this.agentEvents)
+      : this.addAgentEventInMemory(input, this.agentEvents);
     if (targetIds.length > 0) {
       for (const id of targetIds) {
         const existing = this.findEvent(id);
@@ -2144,7 +2186,8 @@ export class StrataGate {
       ...(opts.confidence !== undefined ? { confidence: opts.confidence } : {}),
       ...(opts.downgradedFrom !== undefined ? { downgradedFrom: opts.downgradedFrom } : {}),
       ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
-      sourceBlockId: source.id,
+      ...(provenance.sourceBlockId !== undefined ? { sourceBlockId: provenance.sourceBlockId } : {}),
+      sourceMessageIds: provenance.messageIds,
       weight: Number(memoryWeightAt(event, this.currentTurn).toFixed(3)),
     };
   }
@@ -2160,35 +2203,78 @@ export class StrataGate {
     const formedTurn = isSyntheticSourceThreadId(sourceBlock.threadId)
       ? this.currentTurn
       : sourceBlock.endTurn;
+    return this.storeEventCard(input, pool, {
+      sourceMessageIds,
+      sourceBlockId: sourceBlock.id,
+      formedTurn,
+      now,
+      criticality,
+    });
+  }
+
+  /**
+   * Agent-recorded variant: provenance may cite real conversation messages
+   * (open tail or sealed blocks) directly, with no source block. Every cited
+   * message must exist in the store; the lifecycle clock starts at the
+   * current turn.
+   */
+  private addAgentEventInMemory(input: AgentEventCardInput, pool: EventCard[]): EventCard {
+    const known = new Set([...this.openTail.map((message) => message.id), ...this.rawMessageLookup.keys()]);
+    const unknown = input.sourceMessageIds.filter((id) => !known.has(id));
+    if (unknown.length > 0) {
+      throw new Error(`Agent event cites unknown source messages: ${unknown.join(', ')}`);
+    }
+    const now = toUtc8Iso(this.now());
+    const criticality = input.criticality ?? 'routine';
+    return this.storeEventCard(input, pool, {
+      sourceMessageIds: [...new Set(input.sourceMessageIds)],
+      ...(input.sourceBlockId !== undefined ? { sourceBlockId: input.sourceBlockId } : {}),
+      formedTurn: input.formedTurn ?? this.currentTurn,
+      now,
+      criticality,
+    });
+  }
+
+  private storeEventCard(
+    input: EventCardInput | AgentEventCardInput,
+    pool: EventCard[],
+    parts: {
+      sourceMessageIds: string[]
+      sourceBlockId?: string
+      formedTurn: number
+      now: string
+      criticality: MemoryCriticality
+    },
+  ): EventCard {
     const event: EventCard = {
       id: input.id ?? this.idFactory('evt'),
-      formedTurn,
+      formedTurn: parts.formedTurn,
       title: input.title.trim(),
       summary: input.summary.trim(),
       narrative: input.narrative?.trim() || input.summary.trim(),
       tags: [...new Set(input.tags ?? [])].slice(0, 12),
       quotes: [...new Set(input.quotes ?? [])].slice(0, 12),
-      sourceMessageIds,
-      sourceBlockId: sourceBlock.id,
+      sourceMessageIds: parts.sourceMessageIds,
+      ...(parts.sourceBlockId !== undefined ? { sourceBlockId: parts.sourceBlockId } : {}),
       temporal: {
-        ...(input.temporal ? { ...input.temporal } : { mentionedAt: now }),
+        ...(input.temporal ? { ...input.temporal } : { mentionedAt: parts.now }),
         eventType: normalizeStandardEventType(input.temporal?.eventType),
       },
       scope: input.scope ?? 'user',
-      criticality,
+      criticality: parts.criticality,
       confidence: Math.max(0, Math.min(1, input.confidence ?? 1)),
       status: 'active',
       supersededBy: null,
       weight: {
         mentionCount: 1,
-        lastAdoptedTurn: formedTurn,
+        lastAdoptedTurn: parts.formedTurn,
         lastRetrievedAt: null,
         pinned: false,
-        floorWeight: criticalityFloor(criticality),
+        floorWeight: criticalityFloor(parts.criticality),
         forcedCap: null,
       },
-      createdAt: now,
-      updatedAt: now,
+      createdAt: parts.now,
+      updatedAt: parts.now,
     };
     if (this.listAllEvents().some((candidate) => candidate.id === event.id)) throw new Error(`Duplicate event ID: ${event.id}`);
     pool.push(event);
@@ -2196,11 +2282,10 @@ export class StrataGate {
     for (const supersededId of event.temporal.supersedesEventIds ?? []) {
       const old = this.findEvent(supersededId);
       if (!old || old.id === event.id) continue;
-      if (!old) continue;
       old.status = 'superseded';
       old.supersededBy = event.id;
       old.weight.forcedCap = 0.1;
-      old.updatedAt = now;
+      old.updatedAt = parts.now;
     }
     return event;
   }
@@ -2738,8 +2823,8 @@ export class StrataGate {
       const sourceSequence = new Map(this.blocks.map((block) => [block.id, block.sequence]));
       const recent = this.events
         .filter((event) => event.status === 'active' || event.status === 'superseded')
-        .sort((left, right) => (sourceSequence.get(right.sourceBlockId) ?? -1)
-          - (sourceSequence.get(left.sourceBlockId) ?? -1)
+        .sort((left, right) => (sourceSequence.get(right.sourceBlockId ?? '') ?? -1)
+          - (sourceSequence.get(left.sourceBlockId ?? '') ?? -1)
           || (right.formedTurn ?? -1) - (left.formedTurn ?? -1)
           || right.createdAt.localeCompare(left.createdAt)
           || right.id.localeCompare(left.id))
@@ -2935,6 +3020,16 @@ export class StrataGate {
     for (const event of this.listAllEvents()) {
       if (eventIds.has(event.id)) throw new Error(`Duplicate event ID in snapshot: ${event.id}`);
       eventIds.add(event.id);
+      if (event.sourceBlockId === undefined) {
+        // Agent-recorded events may cite real conversation messages directly
+        // (open tail or any sealed block) without a provenance block.
+        for (const messageId of event.sourceMessageIds) {
+          if (!messageBlockIds.has(messageId)) {
+            throw new Error(`Event ${event.id} references unknown source message ${messageId}`);
+          }
+        }
+        continue;
+      }
       if (!blockIds.has(event.sourceBlockId)) throw new Error(`Unknown event source block in snapshot: ${event.sourceBlockId}`);
       for (const messageId of event.sourceMessageIds) {
         if (messageBlockIds.get(messageId) !== event.sourceBlockId) {

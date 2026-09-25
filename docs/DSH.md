@@ -98,8 +98,10 @@ two differences:
 
 - **Isolated storage.** Agent-recorded Events live in dedicated `agent_events` tables that
   mirror the Event model but are physically separate from the passive conversation tables.
-  Each recording gets a synthetic `agent-memory:` provenance Block whose raw content is the
-  recorded sentence, marked `shouldExtract: false` so derivation never re-processes it.
+  Their provenance cites the **real conversation messages** of the recording session — the
+  open-tail user/assistant messages when available, otherwise the latest sealed Block of
+  that thread — so no fabricated user message is ever created. Only when a session has no
+  ingested messages at all does a synthetic `agent-memory:` provenance Block get created.
 - **Pre-write resolution.** Before writing, StrataGate searches existing memory (both pools)
   for duplicates and conflicts. Exact and near duplicates reinforce the existing card instead
   of writing a new one. Ambiguous lexical overlap triggers one synchronous model adjudication

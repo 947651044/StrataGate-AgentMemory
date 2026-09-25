@@ -607,6 +607,7 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
       currentTurn: snapshot.currentTurn,
       blockTurnSize: snapshot.blockTurnSize,
       blockDecayLambda: snapshot.blockDecayLambda,
+      agentMemoryRetrievalWeight: runtime.adminAgentMemoryRetrievalWeight?.() ?? 1,
       blocks: snapshot.blocks.length,
       openTailMessages: snapshot.openTail.length,
       events: snapshot.events.length,
@@ -668,11 +669,13 @@ async function overview(runtime: StrataGateRuntime, cachedEntries?: readonly Adm
 async function updateSettings(runtime: StrataGateRuntime, url: URL): Promise<unknown> {
   const rawTurnSize = url.searchParams.get('blockTurnSize')?.trim()
   const rawLambda = url.searchParams.get('blockDecayLambda')?.trim()
-  if (rawTurnSize === undefined && rawLambda === undefined) {
-    throw new AdminHttpError(400, 'blockTurnSize or blockDecayLambda is required')
+  const rawAgentWeight = url.searchParams.get('agentMemoryRetrievalWeight')?.trim()
+  if (rawTurnSize === undefined && rawLambda === undefined && rawAgentWeight === undefined) {
+    throw new AdminHttpError(400, 'blockTurnSize, blockDecayLambda, or agentMemoryRetrievalWeight is required')
   }
   let turnSize: number | undefined
   let lambda: number | undefined
+  let agentWeight: number | undefined
   if (rawTurnSize !== undefined) {
     const value = Number(rawTurnSize)
     if (!rawTurnSize || !Number.isSafeInteger(value) || value < 1) {
@@ -687,9 +690,17 @@ async function updateSettings(runtime: StrataGateRuntime, url: URL): Promise<unk
     }
     lambda = value
   }
-  const result: { blockTurnSize?: number; blockDecayLambda?: number } = {}
+  if (rawAgentWeight !== undefined) {
+    const value = Number(rawAgentWeight)
+    if (rawAgentWeight === '' || !Number.isFinite(value) || value < 0 || value > 5) {
+      throw new AdminHttpError(400, 'agentMemoryRetrievalWeight must be a finite number between 0 and 5')
+    }
+    agentWeight = value
+  }
+  const result: { blockTurnSize?: number; blockDecayLambda?: number; agentMemoryRetrievalWeight?: number } = {}
   if (turnSize !== undefined) result.blockTurnSize = await runtime.adminSetBlockTurnSize(turnSize)
   if (lambda !== undefined) result.blockDecayLambda = await runtime.adminSetBlockDecayLambda(lambda)
+  if (agentWeight !== undefined) result.agentMemoryRetrievalWeight = runtime.adminSetAgentMemoryRetrievalWeight(agentWeight)
   return result
 }
 

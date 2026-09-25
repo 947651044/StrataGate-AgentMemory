@@ -103,7 +103,7 @@ interface EventRow {
   narrative: string;
   tags_json: string;
   quotes_json: string;
-  source_block_id: string;
+  source_block_id: string | null;
   formed_turn: number | null;
   temporal_json: string;
   scope: MemoryScope;
@@ -366,6 +366,8 @@ CREATE TABLE IF NOT EXISTS event_sources (
 
 -- Agent-recorded memories live in isolated tables that mirror the Event model.
 -- They cite the same provenance blocks but never join the passive events table.
+-- source_block_id is nullable: agent events may cite real open-tail conversation
+-- messages directly, in which case provenance is message-level only.
 CREATE TABLE IF NOT EXISTS agent_events (
   namespace TEXT NOT NULL,
   id TEXT NOT NULL,
@@ -375,7 +377,7 @@ CREATE TABLE IF NOT EXISTS agent_events (
   narrative TEXT NOT NULL,
   tags_json TEXT NOT NULL,
   quotes_json TEXT NOT NULL,
-  source_block_id TEXT NOT NULL,
+  source_block_id TEXT,
   formed_turn INTEGER,
   temporal_json TEXT NOT NULL,
   scope TEXT NOT NULL,
@@ -600,7 +602,7 @@ function mapEventRows(rows: EventRow[], sourcesByEvent: Map<string, string[]>, t
     tags: parseJson<string[]>(row.tags_json, `${table}.tags_json`),
     quotes: parseJson<string[]>(row.quotes_json, `${table}.quotes_json`),
     sourceMessageIds: sourcesByEvent.get(row.id) ?? [],
-    sourceBlockId: row.source_block_id,
+    ...(row.source_block_id === null ? {} : { sourceBlockId: row.source_block_id }),
     ...(row.formed_turn === null ? {} : { formedTurn: row.formed_turn }),
     temporal: (() => {
       const temporal = parseJson<EventTemporal>(row.temporal_json, `${table}.temporal_json`);
@@ -1273,6 +1275,8 @@ export class SqliteStorage implements StorageAdapter {
       ON CONFLICT (namespace, event_id, message_id) DO UPDATE SET position = excluded.position
     `);
     for (const [eventPosition, event] of snapshot.events.entries()) {
+      // Passive events always carry a provenance block (enforced by
+      // addEventInMemory); only agent events may omit sourceBlockId.
       insertEvent.run(
         namespace,
         event.id,
@@ -1282,7 +1286,7 @@ export class SqliteStorage implements StorageAdapter {
         event.narrative,
         JSON.stringify(event.tags),
         JSON.stringify(event.quotes),
-        event.sourceBlockId,
+        event.sourceBlockId as string,
         event.formedTurn ?? null,
         JSON.stringify(event.temporal),
         event.scope,
@@ -1298,8 +1302,7 @@ export class SqliteStorage implements StorageAdapter {
         event.weight.forcedCap,
         event.createdAt,
         event.updatedAt,
-      );
-      for (const [position, messageId] of event.sourceMessageIds.entries()) {
+      );      for (const [position, messageId] of event.sourceMessageIds.entries()) {
         insertEventSource.run(namespace, event.id, messageId, position);
       }
     }
@@ -1330,7 +1333,7 @@ export class SqliteStorage implements StorageAdapter {
         event.narrative,
         JSON.stringify(event.tags),
         JSON.stringify(event.quotes),
-        event.sourceBlockId,
+        event.sourceBlockId ?? null,
         event.formedTurn ?? null,
         JSON.stringify(event.temporal),
         event.scope,
@@ -1716,6 +1719,45 @@ export class SqliteStorage implements StorageAdapter {
           SELECT namespace, fact_id, event_id, position FROM element_fact_sources;
         DROP TABLE element_fact_sources;
         ALTER TABLE element_fact_sources_rebuild RENAME TO element_fact_sources;
+      `);
+    }
+    // Interim v12 builds declared agent_events.source_block_id NOT NULL; real
+    // open-tail provenance requires a nullable column.
+    const agentColumns = this.database.prepare("PRAGMA table_info('agent_events')").all() as unknown as Array<{ name: string; notnull: number }>;
+    const sourceColumn = agentColumns.find(({ name }) => name === 'source_block_id');
+    if (sourceColumn?.notnull) {
+      this.database.exec(`
+        CREATE TABLE agent_events_rebuild (
+          namespace TEXT NOT NULL,
+          id TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          title TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          narrative TEXT NOT NULL,
+          tags_json TEXT NOT NULL,
+          quotes_json TEXT NOT NULL,
+          source_block_id TEXT,
+          formed_turn INTEGER,
+          temporal_json TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          criticality TEXT NOT NULL,
+          confidence REAL NOT NULL,
+          status TEXT NOT NULL,
+          superseded_by TEXT,
+          mention_count INTEGER NOT NULL,
+          last_adopted_turn INTEGER NOT NULL,
+          last_retrieved_at TEXT,
+          pinned INTEGER NOT NULL,
+          floor_weight REAL NOT NULL,
+          forced_cap REAL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (namespace, id),
+          FOREIGN KEY (namespace, source_block_id) REFERENCES blocks(namespace, id)
+        ) STRICT;
+        INSERT INTO agent_events_rebuild SELECT * FROM agent_events;
+        DROP TABLE agent_events;
+        ALTER TABLE agent_events_rebuild RENAME TO agent_events;
       `);
     }
   }

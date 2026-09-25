@@ -71,6 +71,20 @@ export class DshMetadataStore {
     this.setSetting('blockDecayLambda', value)
   }
 
+  agentMemoryRetrievalWeight(): number | null {
+    const row = this.database.prepare("SELECT value FROM stratagate_dsh_settings WHERE key = 'agentMemoryRetrievalWeight'")
+      .get() as { value: string } | undefined
+    const value = Number(row?.value)
+    return Number.isFinite(value) && value >= 0 && value <= 5 ? value : null
+  }
+
+  setAgentMemoryRetrievalWeight(value: number): void {
+    if (!Number.isFinite(value) || value < 0 || value > 5) {
+      throw new TypeError('agentMemoryRetrievalWeight must be a finite number between 0 and 5')
+    }
+    this.setSetting('agentMemoryRetrievalWeight', value)
+  }
+
   lastFeedbackPromptAt(): string | null {
     const row = this.database.prepare("SELECT value FROM stratagate_dsh_settings WHERE key = 'lastFeedbackPromptAt'")
       .get() as { value: string } | undefined

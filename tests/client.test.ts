@@ -933,7 +933,7 @@ describe('StrataGate Web client contract', () => {
       userPreferredName: '', assistantPreferredName: '', preferredLanguage: '中文', responsePreferences: '',
       standingInstructions: '', userBackground: '', longTermGoals: '', persistentNotes: '',
     }
-    const { SettingsPage } = loadSupportHelpers(['6', '0.3', profile, profile, '', ''])
+    const { SettingsPage } = loadSupportHelpers(['6', '0.3', '1', profile, profile, '', ''])
     const tree = SettingsPage({
       selected: { schemaVersion: 12, blockTurnSize: 6, blockDecayLambda: 0.3, currentTurn: 0 },
       namespace: '', dataDirectory: '', onBack: () => {}, setView: () => {},

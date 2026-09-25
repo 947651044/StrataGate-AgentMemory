@@ -226,6 +226,60 @@ describe('StrataGate.recordAgentEvent', () => {
     expect(memory.listAgentEvents()).toHaveLength(1)
   })
 
+  it('cites real open-tail conversation messages as provenance when available', async () => {
+    // blockTurnSize 2 keeps the first turn in the open tail while recording.
+    const memory = StrataGate.inMemory({
+      blockTurnSize: 6,
+      now: (): Date => new Date('2026-09-23T08:00:00Z'),
+      idFactory: ids(),
+      summarizer: nonExtractingSummarizer,
+      graphProjector: async () => ({ reason: 'projected', nodes: [], edges: [] }),
+    })
+    await memory.appendTurn(
+      { user: '记住：我偏好用 pnpm。', assistant: '好的，我记下了。', threadId: 'session-thread' },
+      { deferDerivation: true },
+    )
+    const realMessages = memory.listOpenTail('session-thread')
+    expect(realMessages.length).toBeGreaterThan(0)
+    const result = await memory.recordAgentEvent({
+      content: '用户偏好 pnpm 作为包管理器。',
+      category: 'preference',
+      threadId: 'session-thread',
+    })
+    expect(result).toMatchObject({ action: 'ADDED', gate: 'clear-new', recorded: true })
+    const event = memory.listAgentEvents()[0]!
+    // Provenance cites the real conversation messages, not a fabricated one.
+    expect(event.sourceBlockId).toBeUndefined()
+    expect(event.sourceMessageIds).toEqual(realMessages.map(({ id }) => id))
+    expect(realMessages.map(({ content }) => content)).toContain('记住：我偏好用 pnpm。')
+    // No synthetic provenance block is created.
+    expect(memory.listBlocks().some(({ threadId }) => threadId?.startsWith('agent-memory:'))).toBe(false)
+    expect(result.sourceMessageIds).toEqual(event.sourceMessageIds)
+  })
+
+  it('falls back to the latest sealed block messages when the open tail is empty', async () => {
+    // blockTurnSize 1 seals the turn immediately, so the open tail is empty.
+    const memory = openMemory()
+    await memory.appendTurn(
+      { user: '记住：我偏好用 pnpm。', assistant: '好的，我记下了。', threadId: 'session-thread' },
+      { deferDerivation: true },
+    )
+    expect(memory.listOpenTail('session-thread')).toHaveLength(0)
+    const sealedBlock = memory.listBlocks().at(-1)!
+    const result = await memory.recordAgentEvent({
+      content: '用户偏好 pnpm 作为包管理器。',
+      category: 'preference',
+      threadId: 'session-thread',
+    })
+    expect(result.recorded).toBe(true)
+    const event = memory.listAgentEvents()[0]!
+    // Sealed-block provenance: a real block is cited with its real messages.
+    expect(event.sourceBlockId).toBe(sealedBlock.id)
+    expect(event.sourceMessageIds).toEqual(sealedBlock.l5Raw.map(({ id }) => id))
+    expect(sealedBlock.l5Raw.map(({ content }) => content)).toContain('记住：我偏好用 pnpm。')
+    expect(memory.listBlocks().some(({ threadId }) => threadId?.startsWith('agent-memory:'))).toBe(false)
+  })
+
   it('gives the agent pool its own top-k lane in merged retrieval', async () => {
     const memory = openMemory()
     // Three passive matches would fill a size-2 window in a single merged

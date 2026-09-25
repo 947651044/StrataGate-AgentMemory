@@ -279,6 +279,7 @@ export class StrataGateRuntime {
   private closed = false
   private blockTurnSize: number
   private blockDecayLambda: number
+  private agentMemoryRetrievalWeight: number
   private transientLastFeedbackPromptAt: string | null = null
 
   constructor(
@@ -291,6 +292,7 @@ export class StrataGateRuntime {
   ) {
     this.blockTurnSize = config.blockTurnSize
     this.blockDecayLambda = config.blockDecayLambda
+    this.agentMemoryRetrievalWeight = config.agentMemoryRetrievalWeight ?? 1
     this.disposeAdaptersUpdated = this.models.onAdaptersUpdated(() => this.wakeModelWorkers())
     this.scheduleBackgroundWorker(BACKGROUND_WORKER_INITIAL_DELAY_MS)
   }
@@ -566,9 +568,7 @@ export class StrataGateRuntime {
       // Agent-recorded events ride their own top-k lane and fuse with the
       // passive pool by the configured weight; they arrive as ordinary event
       // results with the same evidence refs and reinforcement path.
-      ...(this.config.agentMemoryRetrievalWeight !== undefined
-        ? { agentMemoryWeight: this.config.agentMemoryRetrievalWeight }
-        : {}),
+      agentMemoryWeight: this.agentMemoryRetrievalWeight,
     })
     return this.batch(
       session,
@@ -882,9 +882,7 @@ export class StrataGateRuntime {
     const eventHits = activationQuery
       ? await memory.searchEvents(activationQuery, {
           limit: 20,
-          ...(this.config.agentMemoryRetrievalWeight !== undefined
-            ? { agentMemoryWeight: this.config.agentMemoryRetrievalWeight }
-            : {}),
+          agentMemoryWeight: this.agentMemoryRetrievalWeight,
         })
       : []
     let graphResults: GraphNodeSearchResult[] = []
@@ -912,7 +910,7 @@ export class StrataGateRuntime {
       .filter((block) => block.threadId === threadId)
       .map(({ id }) => id))
     const currentEventIds = new Set(memory.listAllEvents()
-      .filter((event) => currentBlockIds.has(event.sourceBlockId))
+      .filter((event) => event.sourceBlockId !== undefined && currentBlockIds.has(event.sourceBlockId))
       .map(({ id }) => id))
     const longTermEvents = events
       .filter((event) => !currentEventIds.has(event.id))
@@ -1297,6 +1295,7 @@ export class StrataGateRuntime {
     try {
       this.blockTurnSize = metadata.blockTurnSize() ?? this.config.blockTurnSize
       this.blockDecayLambda = metadata.blockDecayLambda() ?? this.config.blockDecayLambda
+      this.agentMemoryRetrievalWeight = metadata.agentMemoryRetrievalWeight() ?? this.config.agentMemoryRetrievalWeight ?? 1
     } finally {
       metadata.close()
     }
@@ -1631,6 +1630,27 @@ export class StrataGateRuntime {
     const update = this.settingsTail.catch(() => {}).then(() => this.applyBlockDecayLambda(value))
     this.settingsTail = update.then(() => {}, () => {})
     await update
+    return value
+  }
+
+  /** Runtime-tunable agent-memory retrieval share (0–5); persisted next to the Block knobs. */
+  adminAgentMemoryRetrievalWeight(): number {
+    return this.agentMemoryRetrievalWeight
+  }
+
+  adminSetAgentMemoryRetrievalWeight(value: number): number {
+    if (!Number.isFinite(value) || value < 0 || value > 5) {
+      throw new TypeError('agentMemoryRetrievalWeight must be a finite number between 0 and 5')
+    }
+    this.agentMemoryRetrievalWeight = value
+    try {
+      if (this.config.database !== ':memory:') {
+        const metadata = new DshMetadataStore(this.config.database)
+        try { metadata.setAgentMemoryRetrievalWeight(value) } finally { metadata.close() }
+      }
+    } catch (error) {
+      this.onIngestError(error)
+    }
     return value
   }
 

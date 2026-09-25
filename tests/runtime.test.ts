@@ -2137,4 +2137,31 @@ describe('DSH runtime agent memory', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
+
+  it('tunes the agent retrieval weight at runtime and restores it after a restart', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-agent-weight-knob-'))
+    const database = join(directory, 'memory.db')
+    const first = new StrataGateRuntime(agentRuntimeConfig(database), fakeModels)
+    try {
+      const recorded = await first.recordAgentMemory(session, '用户偏好 pnpm 作为包管理器。', 'preference') as Record<string, unknown>
+      const eventRef = `event:${String(recorded.eventId)}`
+      expect((await first.searchEvents(session, 'pnpm 包管理器') as { evidenceRefs: string[] }).evidenceRefs).toContain(eventRef)
+      expect(await first.adminSetAgentMemoryRetrievalWeight(0)).toBe(0)
+      expect((await first.searchEvents(session, 'pnpm 包管理器') as { evidenceRefs: string[] }).evidenceRefs).not.toContain(eventRef)
+      expect(() => first.adminSetAgentMemoryRetrievalWeight(9)).toThrow('between 0 and 5')
+      await first.close()
+
+      // The knob is persisted next to the Block settings and restored on startup.
+      const second = new StrataGateRuntime(agentRuntimeConfig(database), fakeModels)
+      try {
+        await second.syncConfiguredSettings()
+        expect(second.adminAgentMemoryRetrievalWeight()).toBe(0)
+        expect((await second.searchEvents(session, 'pnpm 包管理器') as { evidenceRefs: string[] }).evidenceRefs).not.toContain(eventRef)
+      } finally {
+        await second.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
 })
