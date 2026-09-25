@@ -32,6 +32,8 @@ StrataGate gradually condenses an AI agent's short-term memory as the conversati
 
    (2) **Views shrink while original records remain.** Complete L5 source messages and tool records are preserved. When details need checking, the agent can expand a memory to recover the original wording and context. → [Layered memory](#layered-memory)
 
+   ![Short-term memory animation: a Block becomes concise down to L0, stays in context, and expands when needed](docs/assets/short-term-memory-explainer-en.gif)
+
 2. **Long-term memory: an event timeline preserves history, while a knowledge graph organizes current state.**
 
    (1) **Events record what happened.** Important decisions, preferences, plans, and changes are extracted from conversations as Events. Each retains its source and distinguishes when something was mentioned from when it happened, so future sessions can retrieve and trace it. → [Event cards](#event-cards)
