@@ -265,6 +265,48 @@ describe('DeepSeek Harness model JSON retries', () => {
     expect(calls.mock.calls[0]?.[0]).not.toHaveProperty('reasoningEffort')
   })
 
+  it('configures the Block Summarizer prompt and five described structured fields', async () => {
+    const { bridge, session, calls } = modelBridge([{
+      tool: { l0Title: 'Block topic', l0Tags: [], l1Summary: 'Block overview.', l2Keypoints: [], shouldExtract: false },
+    }])
+
+    await bridge.run(session, () => bridge.summarizer([]))
+
+    const request = calls.mock.calls[0]![0] as {
+      system: string
+      tools: Array<{ name: string; description: string; parameters: {
+        type: string; required: string[]; properties: Record<string, { type: string; description: string }>
+      } }>
+      tool_choice: unknown
+    }
+    expect(request.tools).toHaveLength(1)
+    expect(request.tools[0]).toMatchObject({
+      name: 'stratagate_summarize_block',
+      description: expect.stringContaining('L0-L2 layered compression'),
+    })
+    expect(request.tools[0]!.description).toContain('Event extraction')
+    expect(request.tool_choice).toEqual({ type: 'function', function: { name: 'stratagate_summarize_block' } })
+    const schema = request.tools[0]!.parameters
+    const fields = ['l0Title', 'l0Tags', 'l1Summary', 'l2Keypoints', 'shouldExtract']
+    expect(schema.type).toBe('object')
+    expect(Object.keys(schema.properties)).toEqual(fields)
+    expect(schema.required).toEqual(fields)
+    expect(fields.every((field) => schema.properties[field]!.description.length > 40)).toBe(true)
+    expect(schema.properties.l0Title!.type).toBe('string')
+    expect(schema.properties.l0Tags!.type).toBe('array')
+    expect(schema.properties.l1Summary!.type).toBe('string')
+    expect(schema.properties.l2Keypoints!.type).toBe('array')
+    expect(schema.properties.shouldExtract!.type).toBe('boolean')
+    expect(schema.properties.shouldExtract!.description).toContain('future memory value')
+    expect(request.system).toContain("Block Summarizer in StrataGate's memory pipeline")
+    expect(request.system).toContain('progressively higher-resolution views of the same history')
+    expect(request.system).toContain('what the assistant only proposed or suspected')
+    expect(request.system).toContain('never guess omitted payload details')
+    expect(request.system).toContain('A fact\'s mere presence is insufficient')
+    expect(request.system).toContain('Call stratagate_summarize_block exactly once')
+    expect(request.system).toContain('Do not return the summary as ordinary text')
+  })
+
   it('summarizes from compact derivation messages instead of raw tool traces', async () => {
     const code = 'const expensiveTrace = run();\n'.repeat(300)
     const result = `BEGIN\n${'raw payload line\n'.repeat(500)}FINAL=success`
