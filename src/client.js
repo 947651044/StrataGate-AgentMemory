@@ -3266,7 +3266,6 @@ window.__ModuleLoader__.load({
     }
 
     function ProfilePage() {
-      const [agentWeight, setAgentWeight] = React.useState(String(selected.agentMemoryRetrievalWeight ?? 1))
       const [profile, setProfile] = React.useState(null)
       const [editing, setEditing] = React.useState(null)
       const [saving, setSaving] = React.useState(false)
@@ -3360,6 +3359,7 @@ window.__ModuleLoader__.load({
     function SettingsPage({ selected, namespace, dataDirectory, onBack, setView, updateSettings, savingSettings, usePluginSettings, setEffort, resetEffort }) {
       const [turnSize, setTurnSize] = React.useState(String(selected.blockTurnSize ?? 6))
       const [lambda, setLambda] = React.useState(String(selected.blockDecayLambda ?? 0.3))
+      const [agentWeight, setAgentWeight] = React.useState(String(selected.agentMemoryRetrievalWeight ?? 1))
       const [directoryOpening, setDirectoryOpening] = React.useState(false)
       const [directoryFeedback, setDirectoryFeedback] = React.useState({ kind: '', text: '' })
       React.useEffect(() => {
