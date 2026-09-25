@@ -181,7 +181,7 @@ function defaultGraphIdFactory(prefix: 'node' | 'edge' | 'gfact' | 'gproj'): str
   return `${prefix}_${crypto.randomUUID()}`;
 }
 
-function renderBlock(block: MemoryBlock, level: BlockLevel): string {
+export function renderBlock(block: MemoryBlock, level: BlockLevel): string {
   if (block.processingStatus !== 'ready' || !block.l0Title || !block.l0Tags || !block.l1Summary || !block.l2Keypoints) {
     throw new Error(`Block ${block.id} is not ready for rendering`);
   }

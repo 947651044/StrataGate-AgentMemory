@@ -11,6 +11,8 @@ import {
   effectiveGraphNodeView,
   graphTimeline,
   estimateTokens,
+  blockLevelLabel,
+  renderBlock,
   memoryWeightAt,
   rrfRank,
   StorageConflictError,
@@ -30,6 +32,7 @@ import {
   type MemoryCitation,
   type MemoryElementType,
   type MemoryBlock,
+  type BlockLevel,
   type RawMessage,
   type RawSearchHit,
   type RetrievalAssessment,
@@ -855,7 +858,7 @@ export class StrataGateRuntime {
     const memory = await this.space(session)
     const threadId = String(session.id)
     const blockContexts = memory.getBlockContext(threadId)
-    if (this.syncDecayedBlockSurface(session, blockContexts)) {
+    if (this.syncDecayedBlockSurface(session, memory, blockContexts)) {
       await this.flushNativeSession(session)
     }
     const openTail = memory.listOpenTail(threadId)
@@ -909,31 +912,43 @@ export class StrataGateRuntime {
     session: Session,
     block: MemoryBlock,
     context: BlockContextEntry,
-    endTurn: number,
-  ): void {
-    const sourceEventSeqs = sealedSurfaceSeqs(session, endTurn, block.endTurn - block.startTurn + 1)
+    endTurn: number | null,
+  ): boolean {
+    if (endTurn === null || hostCompactionActive(session)) return false
+    const sourceEventSeqs = sealedSurfaceSeqs(session, endTurn, block)
+    if (!sourceEventSeqs) return false
     const start = sourceEventSeqs[0]
     const end = sourceEventSeqs.at(-1)
-    if (start === undefined || end === undefined) {
-      throw new Error(`Cannot compact StrataGate block ${block.id}: no DSH surface range was found`)
-    }
+    if (start === undefined || end === undefined) return false
+    const selected = selectCompressedBlockSurface(session, sourceEventSeqs, block, context)
+    if (!selected) return false
     session.append('user/message', createUserMessage({
-      content: [{ type: 'text', text: renderBlockSurfaceMessage(context) }],
+      content: [{ type: 'text', text: selected }],
       source: { kind: 'plugin', plugin: COMPACTION_SOURCE_PLUGIN },
     }), {
       surfaceOp: dshReplaceSurfaceOp(start, end),
       sourceEventSeqs,
     })
+    return true
   }
 
   /** Keep each native Block checkpoint synchronized with its current decay pointer. */
-  private syncDecayedBlockSurface(session: Session, contexts: readonly BlockContextEntry[]): boolean {
+  private syncDecayedBlockSurface(session: Session, memory: StrataGate, contexts: readonly BlockContextEntry[]): boolean {
+    if (hostCompactionActive(session)) return false
     const current = currentBlockSurfaceMessages(session)
+    const blocks = new Map(memory.listBlocks().map((block) => [block.id, block]))
     let changed = false
     for (const context of contexts) {
       const node = current.get(context.id)
       if (!node) continue
-      const text = renderBlockSurfaceMessage(context)
+      const currentLevel = Number(node.text.match(/^Level: L([0-5]) /mu)?.[1] ?? -1)
+      if (context.level >= currentLevel && currentLevel >= 0) continue
+      const block = blocks.get(context.id)
+      if (!block) continue
+      // The current context can request an expansion. Compare every proposed
+      // representation with the actual checkpoint before rewriting it.
+      const text = selectCompressedBlockSurfaceText(node.text, context, block)
+      if (!text) continue
       if (node.text === text) continue
       session.append('user/message', createUserMessage({
         content: [{ type: 'text', text }],
@@ -949,6 +964,7 @@ export class StrataGateRuntime {
 
   /** Finish native-surface replacement when an admin retry ran without the target session loaded. */
   private async syncPendingRetrySurface(session: Session, memory: StrataGate): Promise<void> {
+    if (hostCompactionActive(session)) return
     const namespace = this.namespaceFor(session)
     const threadId = String(session.id)
     const pending = [...this.pendingSurfaceSync.entries()]
@@ -966,9 +982,8 @@ export class StrataGateRuntime {
       const context = contexts.get(blockId)
       if (!block || block.processingStatus !== 'ready' || !context) continue
       try {
-        this.replaceSealedSurface(session, block, context, dshTurnAtBlockEnd(session, block))
+        changed = this.replaceSealedSurface(session, block, context, dshTurnAtBlockEnd(session, block)) || changed
         this.pendingSurfaceSync.delete(key)
-        changed = true
       } catch (error) {
         this.onIngestError(error)
       }
@@ -1731,7 +1746,7 @@ export class StrataGateRuntime {
           try {
             await memory.resumePendingWork({ deferDerivation: true, threadId: String(session.id) })
             const contexts = memory.getBlockContext(String(session.id))
-            this.syncDecayedBlockSurface(session, contexts)
+            this.syncDecayedBlockSurface(session, memory, contexts)
           } finally {
             await this.persistSuccessfulResponses(memory)
           }
@@ -1835,14 +1850,21 @@ export class StrataGateRuntime {
           await this.persistSuccessfulResponses(memory)
           this.noteNewCoreJobFailures(session, failedBefore, memory)
           const contexts = memory.getBlockContext(threadId)
+          let changed = false
           for (const block of resumed.readyBlocks) {
             if (block.threadId !== threadId) continue
             const context = contexts.find(({ id }) => id === block.id)
             if (!context) throw new Error(`Missing context for ready StrataGate block ${block.id}`)
-            this.replaceSealedSurface(session, block, context, dshTurnAtBlockEnd(session, block))
+            if (hostCompactionActive(session)) {
+              this.pendingSurfaceSync.set(`${this.namespaceFor(session)}\u0000${block.id}`, {
+                namespace: this.namespaceFor(session), blockId: block.id,
+              })
+              continue
+            }
+            changed = this.replaceSealedSurface(session, block, context, dshTurnAtBlockEnd(session, block)) || changed
           }
-          const changed = this.syncDecayedBlockSurface(session, contexts)
-          if (resumed.readyBlocks.length > 0 || changed) await this.flushNativeSession(session)
+          changed = this.syncDecayedBlockSurface(session, memory, contexts) || changed
+          if (changed) await this.flushNativeSession(session)
         })
         .catch((error: unknown) => {
           this.notePluginError(session, error)
@@ -2069,20 +2091,19 @@ function renderMessages(messages: readonly RawMessage[]): string {
   }).join('\n\n')
 }
 
-function dshTurnAtBlockEnd(session: Session, block: MemoryBlock): number {
+function dshTurnAtBlockEnd(session: Session, block: MemoryBlock): number | null {
   const blockEnd = Date.parse(block.createdAt)
   const events = session.snapshotEvents()
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (event?.type === 'turn/end' && event.time === blockEnd) return event.data.turn
   }
-  throw new Error(`Cannot match StrataGate block ${block.id} to its completed DSH turn`)
+  return null
 }
 
-function sealedSurfaceSeqs(session: Session, endTurn: number, turnCount: number): SessionSeq[] {
+function sealedSurfaceSeqs(session: Session, endTurn: number, block: MemoryBlock): SessionSeq[] | null {
   const currentSurface = [...session.surface.nodes]
-  const currentSet = new Set(currentSurface)
-  const completed: Array<{ turn: number; start: SessionSeq; end: SessionSeq; nodes: SessionSeq[] }> = []
+  const completed: Array<{ turn: number; endTime: number; start: SessionSeq; end: SessionSeq; nodes: SessionSeq[] }> = []
   let open: { turn: number; start: SessionSeq } | undefined
   const events = session.snapshotEvents()
 
@@ -2098,31 +2119,117 @@ function sealedSurfaceSeqs(session: Session, endTurn: number, turnCount: number)
     if (hasHumanMessage && event.data.turn <= endTurn) {
       completed.push({
         turn: event.data.turn,
+        endTime: event.time,
         start: open.start,
         end: event.seq,
-        nodes: currentSurface.filter((seq) => seq > open!.start && seq < event.seq && currentSet.has(seq)),
+        nodes: currentSurface.filter((seq) => {
+          if (seq > open!.start && seq < event.seq) return true
+          const current = session.eventAt(seq)
+          return current?.type === 'tool/result'
+            && current.surfaceOp !== 'append'
+            && current.sourceEventSeqs?.some((source) => source > open!.start && source < event.seq)
+        }),
       })
     }
     open = undefined
   }
 
+  const sourceTimes = block.l5Raw.filter((message) => message.role === 'user')
+    .map((message) => Date.parse(message.createdAt))
+  const turnCount = block.endTurn - block.startTurn + 1
   const selected = completed.slice(-turnCount)
-  if (selected.length !== turnCount || selected.at(-1)?.turn !== endTurn) {
-    throw new Error(`Cannot identify ${turnCount} completed DSH turns ending at turn ${endTurn}`)
-  }
+  if (selected.length !== turnCount || selected.at(-1)?.turn !== endTurn
+    || sourceTimes.length !== turnCount
+    || selected.some((turn, index) => turn.endTime !== sourceTimes[index])) return null
+  const firstTurn = selected[0]!
+  const lastTurn = selected.at(-1)!
+  // A host checkpoint may consume only part of the block. Never turn a
+  // surviving fragment back into a complete old conversation.
+  if (events.some((event) => {
+    const hostEvent = event as { type: string; data: { shadowedSeqs?: readonly number[] } }
+    return hostEvent.type === 'compaction/summary'
+      && hostEvent.data.shadowedSeqs?.some((seq) => seq >= firstTurn.start && seq <= lastTurn.end)
+  })) return null
   const emptyTurn = selected.find((turn) => turn.nodes.length === 0)
-  if (emptyTurn) {
-    throw new Error(`Cannot compact DSH turn ${emptyTurn.turn}: its original messages are no longer on the surface`)
-  }
+  if (emptyTurn) return null
 
   const start = selected[0]!.nodes[0]!
   const end = selected.at(-1)!.nodes.at(-1)!
   const startIndex = currentSurface.indexOf(start)
   const endIndex = currentSurface.indexOf(end)
-  if (startIndex < 0 || endIndex < startIndex) {
-    throw new Error(`Cannot identify a contiguous DSH surface range ending at turn ${endTurn}`)
-  }
+  if (startIndex < 0 || endIndex < startIndex) return null
   return currentSurface.slice(startIndex, endIndex + 1)
+}
+
+function hostCompactionActive(session: Session): boolean {
+  // Match DSH's own lifecycle rule: a start from a previous restored seed
+  // cannot lock the new live session.
+  let lastBoundary: { type: string; seq: number } | undefined
+  let lastSeed: number | undefined
+  for (let seq = session.seq - 1; seq >= 0; seq -= 1) {
+    const event = session.eventAt(seq as SessionSeq)
+    if (!event) continue
+    if (lastSeed === undefined && event.type === 'session/end-seed') lastSeed = seq
+    if (!lastBoundary && (String(event.type) === 'compaction/start' || String(event.type) === 'compaction/end')) lastBoundary = event
+    if (lastSeed !== undefined && lastBoundary) break
+  }
+  return lastBoundary?.type === 'compaction/start'
+    && (lastSeed === undefined || lastBoundary.seq > lastSeed)
+}
+
+const SURFACE_MIN_SAVED_TOKENS = 32
+const SURFACE_MAX_REPLACEMENT_RATIO = 0.9
+
+function worthwhileSurfaceReduction(before: number, after: number): boolean {
+  return before - after >= SURFACE_MIN_SAVED_TOKENS
+    && after <= before * SURFACE_MAX_REPLACEMENT_RATIO
+}
+
+function selectCompressedBlockSurfaceText(
+  currentText: string,
+  context: BlockContextEntry,
+  block: MemoryBlock,
+): string | null {
+  const before = estimateTokens(currentText)
+  for (let level = context.level; level >= 0; level -= 1) {
+    const candidate = renderBlockSurfaceMessage({
+      ...context,
+      level: level as BlockLevel,
+      label: blockLevelLabel(level as BlockLevel),
+      content: level === context.level ? context.content : renderBlock(block, level as BlockLevel),
+    })
+    if (worthwhileSurfaceReduction(before, estimateTokens(candidate))) return candidate
+  }
+  return null
+}
+
+function selectCompressedBlockSurface(
+  session: Session,
+  sourceSeqs: readonly SessionSeq[],
+  block: MemoryBlock,
+  context: BlockContextEntry,
+): string | null {
+  const before = sourceSeqs.reduce((sum, seq) => {
+    const event = session.eventAt(seq)
+    const message = event && session.deriveEventMessage(event)
+    return sum + (message ? estimateTokens(JSON.stringify(message)) : 0)
+  }, 0)
+  // Use the same token estimator for the visible replacement. The event JSON
+  // wrapper is small, but count it on both sides for a conservative comparison.
+  for (let level = context.level; level >= 0; level -= 1) {
+    const candidate = renderBlockSurfaceMessage({
+      ...context,
+      level: level as BlockLevel,
+      label: blockLevelLabel(level as BlockLevel),
+      content: level === context.level ? context.content : renderBlock(block, level as BlockLevel),
+    })
+    const replacement = createUserMessage({
+      content: [{ type: 'text', text: candidate }],
+      source: { kind: 'plugin', plugin: COMPACTION_SOURCE_PLUGIN },
+    })
+    if (worthwhileSurfaceReduction(before, estimateTokens(JSON.stringify(replacement)))) return candidate
+  }
+  return null
 }
 
 function renderBlockSurfaceMessage(context: BlockContextEntry): string {
