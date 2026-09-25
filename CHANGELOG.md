@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.84 - 2026-09-25
+
+- Clarify the Block Summarizer's L0-L2 layered memory output, source attribution, uncertainty, and length guidance.
+- Use a high-recall `shouldExtract` pre-screen so plausible long-term Events reach the Event Extractor, and describe L0 tags as topical labels for rapid recognition.
+
 ## 0.2.83 - 2026-09-24
 
 - Move Persistent Profile to a compact primary tab with grouped, single-field editing.
