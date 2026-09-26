@@ -1546,14 +1546,15 @@ describe('DSH runtime ingestion', () => {
       const decayedTexts = derived.flatMap((message) => message.content
         .flatMap((block) => block.type === 'text' ? [block.text] : []))
       expect(decayedRequest).toContain(`Block: ${decayed[0]!.id}`)
-      expect(decayedRequest).toContain('Level: L3 (L3 rule-condensed transcript)')
-      expect(decayedTexts.find((text) => text.includes(`Block: ${decayed[0]!.id}`))).toContain(decayed[0]!.content)
+      expect(decayedRequest).toContain('Level: L5 (L5 raw transcript)')
+      expect(decayedTexts.find((text) => text.includes(`Block: ${decayed[0]!.id}`))).toContain('SEALED ORIGINAL ONE')
       expect(decayedRequest).toContain(`Block: ${decayed[1]!.id}`)
       expect(decayedRequest).toContain('Level: L5 (L5 raw transcript)')
 
       await nativeMemory.expandBlock(decayed[0]!.id, 'L4', 'user')
       await runtime.buildAutoContext(activeSession)
-      expect(JSON.stringify(activeSession.deriveMessages())).toContain('Level: L4 (L4 readable near-verbatim transcript)')
+      expect(nativeMemory.getBlockContext(String(activeSession.id))[0]?.level).toBe(4)
+      expect(JSON.stringify(activeSession.deriveMessages())).toContain('Level: L5 (L5 raw transcript)')
     } finally {
       await runtime.close().catch(() => {})
       await rm(directory, { recursive: true, force: true })

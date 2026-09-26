@@ -95,6 +95,9 @@ export class TurnFolder {
         return null
       }
       case 'tool/result': {
+        // DSH prune emits a second tool/result for the model-visible surface.
+        // The first append is the execution evidence kept in L5.
+        if (event.surfaceOp && event.surfaceOp !== 'append') return null
         const callId = String(event.data.message.source.callId)
         const pending = this.pending(sessionId, event.data.turn)
         if (pending.ignoredTools.has(callId)) return null

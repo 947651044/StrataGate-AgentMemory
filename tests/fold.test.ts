@@ -17,6 +17,27 @@ function content(text: string): ContentBlock[] {
 }
 
 describe('DSH turn folding', () => {
+  it('preserves the original tool result when DSH prunes it before turn end', () => {
+    const folder = new TurnFolder()
+    folder.accept(session, event('turn/start', { turn: 12 }, 1))
+    folder.accept(session, event('user/message', {
+      id: 'human', role: 'user', content: content('Inspect file'), source: { kind: 'user' },
+    }, 2))
+    folder.accept(session, event('tool/call', {
+      turn: 12, step: 1, callId: 'call', name: 'read_file', arguments: '{}',
+    }, 3))
+    folder.accept(session, { ...event('tool/result', {
+      turn: 12, step: 1,
+      message: { source: { kind: 'tool', callId: 'call' }, content: [{ type: 'tool-result', content: content('FULL ORIGINAL RESULT') }] },
+    }, 4), surfaceOp: 'append' } as SessionEvent)
+    folder.accept(session, { ...event('tool/result', {
+      turn: 12, step: 1,
+      message: { source: { kind: 'tool', callId: 'call' }, content: [{ type: 'tool-result', content: content('[pruned]') }] },
+    }, 5), surfaceOp: { op: 'replace', startSeq: 4, endSeq: 4 } } as SessionEvent)
+    const folded = folder.accept(session, event('turn/end', { turn: 12, reason: { kind: 'completed' } }, 6))
+    expect(folded?.assistantToolCalls).toEqual([{ name: 'read_file', arguments: {}, result: 'FULL ORIGINAL RESULT' }])
+  })
+
   it('folds a multi-step DSH turn and ignores injected plugin messages', () => {
     const folder = new TurnFolder()
     expect(folder.accept(session, event('turn/start', { turn: 7 }, 1))).toBeNull()
