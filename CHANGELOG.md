@@ -2,7 +2,7 @@
 
 ## 0.2.86 - Unreleased
 
-- Register the chat memory tail with a stable list slot ID on DSH `0.1.7-rc.1` and derive its citation data from owner props, while retaining the older chain slot path. This also allows the StrataGate Settings section to finish registering.
+- Register the chat memory tail with a stable list slot ID on DSH `0.1.7-rc.1` and derive its citation data from owner props, while retaining the older chain slot path. This also allows the StrataGate Settings section to finish registering. Chat citation registration now degrades independently with a console warning if the optional host slot fails, keeping Settings available.
 
 ## 0.2.85 - Unreleased
 

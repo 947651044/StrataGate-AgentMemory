@@ -6,7 +6,7 @@ function loadSupportHelpers(stateValues: unknown[] = [], globals: Record<string,
   const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
   const instrumented = source.replace(
     "    exports.name = 'stratagate-dsh'",
-    "    exports.__test = { feedbackDraftMarkdown, restoreFeedbackDraftValues, shouldExpandFeedbackPreview, handleFeedbackIssueResult, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, MemoryStatusAlert, taskStatus, ProfilePage, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
+    "    exports.__test = { feedbackDraftMarkdown, restoreFeedbackDraftValues, shouldExpandFeedbackPreview, handleFeedbackIssueResult, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, MemoryStatusAlert, taskStatus, ProfilePage, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT, apply }; exports.name = 'stratagate-dsh'",
   )
   let definition: any
   runInNewContext(instrumented, {
@@ -80,10 +80,53 @@ describe('StrataGate Web client contract', () => {
     plugin.apply({ get: (name: string) => name === 'slots' ? slots : name === 'uiConversation' ? { events: { register: () => {} } } : undefined })
     const tail = registrations.find(({ metadata }) => metadata.name === 'conversation.chat.turnTail')
     const registration = registrations.find(({ metadata }) => metadata.name === 'settings.section')
+    expect(registrations[0].metadata.name).toBe('settings.section')
     expect(tail.metadata.id).toBe('stratagate-memory-citations')
     expect(registration.metadata).toMatchObject({ name: 'settings.section', id: 'stratagate-memory' })
     expect(registration.metadata.label()).toBe('StrataGate-AgentMemory')
     expect(typeof registration.render).toBe('function')
+  })
+
+  it.each(['get', 'event', 'inject', 'register'] as const)('keeps Settings available when chat %s setup fails', (failure) => {
+    const warnings: unknown[][] = []
+    const { apply } = loadSupportHelpers([], { console: { warn: (...args: unknown[]) => warnings.push(args) } }) as any
+    const registrations: string[] = []
+    let delayedTailSetup: (() => unknown) | undefined
+    const slots = {
+      inject: (name: string, setup: () => unknown) => {
+        if (name === 'conversation.chat.turnTail') {
+          if (failure === 'inject') throw new Error('turnTail slot unavailable')
+          if (failure === 'register') { delayedTailSetup = setup; return }
+        }
+        return setup()
+      },
+      register: (metadata: { name: string }) => {
+        if (metadata.name === 'conversation.chat.turnTail' && failure === 'register') throw new Error('duplicate turnTail id')
+        registrations.push(metadata.name)
+        return () => {}
+      },
+    }
+    const uiConversation = { events: { register: () => {
+      if (failure === 'event') throw new Error('conversation definition unavailable')
+    } } }
+    expect(() => apply({ get: (name: string) => {
+      if (name === 'slots') return slots
+      if (name === 'uiConversation') {
+        if (failure === 'get') throw new Error('conversation service unavailable')
+        return uiConversation
+      }
+      return undefined
+    } })).not.toThrow()
+    expect(registrations).toContain('settings.section')
+    if (failure === 'register') {
+      expect(delayedTailSetup).toBeTypeOf('function')
+      const dispose = delayedTailSetup!()
+      expect(dispose).toBeTypeOf('function')
+      expect(() => (dispose as () => void)()).not.toThrow()
+    }
+    expect(registrations).not.toContain('conversation.chat.turnTail')
+    expect(warnings).toHaveLength(1)
+    expect(String(warnings[0]?.[0])).toContain('memory settings remain available')
   })
 
   it('declares the supported DSH Conversation package and service contracts', () => {

@@ -3707,19 +3707,9 @@ window.__ModuleLoader__.load({
       const pluginSettingsScope = configForms
         ? configForms.get('stratagate-memory')
         : settingsScope ? settingsScope.bind({ namespace: 'stratagate-memory' }) : null
-      const uiConversation = ctx.get('uiConversation')
-      if (uiConversation) {
-        uiConversation.events.register(memoryCitationsDefinition)
-        ensureCitationStyles()
-        slots.inject('conversation.chat.turnTail', () => slots.register({
-          name: 'conversation.chat.turnTail',
-          id: 'stratagate-memory-citations',
-          select: selectMemoryCitations,
-          inject: () => ({
-            ...(pluginSettingsScope ? { hooks: { pluginSettings: pluginSettingsScope } } : {}),
-            onOpenGraphNode: (namespace, nodeId) => navigateToGraphNode(ctx, namespace, nodeId),
-          }),
-        }, MemoryCitationTail))
+      const warnCitationFailure = (part, error) => {
+        if (typeof console === 'undefined' || typeof console.warn !== 'function') return
+        try { console.warn('[StrataGate] ' + part + ' registration failed; memory settings remain available.', error) } catch {}
       }
       slots.inject('settings.section', () => slots.register({
         name: 'settings.section',
@@ -3735,6 +3725,31 @@ window.__ModuleLoader__.load({
           setRetrievalStatus: pluginSettingsScope ? (visible) => pluginSettingsScope.set('showRetrievalStatus', visible) : null,
         }),
       }, (props) => h(MemoryPage, props)))
+      try {
+        const uiConversation = ctx.get('uiConversation')
+        if (uiConversation) {
+          uiConversation.events.register(memoryCitationsDefinition)
+          ensureCitationStyles()
+          slots.inject('conversation.chat.turnTail', () => {
+            try {
+              return slots.register({
+                name: 'conversation.chat.turnTail',
+                id: 'stratagate-memory-citations',
+                select: selectMemoryCitations,
+                inject: () => ({
+                  ...(pluginSettingsScope ? { hooks: { pluginSettings: pluginSettingsScope } } : {}),
+                  onOpenGraphNode: (namespace, nodeId) => navigateToGraphNode(ctx, namespace, nodeId),
+                }),
+              }, MemoryCitationTail)
+            } catch (error) {
+              warnCitationFailure('chat turn tail', error)
+              return () => {}
+            }
+          })
+        }
+      } catch (error) {
+        warnCitationFailure('chat citations', error)
+      }
       if (typeof document !== 'undefined') {
         disposeFeedbackLinkNavigation?.()
         const disposeLinkNavigation = installFeedbackLinkNavigation(ctx)
