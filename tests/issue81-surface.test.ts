@@ -1,9 +1,10 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, type SessionSeq } from '@deepseek-ai/dsh-session'
-import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
+import { createSessionFormatCatalogWithChildren, sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
+import { releasedV3SessionFormatCodec } from '@deepseek-ai/dsh-session-format-v3-to-v4'
 import { StrataGate, estimateTokens, type BlockContextEntry, type MemoryBlock } from '@diqier/stratagate'
 import { describe, expect, it, vi } from 'vitest'
 import type { DshModelBridge } from '../src/llm.js'
@@ -97,6 +98,69 @@ describe('Issue #81 surface ownership and size', () => {
       type: event.type, seq: event.seq, time: event.time,
       data: { ...event.data, source: { kind: 'plugin', plugin: 'stratagate-memory' } as any },
     } as never)).toThrow(/producer-owned source|retired plugin/)
+  })
+
+  it('persists a generated Block checkpoint through the V4 codec and reopens its surface', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-issue81-v4-'))
+    const database = join(directory, 'memory.db')
+    const sessionPath = join(directory, 'session.v4.jsonl')
+    const session = Session.create('issue81-v4-roundtrip' as never)
+    const user = 'The original conversation detail. '.repeat(100)
+    appendTurn(session, user, 'The answer to that detail. '.repeat(100))
+    const memory = await StrataGate.open({
+      database, namespace: 'dsh:session:issue81-v4-roundtrip', blockTurnSize: 1,
+      summarizer: models.summarizer, extractor: models.extractor,
+    })
+    const plugin = runtime(database)
+    try {
+      await memory.appendTurn({ user, assistant: 'The answer to that detail. '.repeat(100), threadId: String(session.id), createdAt: turnEndAt(session) })
+      const block = memory.listBlocks()[0]!
+      expect(replace(plugin, session, block, memory.getBlockContext(String(session.id))[0]!)).toBe(true)
+      expect(session.deriveMessages()[0]?.source).toMatchObject({ kind: 'plugin:stratagate-memory' })
+
+      const rows = [
+        sessionFormatCatalog.encodeCurrentHeader({ ...session.header, delegationDepth: 0 } as never, session.inheritedEventCount),
+        ...session.snapshotEvents().map((event) => sessionFormatCatalog.encodeCurrentEvent(event as never)),
+      ]
+      await writeFile(sessionPath, rows.map((row) => JSON.stringify(row)).join('\n') + '\n')
+      const [header, ...events] = (await readFile(sessionPath, 'utf8')).trimEnd().split('\n').map((line) => JSON.parse(line))
+      const restore = sessionFormatCatalog.createRestore(header, { recovery: 'strict', validation: 'current' })
+      for (const event of events) restore.decodeRow(event)
+      const artifact = restore.finish()
+      const reopened = Session.create(session.id, artifact.events as never, artifact.header as never)
+      expect(reopened.deriveMessages()).toHaveLength(1)
+      expect(reopened.deriveMessages()[0]?.source).toMatchObject({ kind: 'plugin:stratagate-memory' })
+      expect(JSON.stringify(reopened.deriveMessages())).toContain(`Block: ${block.id}`)
+    } finally {
+      await plugin.close()
+      await memory.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('migrates a V3 StrataGate checkpoint to its producer kind and still recognizes the Block', () => {
+    const session = Session.create('issue81-v3-source' as never)
+    const original = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: 'Original conversation' }], source: { kind: 'user' },
+    }), { surfaceOp: 'append' })
+    session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: '[StrataGate conversation block]\nBlock: migrated-block' }],
+      source: { kind: 'plugin', plugin: 'stratagate-memory' } as any,
+    }), {
+      surfaceOp: { op: 'replace', startSeq: original.seq, endSeq: original.seq },
+      sourceEventSeqs: [original.seq],
+    })
+    const header = { ...session.header, version: 3, delegationDepth: 0 }
+    const catalog = createSessionFormatCatalogWithChildren([])
+    const restore = catalog.createRestore(releasedV3SessionFormatCodec.encodeHeader(header as never, 0), {
+      recovery: 'strict', validation: 'current',
+    })
+    for (const event of session.snapshotEvents()) restore.decodeRow(releasedV3SessionFormatCodec.encodeEvent(event as never))
+    const artifact = restore.finish()
+    const reopened = Session.create(session.id, artifact.events as never, artifact.header as never)
+    expect(reopened.deriveMessages()).toHaveLength(1)
+    expect(reopened.deriveMessages()[0]?.source).toMatchObject({ kind: 'plugin:stratagate-memory' })
+    expect(JSON.stringify(reopened.deriveMessages())).toContain('Block: migrated-block')
   })
 
   it('repairs an oversized legacy L5 checkpoint after session restore while keeping L5 in SQLite', async () => {
@@ -535,7 +599,7 @@ describe('Issue #81 surface ownership and size', () => {
   it('lets decay shrink a checkpoint and keeps user expansion available without surface inflation', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-issue81-decay-'))
     const database = join(directory, 'memory.db')
-    const session = Session.create('issue81-decay' as never)
+    let session = Session.create('issue81-decay' as never)
     const user = 'Working through the project details. '.repeat(100)
     const assistant = 'The detailed project answer. '.repeat(100)
     appendTurn(session, user, assistant)
@@ -559,6 +623,15 @@ describe('Issue #81 surface ownership and size', () => {
         surfaceOp: { op: 'replace', startSeq: oldNodes[0]!, endSeq: oldNodes.at(-1)! },
         sourceEventSeqs: oldNodes,
       })
+      const v3Header = { ...session.header, version: 3, delegationDepth: 0 }
+      const migration = createSessionFormatCatalogWithChildren([]).createRestore(
+        releasedV3SessionFormatCodec.encodeHeader(v3Header as never, 0),
+        { recovery: 'strict', validation: 'current' },
+      )
+      for (const event of session.snapshotEvents()) migration.decodeRow(releasedV3SessionFormatCodec.encodeEvent(event as never))
+      const migrated = migration.finish()
+      session = Session.create(session.id, migrated.events as never, migrated.header as never)
+      expect(session.deriveMessages()[0]?.source).toMatchObject({ kind: 'plugin:stratagate-memory' })
       const beforeDecay = estimateTokens(JSON.stringify(session.deriveMessages()))
       await memory.appendTurn({ user: 'Later turn', assistant: 'Later answer', threadId: String(session.id) })
       await memory.appendTurn({ user: 'Another turn', assistant: 'Another answer', threadId: String(session.id) })
