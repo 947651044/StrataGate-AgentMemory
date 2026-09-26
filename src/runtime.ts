@@ -2078,8 +2078,11 @@ function renderContent(content: readonly ContentBlock[]): string {
       output.push(block.text.trim())
     } else if (block.type === 'image') {
       output.push('[image]')
-    } else if (block.type === 'tool-result' && Array.isArray(block.content)) {
-      output.push(renderContent(block.content))
+    } else {
+      const legacy = block as { type: string; content?: readonly ContentBlock[] }
+      if (legacy.type === 'tool-result' && Array.isArray(legacy.content)) {
+        output.push(renderContent(legacy.content))
+      }
     }
   }
   return output.filter(Boolean).join('\n')

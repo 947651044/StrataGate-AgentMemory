@@ -81,7 +81,7 @@ describe('StrataGate Web client contract', () => {
   it('declares the supported DSH Conversation package and service contracts', () => {
     const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
     expect(manifest.dsh.client.inject).toEqual(['@deepseek-ai/dsh-client-ui-conversation'])
-    expect(manifest.dshWorkshop.compatibility.dshVersions).toEqual(['0.1.2-rc.1', '0.1.5-rc.1'])
+    expect(manifest.dshWorkshop.compatibility.dshVersions).toEqual(['0.1.2-rc.1', '0.1.5-rc.1', '0.1.6-alpha.1', '0.1.7-rc.1'])
   })
 
   it('parses and consumes only the StrataGate feedback deep link while preserving unrelated URL state', () => {
@@ -336,6 +336,35 @@ describe('StrataGate Web client contract', () => {
     expect(source).not.toContain('IntersectionObserver')
     expect(source).not.toContain('MemoryCompressionWidget')
     expect(source).not.toContain('sg-compression-panel')
+  })
+
+  it('binds display settings through the DSH 0.1.7 config form when available', () => {
+    const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
+    let definition: any
+    runInNewContext(source, {
+      URLSearchParams,
+      window: { __ModuleLoader__: { load: (value: unknown) => { definition = value } } },
+    })
+    const plugin = definition.factory((name: string) => {
+      if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
+      return { createContext: (value: unknown) => ({ Provider: 'provider', value }), createElement: (...args: unknown[]) => args, Fragment: 'fragment' }
+    })
+    const registrations: any[] = []
+    const writes: unknown[][] = []
+    const form = { getSnapshot: () => ({ status: 'ready', value: {}, writable: true }), subscribe: () => () => {}, set: (...args: unknown[]) => { writes.push(args) }, unset: (...args: unknown[]) => { writes.push(args) } }
+    const namespaces: string[] = []
+    plugin.apply({ get: (name: string) => name === 'slots'
+      ? { inject: (_name: string, callback: () => void) => callback(), register: (metadata: unknown, render: unknown) => { registrations.push({ metadata, render }) } }
+      : name === 'uiConversation'
+        ? { events: { register: () => {} } }
+        : name === 'configForms'
+          ? { get: (namespace: string) => { namespaces.push(namespace); return form } }
+          : undefined })
+    expect(namespaces).toEqual(['stratagate-memory'])
+    const settings = registrations.find(({ metadata }) => metadata.name === 'settings.section')
+    settings.metadata.inject().setStrataGateStatus(false)
+    settings.metadata.inject().resetEffort()
+    expect(writes).toEqual([['showStrataGateStatus', false], ['structuredReasoningEffort']])
   })
 
   it('defaults all chat status UI to visible and combines the master and child preferences', () => {

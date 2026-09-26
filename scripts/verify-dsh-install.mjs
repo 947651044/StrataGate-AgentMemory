@@ -9,6 +9,7 @@ import { once } from 'node:events'
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
+const expectedPluginVersion = process.env.EXPECTED_PLUGIN_VERSION ?? manifest.version
 const tarball = process.argv[2] ? resolve(packageRoot, process.argv[2]) : join(packageRoot, `${manifest.name}-${manifest.version}.tgz`)
 const versions = process.env.DSH_VERSION
   ? [process.env.DSH_VERSION]
@@ -100,10 +101,10 @@ async function smokeWeb(cli, root, env, version) {
     assert(html.includes('__DSH_BOOT__'), `${version}: Web shell omitted the DSH boot payload`)
 
     const overviewResponse = await fetch(`${origin}/api/stratagate/overview`, { headers: { cookie } })
-    assert(overviewResponse.status === 200, `${version}: StrataGate admin probe returned HTTP ${overviewResponse.status}`)
+    assert(overviewResponse.status === 200, `${version}: StrataGate admin probe returned HTTP ${overviewResponse.status}\n${output.join('').replace(/token=[A-Za-z0-9_-]+/g, 'token=<redacted>')}`)
     const overview = await overviewResponse.json()
     assert(overview?.readonly === true, `${version}: StrataGate admin probe omitted its read-only contract`)
-    assert(overview?.pluginVersion === manifest.version, `${version}: StrataGate admin probe reported plugin ${overview?.pluginVersion ?? '<missing>'}`)
+    assert(overview?.pluginVersion === expectedPluginVersion, `${version}: StrataGate admin probe reported plugin ${overview?.pluginVersion ?? '<missing>'}`)
     assert(Array.isArray(overview?.namespaces), `${version}: StrataGate admin probe omitted namespaces`)
 
     const call = async (method, args) => {
@@ -116,7 +117,7 @@ async function smokeWeb(cli, root, env, version) {
       assert(rpcResponse.ok, `${version}: ${method} returned HTTP ${rpcResponse.status}`)
       const envelope = await rpcResponse.json()
       assert(envelope.rpcId === rpcId, `${version}: ${method} returned a mismatched RPC id`)
-      assert(envelope.result?.ok === true, `${version}: ${method} failed: ${JSON.stringify(envelope.result?.error)}`)
+      assert(envelope.result?.ok === true, `${version}: ${method} failed: ${JSON.stringify(envelope.result?.error)}\n${output.join('').replace(/token=[A-Za-z0-9_-]+/g, 'token=<redacted>')}`)
       return envelope.result.value
     }
 
@@ -205,11 +206,15 @@ try {
     const localInternalNames = readdirSync(join(packageRoot, 'node_modules', '@deepseek-ai'))
       .filter(name => name.startsWith('dsh-'))
       .map(name => `@deepseek-ai/${name}`)
-    const overrides = Object.fromEntries([...new Set([...Object.keys(hostManifest.dependencies ?? {}), ...localInternalNames])]
+    // These transitive 0.1.6 packages are absent from the current CLI's
+    // direct dependency list. Letting caret ranges choose alpha.2 withdraws
+    // the older Host's strict typert definitions, including session/list.
+    const legacyTransitiveNames = ['@deepseek-ai/dsh-agent-presets', '@deepseek-ai/dsh-settings-file']
+    const overrides = Object.fromEntries([...new Set([...Object.keys(hostManifest.dependencies ?? {}), ...localInternalNames, ...legacyTransitiveNames])]
       .filter(name => name.startsWith('@deepseek-ai/dsh-'))
       .map(name => [name, internalVersion]))
-    overrides['@deepseek-ai/cordis'] = '4.0.2'
-    overrides['@deepseek-ai/schemastery'] = '3.18.2'
+    overrides['@deepseek-ai/cordis'] = version === '0.1.7-rc.1' ? '4.0.4' : '4.0.2'
+    overrides['@deepseek-ai/schemastery'] = version === '0.1.7-rc.1' ? '3.18.4' : '3.18.2'
     const freshManifestPath = join(root, 'package.json')
     const freshManifest = JSON.parse(readFileSync(freshManifestPath, 'utf8'))
     freshManifest.overrides = overrides
@@ -262,13 +267,13 @@ try {
     const config = run(process.execPath, [cli, '--profile', 'web', '--dump-config'], root, dshEnv)
     assert(config.includes("sessionRoot: !!js dshHomePath('sessions')"), `${version}: sessionRoot was not wired to the host DSH_HOME`)
     await smokeWeb(cli, root, dshEnv, version)
-    if (version === '0.1.6-alpha.1') {
+    if (version === '0.1.6-alpha.1' || version === '0.1.7-rc.1') {
       await verifyPluginFailureIsDetected(cli, root, dshEnv, version, profile)
     }
     const projectId = process.platform === 'win32' ? '--C-redacted-workspace--' : '--redacted-workspace--'
     const legacyDirectory = join(dshHome, 'sessions', projectId, 'fixture-legacy-citations')
     assert(existsSync(join(legacyDirectory, 'session.jsonl')), `${version}: immutable v0 fixture was removed`)
-    if (version === '0.1.5-rc.1' || version === '0.1.6-alpha.1') {
+    if (version !== '0.1.2-rc.1') {
       assert(existsSync(join(legacyDirectory, 'session.v1.jsonl')), `${version}: legacy citation bridge was not published`)
       assert(existsSync(join(legacyDirectory, 'stratagate-legacy-citations-v1.json')), `${version}: migration receipt was not published`)
     }

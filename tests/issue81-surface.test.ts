@@ -211,10 +211,7 @@ describe('Issue #81 surface ownership and size', () => {
         ...original.data,
         message: {
           ...original.data.message,
-          content: [{
-            ...original.data.message.content[0]!,
-            content: [{ type: 'text', text: '[pruned by DSH]' }],
-          }],
+          content: [{ type: 'text', text: '[pruned by DSH]' }],
         },
       }, { surfaceOp: { op: 'replace', startSeq: toolSeq, endSeq: toolSeq }, sourceEventSeqs: [toolSeq] })
       const before = estimateTokens(JSON.stringify(session.deriveMessages()))
@@ -424,7 +421,7 @@ describe('Issue #81 surface ownership and size', () => {
         ...original.data,
         message: {
           ...original.data.message,
-          content: [{ ...original.data.message.content[0]!, content: [{ type: 'text', text: '[pruned by DSH]' }] }],
+          content: [{ type: 'text', text: '[pruned by DSH]' }],
         },
       }, { surfaceOp: { op: 'replace', startSeq: toolSeq, endSeq: toolSeq }, sourceEventSeqs: [toolSeq] })
       const prunedTokens = estimateTokens(JSON.stringify(session.deriveMessages()))

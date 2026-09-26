@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { Config, resolveConfig } from '../src/config.js'
+import { Config, resolveConfig, volatileIfSupported } from '../src/config.js'
 
 describe('DeepSeek Harness plugin config', () => {
+  it('keeps old Schemastery fields usable without the volatile method', () => {
+    const legacy = { meta: { default: true } }
+    expect(volatileIfSupported(legacy)).toBe(legacy)
+    const current = { volatile: () => ({ meta: { volatile: true } }) }
+    expect(volatileIfSupported(current)).toEqual({ meta: { volatile: true } })
+  })
+
   it('resolves safe defaults', () => {
     expect(resolveConfig({ database: ' ./memory.db ' })).toEqual({
       database: './memory.db',
@@ -46,9 +53,10 @@ describe('DeepSeek Harness plugin config', () => {
   })
 
   it('exposes persistent defaults for all chat display preferences', () => {
-    expect(Config.dict?.showStrataGateStatus?.meta).toMatchObject({ default: true })
-    expect(Config.dict?.showShortTermStatus?.meta).toMatchObject({ default: true })
-    expect(Config.dict?.showRetrievalStatus?.meta).toMatchObject({ default: true })
+    expect(Config.dict?.showStrataGateStatus?.meta).toMatchObject({ default: true, volatile: true })
+    expect(Config.dict?.showShortTermStatus?.meta).toMatchObject({ default: true, volatile: true })
+    expect(Config.dict?.showRetrievalStatus?.meta).toMatchObject({ default: true, volatile: true })
+    expect(Config.dict?.structuredReasoningEffort?.meta).toMatchObject({ volatile: true })
     expect(resolveConfig({ database: 'memory.db' })).toMatchObject({
       showStrataGateStatus: true,
       showShortTermStatus: true,
@@ -64,5 +72,11 @@ describe('DeepSeek Harness plugin config', () => {
       showShortTermStatus: false,
       showRetrievalStatus: false,
     })
+  })
+
+  it('reads the live DSH 0.1.7 preference snapshot without changing older plain configs', () => {
+    const live = { get: () => false }
+    expect(resolveConfig({ database: 'memory.db', showStrataGateStatus: live as unknown as boolean }).showStrataGateStatus).toBe(false)
+    expect(resolveConfig({ database: 'memory.db', showStrataGateStatus: true }).showStrataGateStatus).toBe(true)
   })
 })

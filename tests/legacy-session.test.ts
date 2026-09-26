@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import * as zlib from 'node:zlib'
 import { describe, expect, it } from 'vitest'
 import { releasedV0SessionFormatCodec, releasedV1SessionFormatCodec, sessionFormatV0ToV1 } from '@deepseek-ai/dsh-session-format-v0-to-v1'
-import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
+import { restoreReleasedV1Artifact } from '@deepseek-ai/dsh-session-format-v0-to-v1'
 import {
   migrateLegacyCitationSessions,
   prepareLegacyCitationGeneration,
@@ -17,7 +17,7 @@ const modules = {
   releasedV0SessionFormatCodec,
   releasedV1SessionFormatCodec,
   sessionFormatV0ToV1,
-  sessionFormatCatalog,
+  restoreReleasedV1Artifact,
 }
 
 function platformFixture(source: Buffer): Buffer {
@@ -39,7 +39,7 @@ function conversationText(events: readonly any[]): string[] {
 }
 
 describe('legacy stratagate/memory-citations migration', () => {
-  it('uses the official v0-to-v3 catalog without changing conversation content', async () => {
+  it('validates the published V1 generation without changing conversation content', async () => {
     const source = platformFixture(await readFile(fixturePath))
     const originalHash = digest(source)
     const prepared = prepareLegacyCitationGeneration(source, 'none', modules)

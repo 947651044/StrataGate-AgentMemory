@@ -4,6 +4,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import {
   Config,
+  isLiveConfigValue,
+  liveConfigValue,
   resolveConfig,
   StructuredReasoningEffortSettings,
   type Config as StrataGateConfig,
@@ -74,7 +76,10 @@ export async function apply(ctx: Context, config: StrataGateConfig): Promise<() 
     ctx.logger.info(`stratagate-memory prepared ${legacyMigration.migrated} legacy Session generation(s) for DSH ${compatibility.cliVersion}`)
   }
   await mkdir(dirname(resolved.database), { recursive: true })
-  const models = new DshModelBridge(ctx, resolved)
+  const models = new DshModelBridge(ctx, resolved,
+    isLiveConfigValue(config.structuredReasoningEffort)
+      ? () => liveConfigValue(config.structuredReasoningEffort) ?? 'auto'
+      : undefined)
   const runtime = new StrataGateRuntime(resolved, models, (error) => {
     ctx.logger.error(`stratagate-memory ingestion failed: ${renderError(error)}`)
   }, async (session) => {
@@ -90,16 +95,19 @@ export async function apply(ctx: Context, config: StrataGateConfig): Promise<() 
   }
   let effortSource = (): EffortSettings => effortEntry
   ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(
-      ctx,
-      STRATAGATE_SETTINGS_NAMESPACE,
-      StructuredReasoningEffortSettings,
-      effortEntry,
-      {
+    const settings = settingsCtx.settings as unknown as {
+      installSection?: (owner: Context, namespace: string, schema: typeof StructuredReasoningEffortSettings,
+        entry: EffortSettings, hooks: { setSource(source: () => EffortSettings): void; onChange(): void }) => void
+      configure?: (presentation: { auto: boolean }, owner: typeof ctx.fiber) => () => void
+    }
+    if (settings.installSection) {
+      settings.installSection(ctx, STRATAGATE_SETTINGS_NAMESPACE, StructuredReasoningEffortSettings, effortEntry, {
         setSource: (current) => { effortSource = current },
         onChange: () => models.setStructuredReasoningEffort(effortSource().structuredReasoningEffort),
-      },
-    )
+      })
+    } else if (settings.configure) {
+      settingsCtx.effect(() => settings.configure!({ auto: false }, ctx.fiber))
+    }
   })
 
   ctx.systemPrompt.section({ name: 'tool:stratagate-memory', order: 113, text: MEMORY_PROTOCOL })

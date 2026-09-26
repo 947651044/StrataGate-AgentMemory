@@ -58,10 +58,24 @@ const SUPPORTED_RUNTIME_FAMILIES = [
       '@deepseek-ai/schemastery': '3.18.2',
     },
   },
+  {
+    cli: '0.1.7-rc.1',
+    versions: {
+      '@deepseek-ai/cordis': '4.0.4',
+      '@deepseek-ai/dsh-agent-default-model': '0.1.7-rc.1',
+      '@deepseek-ai/dsh-client-ui-conversation': '0.1.7-rc.1',
+      '@deepseek-ai/dsh-llm': '0.1.7-rc.1',
+      '@deepseek-ai/dsh-session': '0.1.7-rc.1',
+      '@deepseek-ai/dsh-settings': '0.1.7-rc.1',
+      '@deepseek-ai/dsh-system-prompt': '0.1.7-rc.1',
+      '@deepseek-ai/dsh-tools': '0.1.7-rc.1',
+      '@deepseek-ai/schemastery': '3.18.4',
+    },
+  },
 ] as const
 
 export interface DshRuntimeCompatibility {
-  cliVersion: '0.1.2-rc.1' | '0.1.5-rc.1' | '0.1.6-alpha.1'
+  cliVersion: '0.1.2-rc.1' | '0.1.5-rc.1' | '0.1.6-alpha.1' | '0.1.7-rc.1'
   packageVersions: Readonly<Record<string, string>>
 }
 
@@ -103,7 +117,8 @@ export function classifyDshRuntime(packageVersions: DshRuntimePackageVersions): 
     + `Resolved: ${found}. Supported tested hosts are @deepseek-ai/dsh@0.1.2-rc.1 `
     + '(internal DSH packages 0.1.2-rc.1) and @deepseek-ai/dsh@0.1.5-rc.1 '
     + '(its real dependency tree uses internal DSH packages 0.1.5-rc.2), and '
-    + '@deepseek-ai/dsh@0.1.6-alpha.1 (internal DSH packages 0.1.6-alpha.1). '
+    + '@deepseek-ai/dsh@0.1.6-alpha.1 (internal DSH packages 0.1.6-alpha.1), and '
+    + '@deepseek-ai/dsh@0.1.7-rc.1 (internal DSH packages 0.1.7-rc.1). '
     + 'Reinstall or update stratagate-dsh through `dsh plugin --profile <name> add <package>` so the host supplies its peers.',
   )
 }

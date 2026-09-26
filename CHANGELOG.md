@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.85 - Unreleased
+
+- Add explicit support for DSH `0.1.7-rc.1` and its host-provided runtime package family, including Cordis `4.0.4` and Schemastery `3.18.4`.
+- Adapt the in-chat settings controls to DSH's profile-backed config forms while retaining the earlier settings service on supported older hosts. Keep the live reasoning-effort preference effective without restarting the plugin.
+- Validate the legacy citation bridge as a V1 Session generation before DSH continues its V4 migration; preserve the original V0 log and its recovery receipt.
+- Extend the compatibility matrix and clean-install smoke checks to the 0.1.7 host.
+
 ## 0.2.84 - 2026-09-25
 
 - Clarify the Block Summarizer's L0-L2 layered memory output, source attribution, uncertainty, and length guidance.

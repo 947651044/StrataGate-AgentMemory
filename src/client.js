@@ -3700,8 +3700,11 @@ window.__ModuleLoader__.load({
     function apply(ctx) {
       const slots = ctx.get('slots')
       if (!slots) return
+      const configForms = ctx.get('configForms')
       const settingsScope = ctx.get('settingsScope')
-      const pluginSettingsScope = settingsScope ? settingsScope.bind({ namespace: 'stratagate-memory' }) : null
+      const pluginSettingsScope = configForms
+        ? configForms.get('stratagate-memory')
+        : settingsScope ? settingsScope.bind({ namespace: 'stratagate-memory' }) : null
       const uiConversation = ctx.get('uiConversation')
       if (uiConversation) {
         uiConversation.events.register(memoryCitationsDefinition)
