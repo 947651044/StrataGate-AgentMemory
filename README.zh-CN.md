@@ -16,6 +16,8 @@ StrataGate 让 AI Agent 的短期记忆随对话推进逐渐变得简略，需�
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 [![欢迎贡献](https://img.shields.io/badge/%E6%AC%A2%E8%BF%8E%E8%B4%A1%E7%8C%AE-brightgreen.svg)](CONTRIBUTING.zh-CN.md)
 
+[![dshfind](https://dshfind.com/api/card/diqierjia/StrataGate-AgentMemory?lang=zh)](https://dshfind.com/zh/plugins/diqierjia/StrataGate-AgentMemory?ref=badge)
+
 [English](README.md) · [DeepSeek Harness 插件说明](docs/DSH.zh-CN.md) · [架构说明](docs/ARCHITECTURE.md) · [完整评测](docs/EVALUATION.md)
 
 <strong>当前公开结果：</strong>在 LoCoMo `conv-26` 上，StrataGate 经过 10 次独立评审的平均准确率为 <strong>80.46%</strong>，Mem0 base 为 <strong>63.22%</strong>。[查看测试范围与方法](#实验结果)。
