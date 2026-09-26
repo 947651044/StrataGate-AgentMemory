@@ -12,7 +12,8 @@ StrataGate gradually condenses an AI agent's short-term memory as the conversati
 [![npm version](https://img.shields.io/npm/v/stratagate-dsh.svg)](https://www.npmjs.com/package/stratagate-dsh)
 [![npm downloads](https://img.shields.io/npm/dt/stratagate-dsh.svg)](https://www.npmjs.com/package/stratagate-dsh)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6.svg)](https://www.typescriptlang.org/)
+[![GitHub stars](https://img.shields.io/github/stars/diqierjia/StrataGate-AgentMemory?style=social&label=Stars)](https://github.com/diqierjia/StrataGate-AgentMemory/stargazers)
+[![dshfind: StrataGate-AgentMemory — A 73](https://dshfind.com/api/badge/diqierjia/StrataGate-AgentMemory?lang=en)](https://dshfind.com/en/plugins/diqierjia/StrataGate-AgentMemory?ref=badge)
 [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
