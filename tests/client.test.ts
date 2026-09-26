@@ -67,12 +67,20 @@ describe('StrataGate Web client contract', () => {
     })
     expect(plugin.inject).toEqual(['slots', 'uiConversation'])
 
-    let registration: any
+    const registrations: any[] = []
     const slots = {
       inject: (_name: string, callback: () => void) => callback(),
-      register: (metadata: unknown, render: unknown) => { registration = { metadata, render } },
+      register: (metadata: any, render: unknown) => {
+        if (metadata.name === 'conversation.chat.turnTail' && !metadata.id) {
+          throw new Error('list slot "conversation.chat.turnTail" requires options.id')
+        }
+        registrations.push({ metadata, render })
+      },
     }
-    plugin.apply({ get: (name: string) => name === 'slots' ? slots : undefined })
+    plugin.apply({ get: (name: string) => name === 'slots' ? slots : name === 'uiConversation' ? { events: { register: () => {} } } : undefined })
+    const tail = registrations.find(({ metadata }) => metadata.name === 'conversation.chat.turnTail')
+    const registration = registrations.find(({ metadata }) => metadata.name === 'settings.section')
+    expect(tail.metadata.id).toBe('stratagate-memory-citations')
     expect(registration.metadata).toMatchObject({ name: 'settings.section', id: 'stratagate-memory' })
     expect(registration.metadata.label()).toBe('StrataGate-AgentMemory')
     expect(typeof registration.render).toBe('function')
@@ -575,6 +583,9 @@ describe('StrataGate Web client contract', () => {
     const renderedTail = JSON.stringify(rendered)
     expect(renderedTail).toContain('本回答采用了 3 条记忆')
     expect(renderedTail).toContain('· 查看检索过程')
+    const listRenderedTail = JSON.stringify(tail.render({ turn: { turn: 7, data: { get: (key: string) => locationData.get(key) } }, seq: 8 }))
+    expect(listRenderedTail).toContain('本回答采用了 3 条记忆')
+    expect(listRenderedTail).toContain('· 查看检索过程')
     expect(JSON.stringify(rendered[3])).not.toContain('pnpm compatibility')
     expect(tail.metadata.select({ turn: { turn: 7, data: { get: (key: string) => locationData.get(key) } }, seq: 2 })).toMatchObject({ turn: 7, citations: [], retrievalGroups: [] })
     const legacyUpdated = conversationDefinition.update({ state: started }, {

@@ -1092,7 +1092,9 @@ window.__ModuleLoader__.load({
         h('div', { className: 'sg-retrieved-final' }, h('span', null, '最终采用 ' + citations.length + ' 条'), h('span', null, '检索命中不会自动强化记忆')))
     }
 
-    function MemoryCitationTail({ matched, sessionId, useSession, useSessions, useWorkspaces, usePluginSettings, onOpenGraphNode }) {
+    function MemoryCitationTail({ matched, turn, seq, sessionId, useSession, useSessions, useWorkspaces, usePluginSettings, onOpenGraphNode }) {
+      // DSH 0.1.7 renders this list slot with owner props; older chain slots supply matched.
+      matched = matched || selectMemoryCitations({ turn, seq })
       const citations = matched.citations
       const retrievedCount = matched.retrievedCount
       const retrievalGroups = matched.retrievalGroups
@@ -3711,6 +3713,7 @@ window.__ModuleLoader__.load({
         ensureCitationStyles()
         slots.inject('conversation.chat.turnTail', () => slots.register({
           name: 'conversation.chat.turnTail',
+          id: 'stratagate-memory-citations',
           select: selectMemoryCitations,
           inject: () => ({
             ...(pluginSettingsScope ? { hooks: { pluginSettings: pluginSettingsScope } } : {}),

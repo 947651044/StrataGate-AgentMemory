@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.86 - Unreleased
+
+- Register the chat memory tail with a stable list slot ID on DSH `0.1.7-rc.1` and derive its citation data from owner props, while retaining the older chain slot path. This also allows the StrataGate Settings section to finish registering.
+
 ## 0.2.85 - Unreleased
 
 - Add explicit support for DSH `0.1.7-rc.1` and its host-provided runtime package family, including Cordis `4.0.4` and Schemastery `3.18.4`.
