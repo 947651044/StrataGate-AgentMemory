@@ -63,7 +63,13 @@ export const StructuredReasoningEffortSettings: z<StructuredReasoningEffortSetti
     .comment('控制检索次数、返回数量和记忆采用信息的聊天内提示；检索与采用不受影响。'),
 })
 
-export const Config: z<Config> = z.object({
+// Schemastery 3.18.2 (DSH <= 0.1.6) has no volatile fields. Earlier hosts
+// publish these controls through settings.installSection instead.
+export function volatileIfSupported<T>(schema: T): T {
+  return (schema as { volatile?: () => T }).volatile?.() ?? schema
+}
+
+export const Config = z.object({
   database: z.string().required(),
   sessionRoot: z.string(),
   namespaceMode: z.union(['project', 'session', 'global'] as const).default('project'),
@@ -78,11 +84,21 @@ export const Config: z<Config> = z.object({
   model: z.string(),
   maxOutputTokens: z.natural().min(256).default(2_048),
   structuredTaskTimeoutMs: z.natural().min(1_000).default(120_000),
-  structuredReasoningEffort: z.union(['auto', 'force-off'] as const).default('auto'),
-  showStrataGateStatus: z.boolean().default(true),
-  showShortTermStatus: z.boolean().default(true),
-  showRetrievalStatus: z.boolean().default(true),
+  structuredReasoningEffort: volatileIfSupported(z.union(['auto', 'force-off'] as const).default('auto')),
+  showStrataGateStatus: volatileIfSupported(z.boolean().default(true)),
+  showShortTermStatus: volatileIfSupported(z.boolean().default(true)),
+  showRetrievalStatus: volatileIfSupported(z.boolean().default(true)),
 })
+
+export function liveConfigValue<T>(value: T): T {
+  return value && typeof value === 'object' && 'get' in value && typeof value.get === 'function'
+    ? (value as { get(): T }).get()
+    : value
+}
+
+export function isLiveConfigValue(value: unknown): value is { get(): unknown } {
+  return value !== null && typeof value === 'object' && 'get' in value && typeof value.get === 'function'
+}
 
 export function resolveConfig(config: Config): ResolvedConfig {
   const database = config.database?.trim() ?? ''
@@ -107,9 +123,9 @@ export function resolveConfig(config: Config): ResolvedConfig {
     ...(provider && model ? { provider, model } : {}),
     maxOutputTokens: Math.max(256, Math.floor(config.maxOutputTokens ?? 2_048)),
     structuredTaskTimeoutMs: Math.max(1_000, Math.floor(config.structuredTaskTimeoutMs ?? 120_000)),
-    structuredReasoningEffort: config.structuredReasoningEffort ?? 'auto',
-    showStrataGateStatus: config.showStrataGateStatus ?? true,
-    showShortTermStatus: config.showShortTermStatus ?? true,
-    showRetrievalStatus: config.showRetrievalStatus ?? true,
+    structuredReasoningEffort: liveConfigValue(config.structuredReasoningEffort) ?? 'auto',
+    showStrataGateStatus: liveConfigValue(config.showStrataGateStatus) ?? true,
+    showShortTermStatus: liveConfigValue(config.showShortTermStatus) ?? true,
+    showRetrievalStatus: liveConfigValue(config.showRetrievalStatus) ?? true,
   }
 }

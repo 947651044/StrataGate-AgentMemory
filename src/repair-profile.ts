@@ -14,6 +14,7 @@ const PROFILE_PACKAGES = [
   '@deepseek-ai/dsh-code-runtime',
   '@deepseek-ai/dsh-invariants',
   '@deepseek-ai/dsh-llm',
+  '@deepseek-ai/dsh-native-command',
   '@deepseek-ai/dsh-scope',
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-session-format',

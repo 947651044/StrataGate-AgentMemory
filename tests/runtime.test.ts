@@ -1463,7 +1463,7 @@ describe('DSH runtime ingestion', () => {
       expect(derived).toHaveLength(1)
       expect(derived[0]).toMatchObject({
         role: 'user',
-        source: { kind: 'plugin', plugin: 'stratagate-memory' },
+        source: { kind: 'plugin:stratagate-memory' },
       })
       expect(JSON.stringify(derived)).toContain('[StrataGate conversation block]')
       expect(JSON.stringify(derived)).toContain('Level: L5 (L5 raw transcript)')
@@ -1521,7 +1521,7 @@ describe('DSH runtime ingestion', () => {
       expect(nativeRequest).toContain('CURRENT TOOL RESULT')
       expect(nativeRequest).toContain('CURRENT FINAL ANSWER')
       expect(derived.some((message) => message.content.some((block) => block.type === 'tool-call' && block.id === callId))).toBe(true)
-      expect(derived.some((message) => message.content.some((block) => block.type === 'tool-result' && block.toolCallId === callId))).toBe(true)
+      expect(derived.some((message) => message.role === 'tool' && message.toolCallId === callId)).toBe(true)
 
       const dynamicContext = await runtime.buildAutoContext(activeSession)
       expect(dynamicContext).toContain('[Activated long-term memory]')

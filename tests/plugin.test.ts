@@ -1,11 +1,13 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import LlmRuntime from '@deepseek-ai/dsh-llm'
-import FileSettingsRuntime from '@deepseek-ai/dsh-settings-file'
 import type { Session } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -13,7 +15,17 @@ import { describe, expect, it } from 'vitest'
 import * as plugin from '../src/index.js'
 
 describe('DSH plugin composition', () => {
-  it('persists global chat display preferences across a complete plugin restart', async () => {
+  const legacySettingsModule = (() => {
+    const hostRoot = process.env.DSH_ROOT
+    if (hostRoot) {
+      try { return createRequire(join(hostRoot, 'package.json')).resolve('@deepseek-ai/dsh-settings-file') } catch {}
+    }
+    try { return createRequire(import.meta.url).resolve('@deepseek-ai/dsh-settings-file') } catch { return undefined }
+  })()
+  const legacySettingsAvailable = Boolean(legacySettingsModule && existsSync(legacySettingsModule))
+
+  it.skipIf(!legacySettingsAvailable)('persists legacy global chat display preferences across a complete plugin restart', async () => {
+    const { default: FileSettingsRuntime } = await import(pathToFileURL(legacySettingsModule!).href)
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-dsh-display-settings-'))
     const settingsPath = join(directory, 'settings.json')
     const database = join(directory, 'memory.db')
@@ -32,7 +44,7 @@ describe('DSH plugin composition', () => {
     let restarted: Context | undefined
     try {
       first = await mount()
-      const settings = first.get('settings')!
+      const settings = first.get('settings') as unknown as { update(ns: string, value: object): Promise<void>; get(ns: string): unknown }
       await settings.update(plugin.STRATAGATE_SETTINGS_NAMESPACE, {
         showStrataGateStatus: false,
         showShortTermStatus: false,
@@ -47,7 +59,7 @@ describe('DSH plugin composition', () => {
       first = undefined
 
       restarted = await mount()
-      expect(restarted.get('settings')!.get(plugin.STRATAGATE_SETTINGS_NAMESPACE)).toMatchObject({
+      expect((restarted.get('settings') as unknown as { get(ns: string): unknown }).get(plugin.STRATAGATE_SETTINGS_NAMESPACE)).toMatchObject({
         showStrataGateStatus: false,
         showShortTermStatus: false,
         showRetrievalStatus: false,
@@ -96,6 +108,25 @@ describe('DSH plugin composition', () => {
           showRetrievalStatus: true,
         },
       })
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('registers a custom settings page policy through DSH 0.1.7 settings forms', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'stratagate-dsh-config-forms-'))
+    const ctx = new Context()
+    const presentations: unknown[] = []
+    try {
+      await ctx.plugin(LlmRuntime)
+      await ctx.plugin(SystemPrompt, {})
+      await ctx.plugin(ToolRuntime, { mode: 'native' })
+      ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'test', model: 'test' }) } as any)
+      ctx.provide('webServer', { host: '127.0.0.1', port: 10259, register: () => () => {} })
+      ctx.provide('settings', { configure: (policy: unknown) => { presentations.push(policy); return () => {} } })
+      await ctx.plugin(plugin, { database: join(directory, 'memory.db') })
+      expect(presentations).toEqual([{ auto: false }])
     } finally {
       await ctx.fiber.dispose()
       await rm(directory, { recursive: true, force: true })
@@ -259,7 +290,7 @@ describe('DSH plugin composition', () => {
       })
       expect(steered).toHaveLength(1)
       expect(steered[0]).toMatchObject({
-        source: { kind: 'plugin', plugin: 'stratagate-memory', form: 'instructions' },
+        source: { kind: 'plugin:stratagate-memory', form: 'instructions' },
       })
 
       await recordUse!.execute({ evidence_refs: [] }, {

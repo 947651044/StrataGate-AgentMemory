@@ -619,6 +619,7 @@ describe('reasoningEffort off compatibility', () => {
     resolveModelInfo: (...args: any[]) => Promise<any>,
     stream?: (options: any) => AsyncIterable<any>,
     structuredReasoningEffort: 'auto' | 'force-off' = 'auto',
+    liveStructuredReasoningEffort?: () => 'auto' | 'force-off',
   ): { bridge: DshModelBridge; session: Session; calls: ReturnType<typeof vi.fn>; warnings: ReturnType<typeof vi.fn>; adapterUpdated: () => void } {
     const calls = vi.fn()
     const warnings = vi.fn()
@@ -642,7 +643,7 @@ describe('reasoningEffort off compatibility', () => {
       blockTurnSize: 1, blockDecayLambda: 0.3, ingestSubagents: false, maxOutputTokens: 512,
       structuredTaskTimeoutMs: 50,
       structuredReasoningEffort,
-    })
+    }, liveStructuredReasoningEffort)
     const session = { id: 'off-test', requestHeader: () => ({ config: { provider: 'provider-a', model: 'model-a' } }) } as unknown as Session
     return { bridge, session, calls, warnings, adapterUpdated: () => adapterUpdated() }
   }
@@ -657,6 +658,18 @@ describe('reasoningEffort off compatibility', () => {
     const { bridge, session, calls } = bridgeWithCapability(async () => ({ reasoning: { efforts: [{ id: 'low', name: 'Low' }] } }))
     await bridge.run(session, () => bridge.summarizer([]))
     expect(calls.mock.calls[0]?.[0]).not.toHaveProperty('reasoningEffort')
+  })
+
+  it('reads a changed DSH 0.1.7 live config before each structured call', async () => {
+    let mode: 'auto' | 'force-off' = 'auto'
+    const { bridge, session, calls, adapterUpdated } = bridgeWithCapability(async () => ({}), undefined, 'auto', () => mode)
+    await bridge.run(session, () => bridge.summarizer([]))
+    mode = 'force-off'
+    await bridge.run(session, () => bridge.summarizer([]))
+    mode = 'auto'
+    adapterUpdated()
+    await bridge.run(session, () => bridge.summarizer([]))
+    expect(calls.mock.calls.map(([request]) => request.reasoningEffort)).toEqual([undefined, 'off', undefined])
   })
 
   it.each([

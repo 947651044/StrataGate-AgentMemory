@@ -6,7 +6,7 @@ function loadSupportHelpers(stateValues: unknown[] = [], globals: Record<string,
   const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
   const instrumented = source.replace(
     "    exports.name = 'stratagate-dsh'",
-    "    exports.__test = { feedbackDraftMarkdown, restoreFeedbackDraftValues, shouldExpandFeedbackPreview, handleFeedbackIssueResult, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, MemoryStatusAlert, taskStatus, ProfilePage, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT }; exports.name = 'stratagate-dsh'",
+    "    exports.__test = { feedbackDraftMarkdown, restoreFeedbackDraftValues, shouldExpandFeedbackPreview, handleFeedbackIssueResult, issueUrl, buildSupportReport, copyReportAndOpenIssue, downloadSupportReport, readFeedbackDeepLink, readFeedbackNavigationState, readNewFeedbackNavigationState, readGraphNodeNavigationState, readGraphNodeDeepLink, consumeFeedbackDeepLink, consumeGraphNodeDeepLink, feedbackLinkTarget, navigateToFeedback, navigateToGraphNode, installFeedbackLinkNavigation, NodePill, StaticEntityPill, EventMetadata, MemoryWeightTrajectory, ProcessingStatus, MemoryStatusAlert, taskStatus, ProfilePage, SettingsPage, SupportPage, ISSUE_URL, ISSUE_BODY_HINT, FEEDBACK_AI_PROMPT, apply }; exports.name = 'stratagate-dsh'",
   )
   let definition: any
   runInNewContext(instrumented, {
@@ -67,21 +67,72 @@ describe('StrataGate Web client contract', () => {
     })
     expect(plugin.inject).toEqual(['slots', 'uiConversation'])
 
-    let registration: any
+    const registrations: any[] = []
     const slots = {
       inject: (_name: string, callback: () => void) => callback(),
-      register: (metadata: unknown, render: unknown) => { registration = { metadata, render } },
+      register: (metadata: any, render: unknown) => {
+        if (metadata.name === 'conversation.chat.turnTail' && !metadata.id) {
+          throw new Error('list slot "conversation.chat.turnTail" requires options.id')
+        }
+        registrations.push({ metadata, render })
+      },
     }
-    plugin.apply({ get: (name: string) => name === 'slots' ? slots : undefined })
+    plugin.apply({ get: (name: string) => name === 'slots' ? slots : name === 'uiConversation' ? { events: { register: () => {} } } : undefined })
+    const tail = registrations.find(({ metadata }) => metadata.name === 'conversation.chat.turnTail')
+    const registration = registrations.find(({ metadata }) => metadata.name === 'settings.section')
+    expect(registrations[0].metadata.name).toBe('settings.section')
+    expect(tail.metadata.id).toBe('stratagate-memory-citations')
     expect(registration.metadata).toMatchObject({ name: 'settings.section', id: 'stratagate-memory' })
     expect(registration.metadata.label()).toBe('StrataGate-AgentMemory')
     expect(typeof registration.render).toBe('function')
   })
 
+  it.each(['get', 'event', 'inject', 'register'] as const)('keeps Settings available when chat %s setup fails', (failure) => {
+    const warnings: unknown[][] = []
+    const { apply } = loadSupportHelpers([], { console: { warn: (...args: unknown[]) => warnings.push(args) } }) as any
+    const registrations: string[] = []
+    let delayedTailSetup: (() => unknown) | undefined
+    const slots = {
+      inject: (name: string, setup: () => unknown) => {
+        if (name === 'conversation.chat.turnTail') {
+          if (failure === 'inject') throw new Error('turnTail slot unavailable')
+          if (failure === 'register') { delayedTailSetup = setup; return }
+        }
+        return setup()
+      },
+      register: (metadata: { name: string }) => {
+        if (metadata.name === 'conversation.chat.turnTail' && failure === 'register') throw new Error('duplicate turnTail id')
+        registrations.push(metadata.name)
+        return () => {}
+      },
+    }
+    const uiConversation = { events: { register: () => {
+      if (failure === 'event') throw new Error('conversation definition unavailable')
+    } } }
+    expect(() => apply({ get: (name: string) => {
+      if (name === 'slots') return slots
+      if (name === 'uiConversation') {
+        if (failure === 'get') throw new Error('conversation service unavailable')
+        return uiConversation
+      }
+      return undefined
+    } })).not.toThrow()
+    expect(registrations).toContain('settings.section')
+    if (failure === 'register') {
+      expect(delayedTailSetup).toBeTypeOf('function')
+      const dispose = delayedTailSetup!()
+      expect(dispose).toBeTypeOf('function')
+      expect(() => (dispose as () => void)()).not.toThrow()
+    }
+    expect(registrations).not.toContain('conversation.chat.turnTail')
+    expect(warnings).toHaveLength(1)
+    expect(String(warnings[0]?.[0])).toContain('memory settings remain available')
+  })
+
   it('declares the supported DSH Conversation package and service contracts', () => {
     const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
     expect(manifest.dsh.client.inject).toEqual(['@deepseek-ai/dsh-client-ui-conversation'])
-    expect(manifest.dshWorkshop.compatibility.dshVersions).toEqual(['0.1.2-rc.1', '0.1.5-rc.1'])
+    expect(manifest.dshWorkshop.compatibility.dshVersions).toEqual(['0.1.2-rc.1', '0.1.5-rc.1', '0.1.6-alpha.1', '0.1.7-rc.1'])
   })
 
   it('parses and consumes only the StrataGate feedback deep link while preserving unrelated URL state', () => {
@@ -338,6 +389,35 @@ describe('StrataGate Web client contract', () => {
     expect(source).not.toContain('sg-compression-panel')
   })
 
+  it('binds display settings through the DSH 0.1.7 config form when available', () => {
+    const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
+    let definition: any
+    runInNewContext(source, {
+      URLSearchParams,
+      window: { __ModuleLoader__: { load: (value: unknown) => { definition = value } } },
+    })
+    const plugin = definition.factory((name: string) => {
+      if (name !== 'react') throw new Error(`unexpected client dependency: ${name}`)
+      return { createContext: (value: unknown) => ({ Provider: 'provider', value }), createElement: (...args: unknown[]) => args, Fragment: 'fragment' }
+    })
+    const registrations: any[] = []
+    const writes: unknown[][] = []
+    const form = { getSnapshot: () => ({ status: 'ready', value: {}, writable: true }), subscribe: () => () => {}, set: (...args: unknown[]) => { writes.push(args) }, unset: (...args: unknown[]) => { writes.push(args) } }
+    const namespaces: string[] = []
+    plugin.apply({ get: (name: string) => name === 'slots'
+      ? { inject: (_name: string, callback: () => void) => callback(), register: (metadata: unknown, render: unknown) => { registrations.push({ metadata, render }) } }
+      : name === 'uiConversation'
+        ? { events: { register: () => {} } }
+        : name === 'configForms'
+          ? { get: (namespace: string) => { namespaces.push(namespace); return form } }
+          : undefined })
+    expect(namespaces).toEqual(['stratagate-memory'])
+    const settings = registrations.find(({ metadata }) => metadata.name === 'settings.section')
+    settings.metadata.inject().setStrataGateStatus(false)
+    settings.metadata.inject().resetEffort()
+    expect(writes).toEqual([['showStrataGateStatus', false], ['structuredReasoningEffort']])
+  })
+
   it('defaults all chat status UI to visible and combines the master and child preferences', () => {
     const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
     const instrumented = source.replace(
@@ -546,6 +626,9 @@ describe('StrataGate Web client contract', () => {
     const renderedTail = JSON.stringify(rendered)
     expect(renderedTail).toContain('本回答采用了 3 条记忆')
     expect(renderedTail).toContain('· 查看检索过程')
+    const listRenderedTail = JSON.stringify(tail.render({ turn: { turn: 7, data: { get: (key: string) => locationData.get(key) } }, seq: 8 }))
+    expect(listRenderedTail).toContain('本回答采用了 3 条记忆')
+    expect(listRenderedTail).toContain('· 查看检索过程')
     expect(JSON.stringify(rendered[3])).not.toContain('pnpm compatibility')
     expect(tail.metadata.select({ turn: { turn: 7, data: { get: (key: string) => locationData.get(key) } }, seq: 2 })).toMatchObject({ turn: 7, citations: [], retrievalGroups: [] })
     const legacyUpdated = conversationDefinition.update({ state: started }, {

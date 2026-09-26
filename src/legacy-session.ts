@@ -13,8 +13,9 @@ import {
 } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import { encodeSeqRanges } from '@deepseek-ai/dsh-session'
+import { encodeSeqRanges, KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import type {
+  SessionFormatArtifact,
   SessionFormatEvent,
   SessionFormatJsonObject,
   SessionFormatMigrationContext,
@@ -40,7 +41,13 @@ interface MigrationModules {
   }
   releasedV1SessionFormatCodec: {
     decodeHeader(header: unknown): unknown
+    createDecoder(header: unknown, recovery: 'strict'): {
+      header: SessionFormatArtifact['header']
+      decodeRow(row: unknown, context: SessionFormatMigrationContext): void
+      finish(context: SessionFormatMigrationContext): number
+    }
   }
+  restoreReleasedV1Artifact(artifact: SessionFormatArtifact, knownEventTypes: ReadonlySet<string>): SessionFormatArtifact
   sessionFormatV0ToV1: {
     migrateHeader(header: any): any
     createStage(input: any): {
@@ -49,12 +56,6 @@ interface MigrationModules {
       finish(context: SessionFormatMigrationContext): number
     }
     validateTargetHeader(header: unknown): void
-  }
-  sessionFormatCatalog: {
-    createRestore(header: unknown, options: { recovery: 'strict'; validation: 'transformed' }): {
-      decodeRow(row: unknown): void
-      finish(): { events: readonly SessionFormatEvent[] }
-    }
   }
 }
 
@@ -228,12 +229,23 @@ export function prepareLegacyCitationGeneration(
 
   const physicalHeader = { ...headerValue, version: 1 } as SessionFormatJsonObject
   modules.releasedV1SessionFormatCodec.decodeHeader(physicalHeader)
-  const restore = modules.sessionFormatCatalog.createRestore(physicalHeader, {
-    recovery: 'strict',
-    validation: 'transformed',
-  })
-  for (const row of outputRows) restore.decodeRow(row)
-  const current = restore.finish()
+  // Validate the V1 generation we actually publish. A complete V4 catalog
+  // restore needs parent-specific child facts that this byte-only bridge does
+  // not own; DSH supplies those facts when it later migrates the session.
+  const v1 = modules.releasedV1SessionFormatCodec.createDecoder(physicalHeader, 'strict')
+  const v1Events: SessionFormatEvent[] = []
+  const v1Context: SessionFormatMigrationContext = {
+    emitEvent(event) { v1Events.push(event) },
+    emitRun(run) { for (const event of run.expand()) v1Events.push(event) },
+  }
+  for (const row of outputRows) v1.decodeRow(row, v1Context)
+  const v1Cut = v1.finish(v1Context)
+  if (v1Cut !== decodedCut) throw new Error('StrataGate compatibility migration changed the inherited Session cut')
+  const current = modules.restoreReleasedV1Artifact({
+    header: v1.header,
+    inheritedEventCount: v1Cut,
+    events: v1Events,
+  }, KNOWN_SESSION_EVENT_TYPES)
   return {
     bytes: encodeGeneration(physicalHeader, outputRows, compression),
     citationSeqs,
@@ -243,15 +255,12 @@ export function prepareLegacyCitationGeneration(
 
 async function loadMigrationModules(): Promise<MigrationModules | undefined> {
   try {
-    const [edge, catalog] = await Promise.all([
-      import('@deepseek-ai/dsh-session-format-v0-to-v1'),
-      import('@deepseek-ai/dsh-session-format-catalog'),
-    ])
+    const edge = await import('@deepseek-ai/dsh-session-format-v0-to-v1')
     return {
       releasedV0SessionFormatCodec: edge.releasedV0SessionFormatCodec,
       releasedV1SessionFormatCodec: edge.releasedV1SessionFormatCodec,
       sessionFormatV0ToV1: edge.sessionFormatV0ToV1,
-      sessionFormatCatalog: catalog.sessionFormatCatalog,
+      restoreReleasedV1Artifact: edge.restoreReleasedV1Artifact,
     } as MigrationModules
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code === 'ERR_MODULE_NOT_FOUND') return undefined

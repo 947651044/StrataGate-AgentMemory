@@ -172,9 +172,11 @@ config:
 
 ## 兼容性与权限
 
-发布门禁会在 Node `24`、Linux 和 Windows 上测试完整的 DSH `0.1.2-rc.1` 依赖族、`@deepseek-ai/dsh@0.1.5-rc.1` 和 `@deepseek-ai/dsh@0.1.6-alpha.1`。0.1.5 CLI 的真实依赖树会把内部 DSH 包解析为 `0.1.5-rc.2`；0.1.6 CLI 的受测内部 DSH 与 Session Format 包均解析为 `0.1.6-alpha.1`。插件将这些包声明为可选且精确版本的 peer，由宿主提供一套一致的运行时，避免 npm 在插件目录再安装第二套核心包；不会笼统承诺其他 `0.1.x` 版本。
+发布门禁会在 Node `24`、Linux 和 Windows 上测试完整的 DSH `0.1.2-rc.1` 依赖族，以及 `@deepseek-ai/dsh@0.1.5-rc.1`、`@deepseek-ai/dsh@0.1.6-alpha.1` 和 `@deepseek-ai/dsh@0.1.7-rc.1`。0.1.5 CLI 的真实依赖树会把内部 DSH 包解析为 `0.1.5-rc.2`；0.1.6 和 0.1.7 CLI 的受测内部 DSH 与 Session Format 包分别解析为对应版本。0.1.7 宿主还提供 Cordis `4.0.4` 和 Schemastery `3.18.4`。插件将这些包声明为可选且精确版本的 peer，由宿主提供一套一致的运行时，避免 npm 在插件目录再安装第二套核心包；不会笼统承诺其他 `0.1.x` 版本。
 
-DSH 核心包现在都是由宿主提供的可选 peer。若某个 profile 曾在本地安装这些 peer，升级后、启动前运行 `dsh plugin --profile <名称> exec stratagate-dsh-repair`。该命令只会把已知 DSH 运行时包移动到 profile 内的 `.stratagate-runtime-backups` 并写入恢复收据，不会删除包或触碰会话数据。启动时 bootstrap 还会把 StrataGate 自身的 DSH 导入定向到宿主维护的共享模块回退目录，再检查实际解析出的 DSH 核心族；未知宿主会立即给出明确错误并停止，而不是让正文区域空白。对于 DSH `0.1.5` 和 `0.1.6`，含已废弃 `stratagate/memory-citations` 事件的 v0 会话会先复制成经过校验的 v1 代际，再由宿主继续其迁移链；原始 v0 日志不会被修改，并写入 `stratagate-legacy-citations-v1.json` 记录源/目标哈希和恢复说明。
+DSH 核心包现在都是由宿主提供的可选 peer。若某个 profile 曾在本地安装这些 peer，升级后、启动前运行 `dsh plugin --profile <名称> exec stratagate-dsh-repair`。该命令只会把已知 DSH 运行时包移动到 profile 内的 `.stratagate-runtime-backups` 并写入恢复收据，不会删除包或触碰会话数据。启动时 bootstrap 还会把 StrataGate 自身的 DSH 导入定向到宿主维护的共享模块回退目录，再检查实际解析出的 DSH 核心族；未知宿主会立即给出明确错误并停止，而不是让正文区域空白。对于 DSH `0.1.5` 至 `0.1.7`，含已废弃 `stratagate/memory-citations` 事件的 v0 会话会先复制成经过校验的 v1 代际，再由宿主继续其迁移链；原始 v0 日志不会被修改，并写入 `stratagate-legacy-citations-v1.json` 记录源/目标哈希和恢复说明。
+
+DSH 0.1.7 将插件配置保存在 profile 中，并通过配置表单提供实时控制。StrataGate 聊天界面中的设置在 0.1.7 使用配置表单，在之前受支持的宿主上继续使用旧设置服务。调整结构化任务的推理力度后，后续记忆模型调用会直接使用新值，无需重启插件。
 
 DSH 0.1.6 的官方 DeepSeek profile 默认可能启用 Session Log 请求元数据，因此宿主可能把原始 Session Event 放入 `dsh_session_log` 请求字段。该元数据不属于模型 messages、system prompt 或 tool schema，不能据此判断 StrataGate 压缩失效。StrataGate 不会修改这一 DSH 全局设置；需要关闭的用户应通过 DSH 配置设置 `session-log-deepseek.enabled=false`。
 

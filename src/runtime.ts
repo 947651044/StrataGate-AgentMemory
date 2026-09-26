@@ -44,7 +44,7 @@ import {
 import { SqliteStorage } from '@diqier/stratagate/sqlite'
 import type { ResolvedConfig } from './config.js'
 import { TurnFolder, type FoldedTurn } from './fold.js'
-import { dshReplaceSurfaceOp } from './dsh-compatibility.js'
+import { dshMessageSource, dshReplaceSurfaceOp, isStrataGateMessageSource } from './dsh-compatibility.js'
 import { DshModelBridge } from './llm.js'
 import { DshMetadataStore } from './metadata.js'
 
@@ -128,7 +128,6 @@ export interface FeedbackDraft extends Required<Omit<FeedbackDraftInput, 'bodyMa
 const AUTO_EVENT_LIMIT = 4
 const AUTO_ELEMENT_LIMIT = 4
 const AUTO_MEMORY_TOKEN_BUDGET = 900
-const COMPACTION_SOURCE_PLUGIN = 'stratagate-memory'
 const FEEDBACK_PROMPT_COOLDOWN_MS = 5 * 24 * 60 * 60 * 1_000
 
 interface RankedElementFact extends ElementSearchResult {
@@ -924,7 +923,7 @@ export class StrataGateRuntime {
     if (!selected) return false
     session.append('user/message', createUserMessage({
       content: [{ type: 'text', text: selected }],
-      source: { kind: 'plugin', plugin: COMPACTION_SOURCE_PLUGIN },
+      source: dshMessageSource(),
     }), {
       surfaceOp: dshReplaceSurfaceOp(start, end),
       sourceEventSeqs,
@@ -962,7 +961,7 @@ export class StrataGateRuntime {
       if (node.text === text) continue
       session.append('user/message', createUserMessage({
         content: [{ type: 'text', text }],
-        source: { kind: 'plugin', plugin: COMPACTION_SOURCE_PLUGIN },
+        source: dshMessageSource(),
       }), {
         surfaceOp: dshReplaceSurfaceOp(node.seq, node.seq),
         sourceEventSeqs: [node.seq],
@@ -2078,8 +2077,11 @@ function renderContent(content: readonly ContentBlock[]): string {
       output.push(block.text.trim())
     } else if (block.type === 'image') {
       output.push('[image]')
-    } else if (block.type === 'tool-result' && Array.isArray(block.content)) {
-      output.push(renderContent(block.content))
+    } else {
+      const legacy = block as { type: string; content?: readonly ContentBlock[] }
+      if (legacy.type === 'tool-result' && Array.isArray(legacy.content)) {
+        output.push(renderContent(legacy.content))
+      }
     }
   }
   return output.filter(Boolean).join('\n')
@@ -2210,7 +2212,7 @@ function surfaceCheckpointLimit(session: Session): number {
 function surfaceCheckpointTokens(text: string): number {
   return estimateTokens(JSON.stringify(createUserMessage({
     content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: COMPACTION_SOURCE_PLUGIN },
+    source: dshMessageSource(),
   })))
 }
 
@@ -2222,8 +2224,7 @@ function originalCheckpointSourceTokens(session: Session, seq: SessionSeq): numb
     const event = session.eventAt(sourceSeq)
     if (!event) return null
     if (event.type === 'user/message'
-      && event.data.source.kind === 'plugin'
-      && event.data.source.plugin === COMPACTION_SOURCE_PLUGIN) {
+      && isStrataGateMessageSource(event.data.source)) {
       const sources = event.sourceEventSeqs
       if (!sources?.length) return null
       let total = 0
@@ -2412,8 +2413,7 @@ function currentBlockSurfaceMessages(session: Session): Map<string, { seq: Sessi
   for (const seq of session.surface.nodes) {
     const event = session.eventAt(seq)
     if (event?.type !== 'user/message'
-      || event.data.source.kind !== 'plugin'
-      || event.data.source.plugin !== COMPACTION_SOURCE_PLUGIN) continue
+      || !isStrataGateMessageSource(event.data.source)) continue
     const text = event.data.content
       .flatMap((block) => block.type === 'text' ? [block.text] : [])
       .join('\n')

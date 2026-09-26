@@ -28,6 +28,7 @@ import type {
 import { buildMemoryDerivationMessages, EXTERNAL_MEMORY_DECIDER_PROMPT_ZH_CN, nowUtc8, parseExternalMemoryExport } from '@diqier/stratagate'
 import { PROFILE_FIELDS, PROFILE_PROTECTED_SHORT_FIELDS, validateProfile, type PersistentProfile } from '@diqier/stratagate'
 import type { ResolvedConfig, StructuredReasoningEffortMode } from './config.js'
+import { dshMessageSource } from './dsh-compatibility.js'
 import { ModelJsonResponseError, parseJsonResponse } from './json-response.js'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 
@@ -362,7 +363,8 @@ export class DshModelBridge {
   private readonly adaptersUpdatedListeners = new Set<() => void>()
   private structuredReasoningEffort: StructuredReasoningEffortMode
 
-  constructor(private readonly ctx: Context, private readonly config: ResolvedConfig) {
+  constructor(private readonly ctx: Context, private readonly config: ResolvedConfig,
+    private readonly liveStructuredReasoningEffort?: () => StructuredReasoningEffortMode) {
     this.structuredReasoningEffort = config.structuredReasoningEffort ?? 'auto'
     this.ctx.on?.('llm/adapters-updated', () => {
       this.offCapabilities.clear()
@@ -388,6 +390,10 @@ export class DshModelBridge {
 
   setStructuredReasoningEffort(mode: StructuredReasoningEffortMode): void {
     this.structuredReasoningEffort = mode
+  }
+
+  private currentStructuredReasoningEffort(): StructuredReasoningEffortMode {
+    return this.liveStructuredReasoningEffort?.() ?? this.structuredReasoningEffort
   }
 
   run<T>(session: Session, operation: () => Promise<T>): Promise<T> {
@@ -617,7 +623,7 @@ export class DshModelBridge {
       attemptsUsed = attempt
       const message = createUserMessage({
         content: [{ type: 'text', text: JSON.stringify(payload) }],
-        source: { kind: 'plugin', plugin: 'stratagate-memory' },
+        source: dshMessageSource(),
       })
       const assembler = new BlockAssembler()
       const request: Parameters<typeof this.ctx.llm.stream>[0] & StructuredModelRequest = {
@@ -756,14 +762,14 @@ export class DshModelBridge {
     const key = `${route.provider}\u0000${route.model}`
     const cached = this.offCapabilities.get(key)
     if (cached) {
-      if (cached === 'unsupported' && this.structuredReasoningEffort === 'force-off') {
+      if (cached === 'unsupported' && this.currentStructuredReasoningEffort() === 'force-off') {
         this.warnOffFallbackOnce(key, `${route.provider}/${route.model} does not support reasoningEffort=off; using the model default`)
       }
       return cached === 'supported'
     }
     if (typeof this.ctx.llm.resolveModelInfo !== 'function') {
       this.offCapabilities.set(key, 'unsupported')
-      if (this.structuredReasoningEffort === 'force-off') {
+      if (this.currentStructuredReasoningEffort() === 'force-off') {
         this.warnOffFallbackOnce(key, `${route.provider}/${route.model} capabilities are unavailable; using the model default`)
       }
       return false
@@ -782,16 +788,16 @@ export class DshModelBridge {
           timer.unref?.()
         }),
       ])
-      if (!info.reasoning) return this.structuredReasoningEffort === 'force-off'
+      if (!info.reasoning) return this.currentStructuredReasoningEffort() === 'force-off'
       const supported = info.reasoning.efforts.some(({ id }) => String(id) === 'off')
       this.offCapabilities.set(key, supported ? 'supported' : 'unsupported')
-      if (!supported && this.structuredReasoningEffort === 'force-off') {
+      if (!supported && this.currentStructuredReasoningEffort() === 'force-off') {
         this.warnOffFallbackOnce(key, `${route.provider}/${route.model} does not support reasoningEffort=off; using the model default`)
       }
       return supported
     } catch {
       this.offCapabilities.set(key, 'unsupported')
-      if (this.structuredReasoningEffort === 'force-off') {
+      if (this.currentStructuredReasoningEffort() === 'force-off') {
         this.warnOffFallbackOnce(key, `${route.provider}/${route.model} capability lookup failed; using the model default`)
       }
       return false

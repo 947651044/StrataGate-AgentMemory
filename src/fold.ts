@@ -31,13 +31,16 @@ function renderBlocks(blocks: readonly ContentBlock[]): string {
         break
       case 'tool-call':
         break
-      case 'tool-result': {
-        const nested = renderBlocks(block.content)
-        if (nested) output.push(nested)
+      default: {
+        // V3 tool results could be nested content blocks. V4 uses a tool-role
+        // message, but old records may still pass through this reader.
+        const legacy = block as { type: string; content?: readonly ContentBlock[] }
+        if (legacy.type === 'tool-result' && legacy.content) {
+          const nested = renderBlocks(legacy.content)
+          if (nested) output.push(nested)
+        }
         break
       }
-      default:
-        break
     }
   }
   return output.join('\n').trim()
