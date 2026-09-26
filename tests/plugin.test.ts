@@ -1,7 +1,9 @@
 import { mkdtemp, rm } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -13,12 +15,17 @@ import { describe, expect, it } from 'vitest'
 import * as plugin from '../src/index.js'
 
 describe('DSH plugin composition', () => {
-  const legacySettingsAvailable = (() => {
-    try { createRequire(import.meta.url).resolve('@deepseek-ai/dsh-settings-file'); return true } catch { return false }
+  const legacySettingsModule = (() => {
+    const hostRoot = process.env.DSH_ROOT
+    if (hostRoot) {
+      try { return createRequire(join(hostRoot, 'package.json')).resolve('@deepseek-ai/dsh-settings-file') } catch {}
+    }
+    try { return createRequire(import.meta.url).resolve('@deepseek-ai/dsh-settings-file') } catch { return undefined }
   })()
+  const legacySettingsAvailable = Boolean(legacySettingsModule && existsSync(legacySettingsModule))
 
   it.skipIf(!legacySettingsAvailable)('persists legacy global chat display preferences across a complete plugin restart', async () => {
-    const { default: FileSettingsRuntime } = await import('@deepseek-ai/dsh-settings-file' as string)
+    const { default: FileSettingsRuntime } = await import(pathToFileURL(legacySettingsModule!).href)
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-dsh-display-settings-'))
     const settingsPath = join(directory, 'settings.json')
     const database = join(directory, 'memory.db')
@@ -283,7 +290,7 @@ describe('DSH plugin composition', () => {
       })
       expect(steered).toHaveLength(1)
       expect(steered[0]).toMatchObject({
-        source: { kind: 'plugin', plugin: 'stratagate-memory', form: 'instructions' },
+        source: { kind: 'plugin:stratagate-memory', form: 'instructions' },
       })
 
       await recordUse!.execute({ evidence_refs: [] }, {

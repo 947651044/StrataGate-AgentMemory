@@ -8,6 +8,7 @@ const HOST_PACKAGES = [
   '@deepseek-ai/dsh-agent-default-model',
   '@deepseek-ai/dsh-client-ui-conversation',
   '@deepseek-ai/dsh-llm',
+  '@deepseek-ai/dsh-native-command',
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-session-format',
   '@deepseek-ai/dsh-session-format-catalog',

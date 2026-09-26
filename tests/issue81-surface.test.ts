@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { Session, type SessionSeq } from '@deepseek-ai/dsh-session'
+import { sessionFormatCatalog } from '@deepseek-ai/dsh-session-format-catalog'
 import { StrataGate, estimateTokens, type BlockContextEntry, type MemoryBlock } from '@diqier/stratagate'
 import { describe, expect, it, vi } from 'vitest'
 import type { DshModelBridge } from '../src/llm.js'
+import { buildDshMessageSource } from '../src/dsh-compatibility.js'
 import { StrataGateRuntime } from '../src/runtime.js'
 
 const models = {
@@ -82,6 +84,21 @@ function turnEndAt(session: Session): string {
 }
 
 describe('Issue #81 surface ownership and size', () => {
+  it('encodes a new DSH 0.1.7 checkpoint with a producer-owned source', () => {
+    const session = Session.create('issue81-v4-source' as never)
+    const event = session.append('user/message', createUserMessage({
+      content: [{ type: 'text', text: '[StrataGate conversation block]\nBlock: block-v4' }],
+      source: buildDshMessageSource('0.1.7-rc.1'),
+    }), { surfaceOp: 'append' })
+    expect(() => sessionFormatCatalog.encodeCurrentEvent({
+      type: event.type, seq: event.seq, time: event.time, data: event.data,
+    } as never)).not.toThrow()
+    expect(() => sessionFormatCatalog.encodeCurrentEvent({
+      type: event.type, seq: event.seq, time: event.time,
+      data: { ...event.data, source: { kind: 'plugin', plugin: 'stratagate-memory' } as any },
+    } as never)).toThrow(/producer-owned source|retired plugin/)
+  })
+
   it('repairs an oversized legacy L5 checkpoint after session restore while keeping L5 in SQLite', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'stratagate-issue81-legacy-'))
     const database = join(directory, 'memory.db')
@@ -111,7 +128,7 @@ describe('Issue #81 surface ownership and size', () => {
           '[StrataGate conversation block]', `Block: ${block.id}`, 'Turns: 1-1',
           'Level: L5 (L5 raw transcript)', '', raw.content,
         ].join('\n') }],
-        source: { kind: 'plugin', plugin: 'stratagate-memory' },
+        source: { kind: 'plugin', plugin: 'stratagate-memory' } as any,
       }), {
         surfaceOp: { op: 'replace', startSeq: originalNodes[0]!, endSeq: originalNodes.at(-1)! },
         sourceEventSeqs: originalNodes,
@@ -165,7 +182,7 @@ describe('Issue #81 surface ownership and size', () => {
           '[StrataGate conversation block]', `Block: ${block.id}`, 'Turns: 1-1',
           'Level: L5 (L5 raw transcript)', '', context.content,
         ].join('\n') }],
-        source: { kind: 'plugin', plugin: 'stratagate-memory' },
+        source: { kind: 'plugin', plugin: 'stratagate-memory' } as any,
       })))
       expect(l5).toBeLessThan(before * 0.9)
       expect(l5).toBeGreaterThan(4_000)
@@ -263,7 +280,7 @@ describe('Issue #81 surface ownership and size', () => {
       })
       session.append('user/message', createUserMessage({
         content: [{ type: 'text', text: 'Host summary' }],
-        source: { kind: 'plugin', plugin: 'dsh-compaction-basic' },
+        source: { kind: 'plugin', plugin: 'dsh-compaction-basic' } as any,
       }), {
         surfaceOp: { op: 'replace', startSeq: oldNodes[0]!, endSeq: oldNodes.at(-1)! },
         sourceEventSeqs: oldNodes,
@@ -310,7 +327,7 @@ describe('Issue #81 surface ownership and size', () => {
       })
       session.append('user/message', createUserMessage({
         content: [{ type: 'text', text: 'Host first-turn summary' }],
-        source: { kind: 'plugin', plugin: 'dsh-compaction-basic' },
+        source: { kind: 'plugin', plugin: 'dsh-compaction-basic' } as any,
       }), {
         surfaceOp: { op: 'replace', startSeq: firstNodes[0]!, endSeq: firstNodes.at(-1)! },
         sourceEventSeqs: firstNodes,
@@ -369,7 +386,7 @@ describe('Issue #81 surface ownership and size', () => {
       })
       session.append('user/message', createUserMessage({
         content: [{ type: 'text', text: 'Host retained summary' }],
-        source: { kind: 'plugin', plugin: 'dsh-compaction-basic' },
+        source: { kind: 'plugin', plugin: 'dsh-compaction-basic' } as any,
       }), {
         surfaceOp: { op: 'replace', startSeq: oldNodes[0]!, endSeq: oldNodes.at(-1)! },
         sourceEventSeqs: oldNodes,
@@ -435,8 +452,9 @@ describe('Issue #81 surface ownership and size', () => {
       expect(session.surface.nodes).toContain(pruned.seq)
       expect(session.surface.nodes.some((seq) => {
         const event = session.eventAt(seq)
-        return event?.type === 'user/message' && event.data.source.kind === 'plugin'
-          && event.data.source.plugin === 'stratagate-memory'
+        const source = event?.type === 'user/message' ? event.data.source as any : undefined
+        return event?.type === 'user/message' && source?.kind === 'plugin'
+          && source.plugin === 'stratagate-memory'
       })).toBe(false)
       append('compaction/end', { compactionId: 'failed-compact', turn: null, error: 'summarization failed' })
       await plugin.buildAutoContext(session)
@@ -536,7 +554,7 @@ describe('Issue #81 surface ownership and size', () => {
           '[StrataGate conversation block]', `Block: ${block.id}`, 'Turns: 1-1',
           'Level: L5 (L5 raw transcript)', '', fresh.content,
         ].join('\n') }],
-        source: { kind: 'plugin', plugin: 'stratagate-memory' },
+        source: { kind: 'plugin', plugin: 'stratagate-memory' } as any,
       }), {
         surfaceOp: { op: 'replace', startSeq: oldNodes[0]!, endSeq: oldNodes.at(-1)! },
         sourceEventSeqs: oldNodes,

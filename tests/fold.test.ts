@@ -43,7 +43,7 @@ describe('DSH turn folding', () => {
     expect(folder.accept(session, event('turn/start', { turn: 7 }, 1))).toBeNull()
     folder.accept(session, event('user/message', {
       id: 'plugin-message', role: 'user', content: content('hidden instructions'),
-      source: { kind: 'plugin', plugin: 'workspace-context' },
+      source: { kind: 'plugin', plugin: 'workspace-context' } as any,
     }, 2))
     folder.accept(session, event('user/message', {
       id: 'user-message', role: 'user', content: content('Fix login'), source: { kind: 'user' },
@@ -91,7 +91,7 @@ describe('DSH turn folding', () => {
     const folder = new TurnFolder()
     folder.accept(session, event('turn/start', { turn: 8 }, 1))
     folder.accept(session, event('user/message', {
-      id: 'plugin-message', role: 'user', content: content('notice'), source: { kind: 'plugin', plugin: 'notice' },
+      id: 'plugin-message', role: 'user', content: content('notice'), source: { kind: 'plugin', plugin: 'notice' } as any,
     }, 2))
     expect(folder.accept(session, event('turn/end', { turn: 8, reason: { kind: 'completed' } }, 3))).toBeNull()
   })

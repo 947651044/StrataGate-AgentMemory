@@ -28,6 +28,7 @@ import type {
 import { buildMemoryDerivationMessages, EXTERNAL_MEMORY_DECIDER_PROMPT_ZH_CN, nowUtc8, parseExternalMemoryExport } from '@diqier/stratagate'
 import { PROFILE_FIELDS, PROFILE_PROTECTED_SHORT_FIELDS, validateProfile, type PersistentProfile } from '@diqier/stratagate'
 import type { ResolvedConfig, StructuredReasoningEffortMode } from './config.js'
+import { dshMessageSource } from './dsh-compatibility.js'
 import { ModelJsonResponseError, parseJsonResponse } from './json-response.js'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 
@@ -622,7 +623,7 @@ export class DshModelBridge {
       attemptsUsed = attempt
       const message = createUserMessage({
         content: [{ type: 'text', text: JSON.stringify(payload) }],
-        source: { kind: 'plugin', plugin: 'stratagate-memory' },
+        source: dshMessageSource(),
       })
       const assembler = new BlockAssembler()
       const request: Parameters<typeof this.ctx.llm.stream>[0] & StructuredModelRequest = {

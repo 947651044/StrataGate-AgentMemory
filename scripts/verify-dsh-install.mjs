@@ -241,16 +241,24 @@ try {
     // Seed the exact failure shape reported by users. Pnpm intentionally does
     // not delete unknown hoisted directories, so the package must ignore this
     // stale peer without deleting user files or loading a second DSH runtime.
-    const stale = join(profile, 'node_modules', '@deepseek-ai', 'dsh-session')
-    mkdirSync(stale, { recursive: true })
     const staleVersion = version === '0.1.5-rc.1' ? '0.1.2-rc.1' : '0.1.5-rc.2'
-    writeFileSync(join(stale, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh-session', version: staleVersion }))
+    const stalePackages = [
+      ['@deepseek-ai/dsh-session', staleVersion],
+      ['@deepseek-ai/dsh-native-command', staleVersion],
+    ]
+    for (const [name, stalePackageVersion] of stalePackages) {
+      const stale = join(profile, 'node_modules', ...name.split('/'))
+      mkdirSync(stale, { recursive: true })
+      writeFileSync(join(stale, 'package.json'), JSON.stringify({ name, version: stalePackageVersion }))
+    }
 
     // A second add exercises an in-place upgrade with the existing lockfile and
     // profile generation. The stale directory remains recoverable on disk, but
     // the bootstrap resolver must force StrataGate onto the host-owned tree.
     run(process.execPath, [cli, 'plugin', '--profile', 'web', 'add', tarball], root, dshEnv)
-    assert(existsSync(stale), `${version}: upgrade unexpectedly deleted the seeded legacy package`)
+    for (const [name] of stalePackages) {
+      assert(existsSync(join(profile, 'node_modules', ...name.split('/'))), `${version}: upgrade unexpectedly deleted the seeded legacy package ${name}`)
+    }
     // The clean CLI web templates can enable live user-patch watching without
     // mounting HMR. This smoke starts a fresh process for every patch check,
     // so startup loading exercises the installed plugin without that host bug.
@@ -260,7 +268,9 @@ try {
     writeFileSync(manifestPath, JSON.stringify(installedManifest, null, 2))
     const repair = run(process.execPath, [cli, 'plugin', '--profile', 'web', 'exec', 'stratagate-dsh-repair'], root, dshEnv)
     assert(repair.includes('Quarantined'), `${version}: profile repair did not report a quarantine`)
-    assert(!existsSync(stale), `${version}: profile repair left the stale DSH package active`)
+    for (const [name] of stalePackages) {
+      assert(!existsSync(join(profile, 'node_modules', ...name.split('/'))), `${version}: profile repair left the stale DSH package active: ${name}`)
+    }
     const backups = join(profile, '.stratagate-runtime-backups')
     assert(existsSync(backups), `${version}: profile repair did not create a recoverable backup`)
 

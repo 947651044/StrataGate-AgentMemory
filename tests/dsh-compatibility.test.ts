@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildDshReplaceSurfaceOp,
+  buildDshMessageSource,
   classifyDshRuntime,
   type DshRuntimePackageVersions,
 } from '../src/dsh-compatibility.js'
@@ -17,6 +18,7 @@ function versions(version: '0.1.2-rc.1' | '0.1.5-rc.2' | '0.1.6-alpha.1' | '0.1.
     '@deepseek-ai/dsh-agent-default-model': version,
     '@deepseek-ai/dsh-client-ui-conversation': version,
     '@deepseek-ai/dsh-llm': version,
+    '@deepseek-ai/dsh-native-command': version,
     '@deepseek-ai/dsh-session': version,
     '@deepseek-ai/dsh-settings': version,
     '@deepseek-ai/dsh-system-prompt': version,
@@ -57,6 +59,18 @@ describe('DSH runtime compatibility', () => {
     const missing = { ...versions('0.1.6-alpha.1'), '@deepseek-ai/dsh-tools': '<missing>' }
     expect(() => classifyDshRuntime(missing)).toThrow(/unsupported or mixed core runtime/)
     expect(() => classifyDshRuntime(missing)).toThrow(/dsh-tools@<missing>/)
+  })
+
+  it('rejects a mixed native-command runtime', () => {
+    const mixed = { ...versions('0.1.7-rc.1'), '@deepseek-ai/dsh-native-command': '0.1.6-alpha.1' }
+    expect(() => classifyDshRuntime(mixed)).toThrow(/unsupported or mixed core runtime/)
+    expect(() => classifyDshRuntime(mixed)).toThrow(/dsh-native-command@0\.1\.6-alpha\.1/)
+  })
+
+  it('uses the producer-owned source kind only for DSH 0.1.7', () => {
+    expect(buildDshMessageSource('0.1.6-alpha.1')).toEqual({ kind: 'plugin', plugin: 'stratagate-memory' })
+    expect(buildDshMessageSource('0.1.7-rc.1')).toEqual({ kind: 'plugin:stratagate-memory' })
+    expect(buildDshMessageSource('0.1.7-rc.1', 'instructions')).toEqual({ kind: 'plugin:stratagate-memory', form: 'instructions' })
   })
 
   it('uses each host version\'s native surface replacement shape', () => {

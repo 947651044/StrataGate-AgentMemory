@@ -1463,7 +1463,7 @@ describe('DSH runtime ingestion', () => {
       expect(derived).toHaveLength(1)
       expect(derived[0]).toMatchObject({
         role: 'user',
-        source: { kind: 'plugin', plugin: 'stratagate-memory' },
+        source: { kind: 'plugin:stratagate-memory' },
       })
       expect(JSON.stringify(derived)).toContain('[StrataGate conversation block]')
       expect(JSON.stringify(derived)).toContain('Level: L5 (L5 raw transcript)')

@@ -15,7 +15,7 @@ import { DshModelBridge } from './llm.js'
 import { StrataGateRuntime } from './runtime.js'
 import { registerMemoryTools } from './tools.js'
 import { registerAdminRoutes } from './web.js'
-import { assertCompatibleDshRuntime } from './dsh-compatibility.js'
+import { assertCompatibleDshRuntime, dshMessageSource } from './dsh-compatibility.js'
 import { migrateLegacyCitationSessions } from './legacy-session.js'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent'
@@ -142,7 +142,7 @@ export async function apply(ctx: Context, config: StrataGateConfig): Promise<() 
         type: 'text',
         text: `StrataGate retrieval batches are still unresolved: ${runtime.pendingBatchIds(agent.session).join(', ')}. Before ending this turn, close each one with memory_record_use using its batch_id and evidence_refs set to exactly the refs from that batch used in the answer, or [] if none were used.`,
       }],
-      source: { kind: 'plugin', plugin: name, form: 'instructions' },
+      source: dshMessageSource('instructions'),
     }))
   })
   registerMemoryTools(ctx, runtime)
