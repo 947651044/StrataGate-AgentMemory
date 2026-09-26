@@ -937,17 +937,27 @@ export class StrataGateRuntime {
     if (hostCompactionActive(session)) return false
     const current = currentBlockSurfaceMessages(session)
     const blocks = new Map(memory.listBlocks().map((block) => [block.id, block]))
+    const checkpointLimit = surfaceCheckpointLimit(session)
     let changed = false
     for (const context of contexts) {
       const node = current.get(context.id)
       if (!node) continue
       const currentLevel = Number(node.text.match(/^Level: L([0-5]) /mu)?.[1] ?? -1)
-      if (context.level >= currentLevel && currentLevel >= 0) continue
+      const currentTokens = surfaceCheckpointTokens(node.text)
+      const sourceTokens = originalCheckpointSourceTokens(session, node.seq)
+      const violatesLimit = currentTokens > checkpointLimit
+        || (sourceTokens !== null && !worthwhileSurfaceReduction(sourceTokens, currentTokens))
+      if (context.level >= currentLevel && currentLevel >= 0 && !violatesLimit) continue
       const block = blocks.get(context.id)
       if (!block) continue
-      // The current context can request an expansion. Compare every proposed
-      // representation with the actual checkpoint before rewriting it.
-      const text = selectCompressedBlockSurfaceText(node.text, context, block)
+      // A user lift remains available through memory_expand_block. Surface
+      // repair never raises the detail level of an existing checkpoint.
+      const highestLevel = currentLevel >= 0
+        ? Math.min(context.level, currentLevel) as BlockLevel
+        : context.level
+      const text = selectCompressedBlockSurfaceText(
+        node.text, context, block, highestLevel, sourceTokens, checkpointLimit,
+      )
       if (!text) continue
       if (node.text === text) continue
       session.append('user/message', createUserMessage({
@@ -1746,7 +1756,9 @@ export class StrataGateRuntime {
           try {
             await memory.resumePendingWork({ deferDerivation: true, threadId: String(session.id) })
             const contexts = memory.getBlockContext(String(session.id))
-            this.syncDecayedBlockSurface(session, memory, contexts)
+            if (this.syncDecayedBlockSurface(session, memory, contexts)) {
+              await this.flushNativeSession(session)
+            }
           } finally {
             await this.persistSuccessfulResponses(memory)
           }
@@ -2179,6 +2191,54 @@ function hostCompactionActive(session: Session): boolean {
 
 const SURFACE_MIN_SAVED_TOKENS = 32
 const SURFACE_MAX_REPLACEMENT_RATIO = 0.9
+// BasicCompaction's default recent tail is 16% of the routed context window
+// and its default summary cap is 8,192 tokens. An indivisible Block gets at
+// most a quarter of that tail and half of that summary cap. Use the latter
+// when the host has not logged the routed model capacity yet.
+const SURFACE_MAX_WINDOW_FRACTION = 0.04
+const SURFACE_CHECKPOINT_CEILING_TOKENS = 4_096
+
+function surfaceCheckpointLimit(session: Session): number {
+  const window = typeof session.requestContext === 'function'
+    ? session.requestContext()?.contextWindow
+    : undefined
+  return typeof window === 'number' && Number.isInteger(window) && window > 0
+    ? Math.max(1, Math.min(SURFACE_CHECKPOINT_CEILING_TOKENS, Math.floor(window * SURFACE_MAX_WINDOW_FRACTION)))
+    : SURFACE_CHECKPOINT_CEILING_TOKENS
+}
+
+function surfaceCheckpointTokens(text: string): number {
+  return estimateTokens(JSON.stringify(createUserMessage({
+    content: [{ type: 'text', text }],
+    source: { kind: 'plugin', plugin: COMPACTION_SOURCE_PLUGIN },
+  })))
+}
+
+function originalCheckpointSourceTokens(session: Session, seq: SessionSeq): number | null {
+  const visited = new Set<SessionSeq>()
+  const visit = (sourceSeq: SessionSeq): number | null => {
+    if (visited.has(sourceSeq)) return null
+    visited.add(sourceSeq)
+    const event = session.eventAt(sourceSeq)
+    if (!event) return null
+    if (event.type === 'user/message'
+      && event.data.source.kind === 'plugin'
+      && event.data.source.plugin === COMPACTION_SOURCE_PLUGIN) {
+      const sources = event.sourceEventSeqs
+      if (!sources?.length) return null
+      let total = 0
+      for (const source of sources) {
+        const tokens = visit(source)
+        if (tokens === null) return null
+        total += tokens
+      }
+      return total
+    }
+    const message = session.deriveEventMessage(event)
+    return message ? estimateTokens(JSON.stringify(message)) : null
+  }
+  return visit(seq)
+}
 
 function worthwhileSurfaceReduction(before: number, after: number): boolean {
   return before - after >= SURFACE_MIN_SAVED_TOKENS
@@ -2189,16 +2249,22 @@ function selectCompressedBlockSurfaceText(
   currentText: string,
   context: BlockContextEntry,
   block: MemoryBlock,
+  highestLevel: BlockLevel,
+  sourceTokens: number | null,
+  checkpointLimit: number,
 ): string | null {
-  const before = estimateTokens(currentText)
-  for (let level = context.level; level >= 0; level -= 1) {
+  const before = surfaceCheckpointTokens(currentText)
+  for (let level = highestLevel; level >= 0; level -= 1) {
     const candidate = renderBlockSurfaceMessage({
       ...context,
       level: level as BlockLevel,
       label: blockLevelLabel(level as BlockLevel),
       content: level === context.level ? context.content : renderBlock(block, level as BlockLevel),
     })
-    if (worthwhileSurfaceReduction(before, estimateTokens(candidate))) return candidate
+    const tokens = surfaceCheckpointTokens(candidate)
+    if (tokens <= checkpointLimit
+      && worthwhileSurfaceReduction(before, tokens)
+      && (sourceTokens === null || worthwhileSurfaceReduction(sourceTokens, tokens))) return candidate
   }
   return null
 }
@@ -2214,6 +2280,7 @@ function selectCompressedBlockSurface(
     const message = event && session.deriveEventMessage(event)
     return sum + (message ? estimateTokens(JSON.stringify(message)) : 0)
   }, 0)
+  const checkpointLimit = surfaceCheckpointLimit(session)
   // Use the same token estimator for the visible replacement. The event JSON
   // wrapper is small, but count it on both sides for a conservative comparison.
   for (let level = context.level; level >= 0; level -= 1) {
@@ -2223,11 +2290,8 @@ function selectCompressedBlockSurface(
       label: blockLevelLabel(level as BlockLevel),
       content: level === context.level ? context.content : renderBlock(block, level as BlockLevel),
     })
-    const replacement = createUserMessage({
-      content: [{ type: 'text', text: candidate }],
-      source: { kind: 'plugin', plugin: COMPACTION_SOURCE_PLUGIN },
-    })
-    if (worthwhileSurfaceReduction(before, estimateTokens(JSON.stringify(replacement)))) return candidate
+    const tokens = surfaceCheckpointTokens(candidate)
+    if (tokens <= checkpointLimit && worthwhileSurfaceReduction(before, tokens)) return candidate
   }
   return null
 }
